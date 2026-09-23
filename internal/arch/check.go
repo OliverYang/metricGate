@@ -53,18 +53,23 @@ type Violation struct {
 
 // Check walks every internal dependency and reports edges the policy forbids,
 // plus any import cycle in the graph.
+//
+// Pattern matching is done once per (policy entry × package), never per edge:
+// a large repository has orders of magnitude more edges than packages, and the
+// per-edge work is then two map lookups.
 func Check(g *Graph, p Policy) []Violation {
+	m := newMatcher(p, g.Packages())
 	var out []Violation
 	for _, e := range g.Edges() {
-		if v, blocked := checkForbid(e, p.Forbids); blocked {
+		if v, blocked := m.forbidden(e); blocked {
 			out = append(out, v)
-			continue
+			continue // one finding per illegal edge: forbid supersedes layering
 		}
-		if v, blocked := checkLayer(e, p); blocked {
+		if v, blocked := m.layerViolation(e); blocked {
 			out = append(out, v)
 		}
 	}
-	out = append(out, checkCycles(g)...)
+	out = append(out, cycleViolations(g)...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
 			return out[i].File < out[j].File
@@ -77,30 +82,120 @@ func Check(g *Graph, p Policy) []Violation {
 	return out
 }
 
-func checkForbid(e Edge, forbids []Forbid) (Violation, bool) {
+// matcher holds the package sets a policy induces over one graph.
+type matcher struct {
+	forbids []compiledForbid
+	layerOf map[string]Layer           // package → its layer (absent: unlayered)
+	allowed map[string]map[string]bool // layer name → packages it may depend on
+}
+
+type compiledForbid struct {
+	from, to map[string]bool
+	reason   string
+}
+
+func newMatcher(p Policy, pkgs []string) matcher {
+	m := matcher{
+		forbids: compileForbids(p.Forbids, pkgs),
+		layerOf: assignLayers(p.Layers, pkgs),
+		allowed: map[string]map[string]bool{},
+	}
+	m.compileAllowed(p.Layers, pkgs)
+	return m
+}
+
+// compileForbids turns every forbid entry into the package sets it names.
+func compileForbids(forbids []Forbid, pkgs []string) []compiledForbid {
+	out := make([]compiledForbid, 0, len(forbids))
 	for _, f := range forbids {
-		if !MatchesAny([]string{f.From}, e.From) || !MatchesAny([]string{f.To}, e.To) {
+		out = append(out, compiledForbid{
+			from:   matching(f.From, pkgs),
+			to:     matching(f.To, pkgs),
+			reason: f.Reason,
+		})
+	}
+	return out
+}
+
+// matching returns the packages one pattern names.
+func matching(pattern string, pkgs []string) map[string]bool {
+	set := map[string]bool{}
+	for _, pkg := range pkgs {
+		if MatchesAny([]string{pattern}, pkg) {
+			set[pkg] = true
+		}
+	}
+	return set
+}
+
+// assignLayers gives every package its first matching layer.
+func assignLayers(layers []Layer, pkgs []string) map[string]Layer {
+	out := map[string]Layer{}
+	for _, l := range layers {
+		for _, pkg := range pkgs {
+			if _, seen := out[pkg]; !seen && MatchesAny(l.Packages, pkg) {
+				out[pkg] = l
+			}
+		}
+	}
+	return out
+}
+
+// compileAllowed precomputes, per layer, the packages it may depend on.
+func (m matcher) compileAllowed(layers []Layer, pkgs []string) {
+	for _, l := range layers {
+		set := map[string]bool{}
+		for _, pkg := range pkgs {
+			if m.legalTarget(l, pkg) {
+				set[pkg] = true
+			}
+		}
+		m.allowed[l.Name] = set
+	}
+}
+
+// legalTarget reports whether layer `from` may depend on package `pkg`: its own
+// layer, a layer named in may_depend_on, or a package pattern listed there.
+func (m matcher) legalTarget(from Layer, pkg string) bool {
+	to, ok := m.layerOf[pkg]
+	if ok && to.Name == from.Name {
+		return true
+	}
+	for _, dep := range from.MayDependOn {
+		if ok && dep == to.Name {
+			return true
+		}
+		if MatchesAny([]string{dep}, pkg) {
+			return true
+		}
+		if named, ok := m.layerOf[dep]; ok && to.Name == named.Name {
+			return true
+		}
+	}
+	return false
+}
+
+func (m matcher) forbidden(e Edge) (Violation, bool) {
+	for _, f := range m.forbids {
+		if !f.from[e.From] || !f.to[e.To] {
 			continue
 		}
 		msg := fmt.Sprintf("%s must not depend on %s", e.From, e.To)
-		if f.Reason != "" {
-			msg += ": " + f.Reason
+		if f.reason != "" {
+			msg += ": " + f.reason
 		}
 		return atEdge(e, RuleForbiddenEdge, msg), true
 	}
 	return Violation{}, false
 }
 
-func checkLayer(e Edge, p Policy) (Violation, bool) {
-	from, ok := p.layerOf(e.From)
+func (m matcher) layerViolation(e Edge) (Violation, bool) {
+	from, ok := m.layerOf[e.From]
 	if !ok {
 		return Violation{}, false
 	}
-	to, ok := p.layerOf(e.To)
-	if !ok || to.Name == from.Name {
-		return Violation{}, false
-	}
-	if p.allowed(from, to, e.To) {
+	to, ok := m.layerOf[e.To]
+	if !ok || to.Name == from.Name || m.allowed[from.Name][e.To] {
 		return Violation{}, false
 	}
 	msg := fmt.Sprintf("layer %q (%s) may not depend on layer %q (%s); allowed: [%s]",
@@ -112,33 +207,9 @@ func atEdge(e Edge, rule, msg string) Violation {
 	return Violation{RuleID: rule, File: e.Via, Line: e.Line, Message: msg}
 }
 
-// allowed reports whether layer `from` may depend on layer `to`, named either
-// by layer name or by a package pattern matching the target package.
-func (p Policy) allowed(from, to Layer, toPkg string) bool {
-	for _, dep := range from.MayDependOn {
-		if dep == to.Name || MatchesAny([]string{dep}, toPkg) {
-			return true
-		}
-		if l, ok := p.layerOf(dep); ok && l.Name == to.Name {
-			return true
-		}
-	}
-	return false
-}
-
-// layerOf finds the layer a package belongs to (first match wins).
-func (p Policy) layerOf(pkg string) (Layer, bool) {
-	for _, l := range p.Layers {
-		if MatchesAny(l.Packages, pkg) {
-			return l, true
-		}
-	}
-	return Layer{}, false
-}
-
-// checkCycles reports one finding per package cycle, anchored at the first
+// cycleViolations reports one finding per package cycle, anchored at the first
 // import inside the cycle so the report points at real code.
-func checkCycles(g *Graph) []Violation {
+func cycleViolations(g *Graph) []Violation {
 	var out []Violation
 	for _, comp := range g.Cycles() {
 		in := map[string]bool{}

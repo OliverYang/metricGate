@@ -115,12 +115,17 @@ func MatchesAny(patterns []string, name string) bool {
 // type inside a package ("com/foo/Bar") or a static member of one, so the
 // package is matched as a leading sequence instead.
 func resolves(imp, pkg string, java bool) bool {
-	is, ps := segments(imp), segments(pkg)
-	if len(ps) == 0 || len(is) < len(ps) {
+	return matchDir(segments(imp), segments(pkg), java)
+}
+
+// matchDir is resolves() on already-split segments: the one rule shared by the
+// indexed fast path in Build and the plain helper.
+func matchDir(imp, pkg []string, java bool) bool {
+	if len(pkg) == 0 || len(imp) < len(pkg) {
 		return false
 	}
 	if java {
-		return equalSegs(is[:len(ps)], ps)
+		return equalSegs(imp[:len(pkg)], pkg)
 	}
-	return equalSegs(is[len(is)-len(ps):], ps)
+	return equalSegs(imp[len(imp)-len(pkg):], pkg)
 }

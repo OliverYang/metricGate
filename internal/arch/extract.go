@@ -18,8 +18,12 @@ type Raw struct {
 }
 
 // Extract reads the package clause and the imports of one parsed file.
-// Unlike the facts extractor it keeps the import line, because an
-// architecture violation has to be anchored where the dependency was written.
+//
+// Unlike the facts extractor it keeps the import line, because an architecture
+// violation has to be anchored where the dependency was written. It scans the
+// top level of the tree only: in both grammars the package clause and every
+// import declaration are direct children of the file node, so a deep walk
+// would cost a full extra traversal per file for nothing.
 func Extract(lang parser.LanguageID, src []byte, root *sitter.Node) Raw {
 	switch lang {
 	case parser.LangGo:
@@ -36,23 +40,39 @@ func extractGo(src []byte, root *sitter.Node) Raw {
 	if root == nil {
 		return out
 	}
-	walk(root, func(n *sitter.Node) bool {
-		switch n.Kind() {
+	for _, decl := range children(root) {
+		switch decl.Kind() {
 		case "package_clause":
-			if id := childByKind(n, "package_identifier"); id != nil {
+			if id := childByKind(decl, "package_identifier"); id != nil {
 				out.Package = text(src, id)
 			}
-		case "import_spec":
-			if path := n.ChildByFieldName("path"); path != nil {
-				out.Imports = append(out.Imports, Import{
-					Path: strings.Trim(text(src, path), "\"`"),
-					Line: line(path),
-				})
-			}
-			return false // an import spec never nests another one
+		case "import_declaration":
+			out.Imports = append(out.Imports, goImports(src, decl)...)
 		}
-		return true
-	})
+	}
+	return out
+}
+
+// goImports collects the import specs of one declaration, grouped or not.
+func goImports(src []byte, decl *sitter.Node) []Import {
+	specs := children(decl)
+	if list := childByKind(decl, "import_spec_list"); list != nil {
+		specs = children(list)
+	}
+	var out []Import
+	for _, spec := range specs {
+		if spec.Kind() != "import_spec" {
+			continue
+		}
+		path := spec.ChildByFieldName("path")
+		if path == nil {
+			continue
+		}
+		out = append(out, Import{
+			Path: strings.Trim(text(src, path), "\"`"),
+			Line: line(path),
+		})
+	}
 	return out
 }
 
@@ -61,29 +81,23 @@ func extractJava(src []byte, root *sitter.Node) Raw {
 	if root == nil {
 		return out
 	}
-	walk(root, func(n *sitter.Node) bool {
-		switch n.Kind() {
+	for _, decl := range children(root) {
+		switch decl.Kind() {
 		case "package_declaration": // tree-sitter-java's name for the clause
-			out.Package = slash(dottedName(src, n))
-			return false
+			out.Package = slash(dottedName(src, decl))
 		case "import_declaration":
-			path := dottedName(src, n)
-			if path == "" {
-				return false
+			if path := dottedName(src, decl); path != "" {
+				out.Imports = append(out.Imports, Import{Path: slash(path), Line: line(decl)})
 			}
-			out.Imports = append(out.Imports, Import{Path: slash(path), Line: line(n)})
-			return false
 		}
-		return true
-	})
+	}
 	return out
 }
 
-// dottedName returns the package name a Java package/import clause carries: the
-// scoped identifier when the name is qualified, the plain identifier when not.
+// dottedName returns the name a Java package/import clause carries: the scoped
+// identifier when qualified, the plain identifier when not.
 func dottedName(src []byte, n *sitter.Node) string {
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
+	for _, c := range children(n) {
 		switch c.Kind() {
 		case "scoped_identifier", "identifier":
 			return text(src, c)
@@ -96,6 +110,23 @@ func dottedName(src []byte, n *sitter.Node) string {
 // uses, so "com.foo.bar" and "com/foo/bar" name one package.
 func slash(dotted string) string { return strings.ReplaceAll(dotted, ".", "/") }
 
+func children(n *sitter.Node) []*sitter.Node {
+	out := make([]*sitter.Node, 0, n.ChildCount())
+	for i := uint(0); i < n.ChildCount(); i++ {
+		out = append(out, n.Child(i))
+	}
+	return out
+}
+
+func childByKind(n *sitter.Node, kind string) *sitter.Node {
+	for _, c := range children(n) {
+		if c.Kind() == kind {
+			return c
+		}
+	}
+	return nil
+}
+
 func text(src []byte, n *sitter.Node) string {
 	if n == nil {
 		return ""
@@ -104,22 +135,3 @@ func text(src []byte, n *sitter.Node) string {
 }
 
 func line(n *sitter.Node) int { return int(n.StartPosition().Row) + 1 }
-
-func childByKind(n *sitter.Node, kind string) *sitter.Node {
-	for i := uint(0); i < n.ChildCount(); i++ {
-		if c := n.Child(i); c.Kind() == kind {
-			return c
-		}
-	}
-	return nil
-}
-
-// walk visits every node depth-first; visit returns false to prune a subtree.
-func walk(n *sitter.Node, visit func(*sitter.Node) bool) {
-	if !visit(n) {
-		return
-	}
-	for i := uint(0); i < n.ChildCount(); i++ {
-		walk(n.Child(i), visit)
-	}
-}

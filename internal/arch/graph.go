@@ -43,11 +43,11 @@ func Build(files []File) *Graph {
 			g.nodes[f.Pkg] = true
 		}
 	}
-	pkgs := g.Packages()
+	idx := newPkgIndex(g.Packages())
 
 	for _, f := range files {
 		for _, imp := range f.Imports {
-			to := resolve(imp.Path, pkgs, f.Java)
+			to := idx.resolve(imp.Path, f.Java)
 			if to == "" || to == f.Pkg {
 				continue
 			}
@@ -58,11 +58,49 @@ func Build(files []File) *Graph {
 	return g
 }
 
-// resolve picks the longest known package that an import path points at.
-func resolve(imp string, pkgs []string, java bool) string {
-	best := ""
+// pkgIndex buckets the known packages by first and last segment, so an import
+// only competes with the few candidates that can possibly match it. Without
+// this, a large repository pays packages × imports in segment comparisons.
+type pkgIndex struct {
+	byFirst map[string][]string
+	byLast  map[string][]string
+	segs    map[string][]string
+}
+
+func newPkgIndex(pkgs []string) *pkgIndex {
+	ix := &pkgIndex{
+		byFirst: map[string][]string{},
+		byLast:  map[string][]string{},
+		segs:    map[string][]string{},
+	}
 	for _, p := range pkgs {
-		if len(p) > len(best) && resolves(imp, p, java) {
+		ps := segments(p)
+		if len(ps) == 0 {
+			continue
+		}
+		ix.segs[p] = ps
+		ix.byFirst[ps[0]] = append(ix.byFirst[ps[0]], p)
+		ix.byLast[ps[len(ps)-1]] = append(ix.byLast[ps[len(ps)-1]], p)
+	}
+	return ix
+}
+
+// resolve returns the longest known package an import path points at, or "".
+func (ix *pkgIndex) resolve(imp string, java bool) string {
+	is := segments(imp)
+	if len(is) == 0 {
+		return ""
+	}
+	cands := ix.byLast[is[len(is)-1]]
+	if java {
+		cands = ix.byFirst[is[0]]
+	}
+	best := ""
+	for _, p := range cands {
+		if len(p) <= len(best) {
+			continue
+		}
+		if matchDir(is, ix.segs[p], java) {
 			best = p
 		}
 	}
