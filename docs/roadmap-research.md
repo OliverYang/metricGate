@@ -162,3 +162,41 @@ CLI 与 MCP 改调 `git.*`。仓库现 policy 里落的三层模型：
 SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
 （`testdata/arch` 三包真实循环、锚点行号、`testdata/archsup` 定点豁免并计入
 `Ignored`、未配置时不污染规则目录、配置后进入 SARIF 目录）。
+
+---
+
+## 落地记录（Phase A-3：重复检测 / duplicate-code gate）
+
+**已落地**（提交 `clones: Type-2 function clone gate + reuse hints (Phase A-3)`）：
+
+- 新包 `internal/clones`（纯库，core 层）：
+  - `Extract`：从 tree-sitter 树提取顶层函数/方法/构造器的 body 指纹（FNV-1a）。
+  - 归一化：所有具名叶子（identifier/type/literal）折叠为同一占位 token；运算符与
+    标点保留精确文本（`a+b` ≠ `a-b`）；注释（tree-sitter extra 节点）与布局不参与。
+  - `Find`：按 `(语言, 指纹)` 分组，`min_lines`/`min_tokens` 双门槛过滤小块
+    （默认 10 行 / 60 token），跨文件同语言成类，组内按文件/行/名排序，anchor 即首个。
+  - `Summary`：每类一行 context 提示（"clone of X:N (name) also at … — reuse it,
+    do not reimplement"）。
+- policy 新增顶层 `clones:` 节（`enabled`/`min_lines`/`min_tokens`；0 值 = 用默认；
+  `enabled: false` = 整个 pass 关闭）。config 层 `ClonePolicy()` 是唯一装配入口。
+- 引擎接入（engine 桥接文件 `internal/engine/clones.go`，与 architecture 同模式）：
+  - 每个文件 parse 时顺带提取指纹（`fileResult.cloneFns`），run 末尾一次分组；
+  - finding 规则 id `function-clone`，severity warning，锚定在**重复方**的 body 区间，
+    message 指向 anchor；anchor 本身永不报；
+  - 完全走统一管线：SARIF catalogue、`metricgate: ignore function-clone` 定点豁免、
+    `-diff` 新增重复闸门、趋势库。
+- context pack / MCP `get_constraints`：facts.Collect 复用同一棵树顺带提取指纹，
+  Render 在 constraints 之前渲染 `## reuse before you generate` 区。
+- 自吃狗粮：首次开启即在自家仓库抓到 4 个真实克隆
+  （`stubs_test`/`metrics_test` 复制了 `facts_test` 的 parse helper；`model.go`
+  两个排序函数同构；`go_rules`/`java_rules` 的 empty-block 规则同构）。
+  全部按真实重构处理：新增 `internal/parsetest` 共享 parse helper、`model.go`
+  改为声明式 key 比较器、新增共享 `newEmptyBlockRule` 工厂——没有放宽任何阈值。
+- 性能实测（Go toolchain `src/`，5606 文件，M3）：开 clones 13.27s vs 关 12.26s，
+  约 +8%，与 architecture pass 的 +6.4% 同量级；指纹提取复用 per-file parse，
+  分组阶段是 O(n) 哈希桶。
+- 已知边界（诚实记录）：
+  - Type-2：语句级重排、字段访问归一化（`a.b.c` 全折叠为 id）会漏报/误报到什么程度
+    取决于归一化粒度；当前粒度在无实测误报前提下偏保守（`+`/`-` 保留精确）。
+  - 窗口检测（winnowing）与"新增代码与既有代码部分重复"（<100% 相同）留给
+    下一轮，需要先积累 diff-only 模式下的真实误报数据再调粒度。

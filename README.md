@@ -159,6 +159,37 @@ split — `internal/diff` (pure line-range arithmetic, core) versus
 `internal/git` (the git adapter) — which is exactly the kind of fact this check
 exists to surface.
 
+## Duplicate-code gate (clone detection)
+
+The "reuse before you generate" rule, made deterministic: every run also
+fingerprints every top-level function body (Go) / method and constructor body
+(Java). Identifiers, type names and literals are normalised away; operators
+and punctuation stay exact — so a renamed, reformatted copy of an existing
+function is caught (Type-2 clones), while `a+b` versus `a-b` never is. Comments
+and layout never affect the fingerprint.
+
+```yaml
+clones:
+  enabled: true      # the zero value / false disables the pass entirely
+  min_lines: 10      # functions shorter than this are never reported
+  min_tokens: 60     # ...nor are token-poor ones
+```
+
+- Reported as `function-clone` (warning) on the **duplicate**, pointing at the
+  original: `function is a Type-2 clone of internal/x/x.go:12 (Run); reuse or
+  parameterise it instead of duplicating`.
+- The anchor (first member of the class) is never reported; the finding anchors
+  on the duplicate's body, so `-diff` mode gates brand-new duplicates.
+- `metricgate: ignore function-clone …` silences one duplicate in place.
+- `metricgate context` and MCP `get_constraints` render the same classes as a
+  **"## reuse before you generate"** section — the model sees the original
+  before it writes a copy.
+
+Dogfooding note: the first run of this gate on metricgate itself reported four
+real clones, including a test helper copied between two packages. The fix was a
+real extraction (`internal/parsetest`), not a threshold bump — which is the
+point of the check.
+
 ## Suppression (inline ignore directives)
 
 Legitimate exceptions are silenced in place, visibly (the report counts what
@@ -259,7 +290,7 @@ published specs where possible; deviations are documented inline.
 | Ver | Scope |
 |-----|-------|
 | v0  | Checker core + CLI + SARIF + gate + SQLite schema (this release) |
-| v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · next: clone detection, class metrics, symbol index, Python/TS packs |
+| v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · duplicate-code gate ✅ · next: class metrics, symbol index, Python/TS packs |
 | v2  | HTTP/gRPC service (SDK), LLM adapter interface + context generator |
 | v3  | Skeleton generator (IR + render backends), end-to-end LLM repair loop demo |
 

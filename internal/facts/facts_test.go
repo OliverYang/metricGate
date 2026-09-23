@@ -6,20 +6,13 @@ import (
 
 	"metricgate/internal/config"
 	"metricgate/internal/parser"
+	"metricgate/internal/parsetest"
 )
 
 func extract(t *testing.T, lang parser.LanguageID, src string) *FileFacts {
 	t.Helper()
-	p, err := parser.New(lang)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer p.Close()
-	tree, err := p.Parse([]byte(src))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tree.Close()
+	tree, release := parsetest.Parse(t, lang, src)
+	defer release()
 	return Extract("x."+string(lang), []byte(src), tree, lang)
 }
 

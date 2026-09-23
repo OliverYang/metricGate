@@ -247,3 +247,27 @@ func todoCommentRule(commentQuery string) *Rule {
 		},
 	}
 }
+
+// newEmptyBlockRule builds the language-neutral empty-block rule over the
+// per-language query: both grammars flag the same way, only the query and
+// the block kinds they reach differ.
+func newEmptyBlockRule(query string) *Rule {
+	return &Rule{
+		ID:              "empty-block",
+		Title:           "Empty control-flow block",
+		DefaultSeverity: model.SevWarning,
+		DefaultEnabled:  true,
+		Query:           query,
+		OnMatch: func(ctx *MatchCtx) *model.Finding {
+			blk := ctx.Captures["blk"]
+			if blk.NamedChildCount() != 0 {
+				return nil
+			}
+			return &model.Finding{
+				StartLine: int(blk.StartPosition().Row) + 1,
+				EndLine:   int(blk.EndPosition().Row) + 1,
+				Message:   "empty block; handle the case or leave a comment explaining why it is empty",
+			}
+		},
+	}
+}

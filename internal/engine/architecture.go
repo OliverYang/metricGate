@@ -45,28 +45,23 @@ func packageID(root, path string) string {
 	return filepath.ToSlash(rel)
 }
 
-// checkArchitecture evaluates the policy's architecture section over the run's
-// package graph, and returns the findings plus how many were suppressed by an
-// inline directive on the import line.
-func (e *Engine) checkArchitecture(files []arch.File, supsByFile map[string][]suppression) ([]model.Finding, int) {
+// checkArchitecture evaluates the policy's architecture section over the
+// run's package graph and appends the findings to the summary, honouring
+// inline directives on the import lines.
+func (e *Engine) checkArchitecture(summary *model.RunSummary, files []arch.File, supsByFile map[string][]suppression) {
 	policy := e.cfg.ArchPolicy()
 	if policy.Empty() || len(files) < 2 {
-		return nil, 0
+		return
 	}
-	var (
-		findings []model.Finding
-		ignored  int
-	)
 	for _, v := range arch.Check(arch.Build(files), policy) {
 		finding := e.archFinding(v)
 		kept, n := suppress([]model.Finding{finding}, supsByFile[finding.File])
 		if n > 0 {
-			ignored += n
+			summary.Ignored += n
 			continue
 		}
-		findings = append(findings, kept...)
+		summary.Findings = append(summary.Findings, kept...)
 	}
-	return findings, ignored
 }
 
 // archFinding turns one violation into the shared finding model: same source

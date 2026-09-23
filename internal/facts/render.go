@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"metricgate/internal/arch"
+	"metricgate/internal/clones"
 	"metricgate/internal/config"
 	"metricgate/internal/metrics"
 	"metricgate/internal/model"
@@ -72,6 +73,21 @@ func render(files []*FileFacts, cfg *config.Config, o renderOpts) string {
 				b.WriteString(line)
 				b.WriteByte('\n')
 			}
+		}
+		b.WriteByte('\n')
+	}
+
+	// Reuse hints first: the deterministic "reuse before you generate" rule.
+	var cloneFns []clones.Func
+	for _, f := range files {
+		cloneFns = append(cloneFns, f.CloneFns...)
+	}
+	if groups := clones.Find(cloneFns, cfg.ClonePolicy()); len(groups) > 0 {
+		b.WriteString("## reuse before you generate\n")
+		for _, l := range clones.Summary(groups) {
+			b.WriteString("- ")
+			b.WriteString(l)
+			b.WriteByte('\n')
 		}
 		b.WriteByte('\n')
 	}

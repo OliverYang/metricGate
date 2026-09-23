@@ -4,20 +4,13 @@ import (
 	"testing"
 
 	"metricgate/internal/parser"
+	"metricgate/internal/parsetest"
 )
 
 func analyze(t *testing.T, lang parser.LanguageID, src string) *FileStats {
 	t.Helper()
-	p, err := parser.New(lang)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer p.Close()
-	tree, err := p.Parse([]byte(src))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tree.Close()
+	tree, release := parsetest.Parse(t, lang, src)
+	defer release()
 	return AnalyzeFile("x."+string(lang), []byte(src), tree, lang)
 }
 

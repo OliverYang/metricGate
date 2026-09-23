@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"metricgate/internal/arch"
+	"metricgate/internal/clones"
 	"metricgate/internal/model"
 )
 
@@ -57,6 +58,14 @@ type LanguageConfig struct {
 	Banned  []BanConfig             `yaml:"banned-api,omitempty"`
 }
 
+// CloneConfig tunes the duplicate-code pass (function-level Type-2 clone
+// detection). The zero value disables the pass entirely.
+type CloneConfig struct {
+	Enabled   *bool `yaml:"enabled,omitempty"`
+	MinLines  int   `yaml:"min_lines,omitempty"`
+	MinTokens int   `yaml:"min_tokens,omitempty"`
+}
+
 // ArchConfig is the architecture section: layer boundaries and forbidden
 // dependency directions, enforced over the package graph built by internal/arch.
 type ArchConfig struct {
@@ -79,6 +88,7 @@ type StoreConfig struct {
 
 // Config is the parsed policy file.
 type Config struct {
+	Clones       CloneConfig               `yaml:"clones,omitempty"`
 	Version      int                       `yaml:"version"`
 	Gate         GateConfig                `yaml:"gate"`
 	Exclude      []string                  `yaml:"exclude,omitempty"`
@@ -284,6 +294,23 @@ func (c *Config) ArchPolicy() arch.Policy {
 }
 
 // ArchSeverity is the severity of architecture findings. kind is "edges" for
+// ClonePolicy returns the duplicate-code pass configuration: clones.Default
+// when the policy leaves it unset, or the policy values with an explicit
+// off switch. Thresholds of 0 mean "use the default" for that knob.
+func (c *Config) ClonePolicy() clones.Config {
+	cfg := clones.Default
+	if c.Clones.Enabled != nil && !*c.Clones.Enabled {
+		return clones.Config{} // the zero value is the documented off switch
+	}
+	if c.Clones.MinLines > 0 {
+		cfg.MinLines = c.Clones.MinLines
+	}
+	if c.Clones.MinTokens > 0 {
+		cfg.MinTokens = c.Clones.MinTokens
+	}
+	return cfg
+}
+
 // layer and forbidden-edge findings, "cycles" for import cycles; both default
 // to warning so that switching architecture checking on never breaks a build
 // by surprise.

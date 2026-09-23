@@ -3,7 +3,9 @@
 package model
 
 import (
+	"cmp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -83,31 +85,36 @@ func (r *RunSummary) Count(sev Severity) int {
 	return n
 }
 
-// SortFindings orders findings by file, then line, then rule id, so output is
-// stable between runs.
-func SortFindings(fs []Finding) {
-	sort.SliceStable(fs, func(i, j int) bool {
-		a, b := fs[i], fs[j]
-		if a.File != b.File {
-			return a.File < b.File
+// sortByKeys orders items by a list of three-way key comparators: the first
+// comparator that distinguishes two items decides. Both public sort helpers
+// are declarative key lists over it — which is exactly what metricgate's
+// own duplicate-code gate holds them to.
+func sortByKeys[T any](items []T, keys ...func(a, b T) int) {
+	sort.SliceStable(items, func(i, j int) bool {
+		for _, key := range keys {
+			if c := key(items[i], items[j]); c != 0 {
+				return c < 0
+			}
 		}
-		if a.StartLine != b.StartLine {
-			return a.StartLine < b.StartLine
-		}
-		return a.RuleID < b.RuleID
+		return false
 	})
+}
+
+// SortFindings orders findings by file, then line, then rule id, so output
+// is stable between runs.
+func SortFindings(fs []Finding) {
+	sortByKeys(fs,
+		func(a, b Finding) int { return strings.Compare(a.File, b.File) },
+		func(a, b Finding) int { return cmp.Compare(a.StartLine, b.StartLine) },
+		func(a, b Finding) int { return strings.Compare(a.RuleID, b.RuleID) },
+	)
 }
 
 // SortMetrics orders metric snapshots by file, then scope, then metric name.
 func SortMetrics(ms []MetricResult) {
-	sort.SliceStable(ms, func(i, j int) bool {
-		a, b := ms[i], ms[j]
-		if a.File != b.File {
-			return a.File < b.File
-		}
-		if a.Scope != b.Scope {
-			return a.Scope < b.Scope
-		}
-		return a.Metric < b.Metric
-	})
+	sortByKeys(ms,
+		func(a, b MetricResult) int { return strings.Compare(a.File, b.File) },
+		func(a, b MetricResult) int { return strings.Compare(a.Scope, b.Scope) },
+		func(a, b MetricResult) int { return strings.Compare(a.Metric, b.Metric) },
+	)
 }

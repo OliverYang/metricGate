@@ -15,6 +15,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
+	"metricgate/internal/clones"
 	"metricgate/internal/parser"
 	"metricgate/internal/sources"
 )
@@ -32,11 +33,12 @@ type Symbol struct {
 
 // FileFacts is the fact sheet of one source file.
 type FileFacts struct {
-	File     string   `json:"file"`
-	Language string   `json:"language"`
-	Package  string   `json:"package,omitempty"`
-	Imports  []string `json:"imports,omitempty"`
-	Symbols  []Symbol `json:"symbols"`
+	File     string        `json:"file"`
+	Language string        `json:"language"`
+	Package  string        `json:"package,omitempty"`
+	Imports  []string      `json:"imports,omitempty"`
+	Symbols  []Symbol      `json:"symbols"`
+	CloneFns []clones.Func `json:"-"` // clone fingerprints for the reuse hints
 }
 
 // Extract pulls the facts out of one parsed file.
@@ -108,7 +110,11 @@ func parseFile(parsers map[parser.LanguageID]*parser.Parser, lang parser.Languag
 		return nil, err
 	}
 	defer tree.Close()
-	return Extract(path, src, tree, lang), nil
+	f := Extract(path, src, tree, lang)
+	// The same tree yields the clone fingerprints, so the reuse hints in
+	// the rendered pack cost no extra parsing pass.
+	f.CloneFns = clones.Extract(lang, path, src, tree, clones.Default)
+	return f, nil
 }
 
 // text returns the source slice covered by a node.

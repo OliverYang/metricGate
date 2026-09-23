@@ -9,15 +9,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
-	"runtime/debug"
 	"sort"
-	"sync"
 	"time"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/arch"
+	"metricgate/internal/clones"
 	"metricgate/internal/config"
 	"metricgate/internal/metrics"
 	"metricgate/internal/model"
@@ -78,12 +76,15 @@ type fileResult struct {
 	ignored  int
 	sups     []suppression // the file's own ignore directives
 	archFile arch.File     // package + imports, for the dependency graph
+	cloneFns []clones.Func // normalised function fingerprints, for clone grouping
 }
 
 // Rules returns rule metadata for reports: built-in rules, the bans compiled
 // from the policy, and the architecture checks when the policy declares them.
 func (e *Engine) Rules() []rules.Meta {
-	return append(rules.Metas(e.packs), archRuleMetas(e.cfg)...)
+	out := append(rules.Metas(e.packs), archRuleMetas(e.cfg)...)
+	out = append(out, cloneRuleMeta(e.cfg))
+	return out
 }
 
 // Run checks every supported file under root and returns the summary.
@@ -95,100 +96,18 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 	}
 	summary := &model.RunSummary{Files: len(files)}
 
-	workers := runtime.NumCPU()
-	if workers > 8 {
-		workers = 8
-	}
-	if workers < 1 {
-		workers = 1
-	}
-
-	bigSem := make(chan struct{}, 2) // at most 2 huge trees in memory at once
-	jobs := make(chan string)
-	results := make(chan fileResult, workers)
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			w := &worker{ps: map[parser.LanguageID]*parser.Parser{}}
-			for path := range jobs {
-				if bigFile(path) {
-					bigSem <- struct{}{}
-				}
-				res := e.checkFile(w, root, path)
-				if bigFile(path) {
-					<-bigSem
-					// Huge files allocate large C-side trees; force Go to
-					// return everything it can before the next big file.
-					runtime.GC()
-					debug.FreeOSMemory()
-				}
-				results <- res
-			}
-		}()
-	}
-	go func() {
-		for _, f := range files {
-			jobs <- f
-		}
-		close(jobs)
-	}()
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
+	results := e.runWorkers(root, files)
 
 	var archFiles []arch.File
-	supsByFile := map[string][]suppression{}
-	for res := range results {
-		summary.Findings = append(summary.Findings, res.findings...)
-		summary.Metrics = append(summary.Metrics, res.metrics...)
-		summary.Ignored += res.ignored
-		if res.archFile.Pkg != "" {
-			archFiles = append(archFiles, res.archFile)
-		}
-		if res.archFile.Name != "" && len(res.sups) > 0 {
-			supsByFile[res.archFile.Name] = res.sups
-		}
-	}
-	archFindings, archIgnored := e.checkArchitecture(archFiles, supsByFile)
-	summary.Findings = append(summary.Findings, archFindings...)
-	summary.Ignored += archIgnored
+	var cloneFns []clones.Func
+	supsByFile := foldResults(summary, results, &archFiles, &cloneFns)
+	e.checkArchitecture(summary, archFiles, supsByFile)
+	e.checkClones(summary, cloneFns, supsByFile)
 
 	model.SortFindings(summary.Findings)
 	model.SortMetrics(summary.Metrics)
 	summary.Duration = time.Since(start)
 	return summary, nil
-}
-
-// worker holds the per-goroutine parser pool; tree-sitter parsers are not
-// thread-safe, so each worker lazily creates one per language it meets.
-type worker struct {
-	ps map[parser.LanguageID]*parser.Parser
-}
-
-// bigFileThreshold is the source size above which a parse tree is large
-// enough that concurrent big trees dominate peak memory (a 3.8MB machine-
-// generated file produces a ~200MB tree).
-const bigFileThreshold = 1 << 20 // 1 MB
-
-// bigFile reports whether the file must gate on the big-file semaphore.
-func bigFile(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Size() >= bigFileThreshold
-}
-
-func (w *worker) parserFor(id parser.LanguageID) (*parser.Parser, error) {
-	if p := w.ps[id]; p != nil {
-		return p, nil
-	}
-	p, err := parser.New(id)
-	if err != nil {
-		return nil, err
-	}
-	w.ps[id] = p
-	return p, nil
 }
 
 // collect walks root and returns files for supported languages, skipping
@@ -268,6 +187,7 @@ func (e *Engine) checkFile(w *worker, root, path string) fileResult {
 
 	res.findings, res.metrics, res.ignored, res.sups = e.analyze(lang, path, src, tree)
 	res.archFile = archFileOf(lang, root, path, src, tree)
+	res.cloneFns = clones.Extract(lang, path, src, tree, e.cfg.ClonePolicy())
 	return res
 }
 

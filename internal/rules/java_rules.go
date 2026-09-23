@@ -42,29 +42,12 @@ func printStackTrace() *Rule {
 // javaEmptyBlock flags empty control-flow blocks: branches, all loop forms
 // and catch handlers.
 func javaEmptyBlock() *Rule {
-	return &Rule{
-		ID:              "empty-block",
-		Title:           "Empty control-flow block",
-		DefaultSeverity: model.SevWarning,
-		DefaultEnabled:  true,
-		Query: `
+	return newEmptyBlockRule(`
 (if_statement consequence: (block) @blk)
 (if_statement alternative: (block) @blk)
 (for_statement body: (block) @blk)
 (while_statement body: (block) @blk)
 (enhanced_for_statement body: (block) @blk)
 (catch_clause body: (block) @blk)
-`,
-		OnMatch: func(ctx *MatchCtx) *model.Finding {
-			blk := ctx.Captures["blk"]
-			if blk.NamedChildCount() != 0 {
-				return nil
-			}
-			return &model.Finding{
-				StartLine: int(blk.StartPosition().Row) + 1,
-				EndLine:   int(blk.EndPosition().Row) + 1,
-				Message:   "empty block; handle the case or leave a comment explaining why it is empty",
-			}
-		},
-	}
+`)
 }
