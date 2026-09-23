@@ -74,9 +74,9 @@ type fileResult struct {
 	findings []model.Finding
 	metrics  []model.MetricResult
 	ignored  int
-	sups     []suppression // the file's own ignore directives
-	archFile arch.File     // package + imports, for the dependency graph
-	cloneFns []clones.Func // normalised function fingerprints, for clone grouping
+	sups     []suppression  // the file's own ignore directives
+	archFile arch.File      // package + imports, for the dependency graph
+	cloneFns []clones.Func  // normalised function fingerprints, for clone grouping
 	types    arch.TypeKinds // type census of the package, for abstractness
 }
 
