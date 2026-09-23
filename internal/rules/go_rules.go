@@ -1,56 +1,15 @@
 package rules
 
 import (
-	"strings"
-
 	"metricgate/internal/model"
 )
 
-// GoRules is the v0 rule set for Go. Each rule is one tree-sitter query plus
-// a filter callback; severities and options come from policy overrides.
+// GoRules is the built-in Go rule pack. Banned APIs live in policy
+// (languages.go.banned) and are compiled by the engine, not here.
 func GoRules() []*Rule {
 	return []*Rule{
-		noFmtPrint(),
 		emptyBlock(),
-		panicCall(),
 		todoComment(),
-	}
-}
-
-// noFmtPrint bans direct fmt.Print* calls in production code. This is the
-// canonical "banned API" constraint: the same shape later carries an
-// organisation's internal allow/deny lists.
-func noFmtPrint() *Rule {
-	return &Rule{
-		ID:              "no-fmt-print",
-		Title:           "Direct fmt.Print* call; use the project logger",
-		DefaultSeverity: model.SevWarning,
-		DefaultEnabled:  true,
-		Query: `
-(call_expression
-  function: (selector_expression
-    operand: (identifier) @pkg
-    field: (field_identifier) @fn)) @call
-`,
-		OnMatch: func(ctx *MatchCtx) *model.Finding {
-			if ctx.Text(ctx.Captures["pkg"]) != "fmt" {
-				return nil
-			}
-			fn := ctx.Text(ctx.Captures["fn"])
-			if !strings.HasPrefix(fn, "Print") {
-				return nil
-			}
-			for _, allow := range ctx.OptStrings("allowed_files") {
-				if strings.HasSuffix(ctx.File, allow) {
-					return nil
-				}
-			}
-			return &model.Finding{
-				StartLine: int(ctx.Captures["call"].StartPosition().Row) + 1,
-				EndLine:   int(ctx.Captures["call"].EndPosition().Row) + 1,
-				Message:   "fmt." + fn + " writes directly to stdout; use the project logger",
-			}
-		},
 	}
 }
 
@@ -76,33 +35,6 @@ func emptyBlock() *Rule {
 				StartLine: int(blk.StartPosition().Row) + 1,
 				EndLine:   int(blk.EndPosition().Row) + 1,
 				Message:   "empty block; handle the case or leave a comment explaining why it is empty",
-			}
-		},
-	}
-}
-
-// panicCall flags direct panic() in non-test code.
-func panicCall() *Rule {
-	return &Rule{
-		ID:              "panic-call",
-		Title:           "Direct panic() call outside tests",
-		DefaultSeverity: model.SevWarning,
-		DefaultEnabled:  true,
-		Query: `
-(call_expression
-  function: (identifier) @fn) @call
-`,
-		OnMatch: func(ctx *MatchCtx) *model.Finding {
-			if ctx.Text(ctx.Captures["fn"]) != "panic" {
-				return nil
-			}
-			if ctx.OptBool("allow_tests", true) && strings.HasSuffix(ctx.File, "_test.go") {
-				return nil
-			}
-			return &model.Finding{
-				StartLine: int(ctx.Captures["call"].StartPosition().Row) + 1,
-				EndLine:   int(ctx.Captures["call"].EndPosition().Row) + 1,
-				Message:   "direct panic() call; return an error so callers can decide",
 			}
 		},
 	}

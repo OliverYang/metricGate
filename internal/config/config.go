@@ -15,6 +15,25 @@ import (
 	"metricgate/internal/model"
 )
 
+// BanConfig is one organisation-level banned API or import. Match is a call
+// pattern ("fmt.Print", "System.out.print", "panic") or an import path. A
+// trailing "*" on a call name is a prefix match. Kind defaults to "call".
+type BanConfig struct {
+	Kind        string   `yaml:"kind,omitempty"`
+	Match       string   `yaml:"match"`
+	Reason      string   `yaml:"reason,omitempty"`
+	ExceptFiles []string `yaml:"except_files,omitempty"` // file-name suffixes
+}
+
+// Bans returns the policy ban list of one language (nil when unset).
+func (c *Config) Bans(lang string) []BanConfig {
+	sec, ok := langSection(c, lang)
+	if !ok {
+		return nil
+	}
+	return sec.Banned
+}
+
 // RuleConfig overrides one rule. A nil Enabled means "use the rule default".
 type RuleConfig struct {
 	Enabled  *bool          `yaml:"enabled,omitempty"`
@@ -34,6 +53,7 @@ type MetricConfig struct {
 type LanguageConfig struct {
 	Rules   map[string]RuleConfig   `yaml:"rules,omitempty"`
 	Metrics map[string]MetricConfig `yaml:"metrics,omitempty"`
+	Banned  []BanConfig             `yaml:"banned-api,omitempty"`
 }
 
 // GateConfig controls when the check command exits non-zero.
@@ -72,17 +92,8 @@ exclude: [".git", "vendor", "node_modules", "testdata"]
 languages:
   go:
     rules:
-      no-fmt-print:
-        severity: warning
-        options:
-          # Files (name suffixes) where direct printing is allowed.
-          allowed_files: []
       empty-block:
         severity: warning
-      panic-call:
-        severity: warning
-        options:
-          allow_tests: true
       todo-comment:
         enabled: false
         severity: info
@@ -93,14 +104,20 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
+    # Organisation bans, evaluated by the same deterministic engine. A trailing
+    # "*" is a name prefix; except_files lists file-name suffixes to skip;
+    # kind: import bans a package import instead of a call. Override severity
+    # or add allowed_files under rules.<id>, where <id> is "banned-" plus the
+    # match with dots replaced by dashes (e.g. banned-fmt-Print*).
+    banned-api:
+      - match: fmt.Print*
+        reason: direct fmt.Print* writes to stdout; use the project logger
+      - match: panic
+        reason: direct panic(); return an error so callers can decide
+        except_files: ["_test.go"]
 
   java:
     rules:
-      system-out-print:
-        severity: warning
-        options:
-          # Files (name suffixes) where direct printing is allowed.
-          allowed_files: []
       print-stack-trace:
         severity: warning
       empty-block:
@@ -115,6 +132,12 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
+    banned-api:
+      - match: System.out.print*
+        reason: direct System.out.print* writes to the console; use the project logger
+      - match: System.err.print*
+        reason: direct System.err.print* writes to the console; use the project logger
+
 
 store:
   enabled: false

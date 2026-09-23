@@ -131,7 +131,7 @@ func constraints(cfg *config.Config, langs map[parser.LanguageID]bool) []string 
 // langConstraints renders the rule and limit lines of one language.
 func langConstraints(cfg *config.Config, lang parser.LanguageID) []string {
 	var lines []string
-	for _, r := range rules.ForLanguage(lang) {
+	for _, r := range rules.RulesFor(lang, cfg) {
 		if l := ruleLine(cfg, lang, r); l != "" {
 			lines = append(lines, l)
 		}

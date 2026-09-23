@@ -33,7 +33,7 @@ func Generate(id string) {
 			t.Errorf("finding file = %q, want virtual name", f.File)
 		}
 	}
-	for _, rule := range []string{"no-fmt-print", "panic-call"} {
+	for _, rule := range []string{"banned-fmt-Print*", "banned-panic"} {
 		if counts[rule] == 0 {
 			t.Errorf("%s missing from %v", rule, counts)
 		}

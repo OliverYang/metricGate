@@ -26,6 +26,11 @@ nesting 16、params 3、no-fmt-print 4。抽查属实：yaml.v3 确有 300+ 行�
 内部 panic。**注意**："事实为真"≠"都应作为违规"——解析器内 panic 是否合法属于
 policy 判断，这正是策略文件和 suppression（待建）存在的意义。
 
+> 更新（banned-api 数据化后）：上文 `panic-call` / `no-fmt-print` 这类禁用类规则
+> 现已由 `policy.yaml` 的 `banned-api:` 清单编译生成，id 变为
+> `banned-panic` / `banned-fmt-Print*`；本报告的测量数据是改造前跑出来的，
+> 数字保留原样。
+
 **尚无证据的部分（诚实声明）**：对 LLM 生成质量本身的改善（减少幻觉 API、减少
 返工轮次）需要真实 agent 接入做 A/B 对照，本报告不给出未测量的结论。
 

@@ -61,7 +61,7 @@ SonarQube（服务端重）；进程内嵌入 semgrep 引擎（许可与复杂�
 ## 4. 行动方案（三阶段，之后全面测试）
 
 **Phase A — 约束核心自研冲刺（~1.5 周）**
-1. policy banned-api 数据化（0.5d）→ 组织约束从"改源码"变"改配置"
+1. ~~policy banned-api 数据化（0.5d）~~ ✅ 已完成 → 组织约束从"改源码"变"改配置"
 2. 依赖图 + 分层规则 + 循环依赖（2-3d）→ 约束族 B 落地，组织级约束的最强载体
 3. 重复检测 + diff-aware 新增重复闸门（3-4d）→ 约束族 D，"先复用再生成"
 4. Java CK 类度量（2d）→ 约束族 C 补全
@@ -95,3 +95,32 @@ SonarQube（服务端重）；进程内嵌入 semgrep 引擎（许可与复杂�
 符号索引）+ 一个接入生态的适配器层**。前者全部自研（管线现成，总成本 ~1.5 周，
 且输出直接进 LLM 工单这个差异化通道）；后者全部 CLI 集成（type 分析不重造、
 许可证干净、CI 可并行）。这是成本、效率、扩展性、维护性四个维度上的最优解。
+
+## 7. 落地记录
+
+### A-1 policy banned-api 数据化 ✅
+
+实现要点（`internal/rules/banned.go` + `internal/config`）：
+
+- policy 结构：`languages.<lang>.banned-api: [{kind?, match, reason?, except_files?}]`；
+  `kind` 默认 `call`，`import` 走 import 节点匹配（Java 端含子包前缀）
+- match 语法：点分模式，`pkg.Name`（Go）/ `recv.method` / `Object.field.method`（Java）；
+  裸名匹配无限定调用；尾随 `*` = 名称前缀（`fmt.Print*` 覆盖 Println/Printf/...）
+- 规则 id 稳定可配：`banned-` + 点与斜杠折叠成短横线，前缀保留 `*`
+  （`banned-fmt-Print*`、`banned-os-exec`、`banned-System-out-print*`），
+  因此 severity / allowed_files / `metricgate: ignore` 全部照常可用
+- 编译入口收敛为 `rules.RulesFor(lang, cfg)`：**引擎与 context 生成器共用**，
+  保证 prompt 里承诺的约束与闸门实际执行的约束不可能漂移
+- 表达不了的条目静默丢弃（未知 kind、空 match、Java 三层以上 receiver），
+  不炸整轮；Java 深 receiver 属类型分析问题，按决策框架留给适配器
+- 原有的 `no-fmt-print` / `panic-call` / `system-out-print` 三条硬编码规则已删除，
+  改为默认 policy 里的 banned-api 条目（行为等价，测试对齐）
+
+顺带修掉的可用性缺陷：CLI 参数解析原先用 Go `flag` 的默认行为，**位置参数之后的
+flag 被静默忽略**（`check . -format json`、`check . -config prod.yaml` 全部失效，
+而 README 就是这么写的）。`cmd/metricgate` 现在把 flag 及其取值重排到位置参数之前
+再解析，`--` 语义保留，并补了回归测试。
+
+验证：`go test ./...` 全绿（新增 7 个 ban 用例 + 4 个参数解析用例）；
+`metricgate check .` 自吃狗粮 0 error（19 warning，均为既有度量债）；
+MCP `check_code` / `get_constraints` 冒烟通过，禁令在两个触点上同源。

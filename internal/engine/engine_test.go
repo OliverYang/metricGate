@@ -65,14 +65,14 @@ func TestRunOnTestdata(t *testing.T) {
 
 	goCounts, javaCounts := countsByLang(s)
 	checkCounts(t, map[string]int{
-		"no-fmt-print": 1,
-		"empty-block":  2,
-		"panic-call":   1,
+		"banned-fmt-Print*": 1,
+		"empty-block":       2,
+		"banned-panic":      1,
 	}, goCounts, "go")
 	checkCounts(t, map[string]int{
-		"system-out-print":  1,
-		"print-stack-trace": 1,
-		"empty-block":       2,
+		"banned-System-out-print*": 1,
+		"print-stack-trace":        1,
+		"empty-block":              2,
 	}, javaCounts, "java")
 
 	var paramsFinding bool

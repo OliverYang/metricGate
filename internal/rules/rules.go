@@ -207,7 +207,8 @@ func Metas(all []*Rule) []Meta {
 	return metas
 }
 
-// ForLanguage returns the rule pack registered for a language.
+// ForLanguage returns the built-in rule pack of a language, without the
+// policy bans. Callers that check code use RulesFor instead.
 func ForLanguage(id parser.LanguageID) []*Rule {
 	switch id {
 	case parser.LangGo:

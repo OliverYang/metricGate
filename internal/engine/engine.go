@@ -30,6 +30,7 @@ type Engine struct {
 	cfg     *config.Config
 	langs   map[parser.LanguageID]*parser.Parser
 	runners map[parser.LanguageID]*rules.Runner
+	packs   []*rules.Rule // built-in rules plus the policy bans
 }
 
 // New builds an engine for the given policy. All rule queries are compiled
@@ -46,7 +47,8 @@ func New(cfg *config.Config) (*Engine, error) {
 			e.Close()
 			return nil, err
 		}
-		runner, err := rules.NewRunner(string(id), p.Lang, rules.ForLanguage(id))
+		pack := rules.RulesFor(id, cfg)
+		runner, err := rules.NewRunner(string(id), p.Lang, pack)
 		if err != nil {
 			p.Close()
 			e.Close()
@@ -54,6 +56,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 		e.langs[id] = p
 		e.runners[id] = runner
+		e.packs = append(e.packs, pack...)
 	}
 	return e, nil
 }
@@ -68,13 +71,10 @@ func (e *Engine) Close() {
 	}
 }
 
-// Rules returns rule metadata for reports across all languages.
+// Rules returns rule metadata for reports: built-in rules plus the bans
+// compiled from the policy that built this engine.
 func (e *Engine) Rules() []rules.Meta {
-	var metas []rules.Meta
-	for _, id := range parser.Supported() {
-		metas = append(metas, rules.Metas(rules.ForLanguage(id))...)
-	}
-	return metas
+	return rules.Metas(e.packs)
 }
 
 type fileResult struct {

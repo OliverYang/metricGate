@@ -19,9 +19,11 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
 - Go + Java language support (tree-sitter grammars, incremental-friendly)
 - 6 metrics: cyclomatic complexity, cognitive complexity, function length,
   file length, nesting depth, parameter count
-- 8 pattern rules (tree-sitter query + Go filter) —
-  Go: `no-fmt-print`, `empty-block`, `panic-call`, `todo-comment`;
-  Java: `system-out-print`, `print-stack-trace`, `empty-block`, `todo-comment`
+- Built-in structural rules (tree-sitter query + Go filter): `empty-block`,
+  `todo-comment`, and Java `print-stack-trace`
+- **Data-driven bans**: `banned-api:` entries in `policy.yaml` compile into the
+  same deterministic pipeline — an organisation adds a constraint by editing
+  YAML, not Go (see [Banned API as policy data](#banned-api-as-policy-data))
 - Policy file (`policy.yaml`) = the project's constraint model
 - SARIF 2.1.0 output (GitHub code scanning compatible)
 - Local SQLite trend store (write-only in v0)
@@ -68,13 +70,53 @@ Tools exposed:
 | `check_path` | check files on disk (optionally diff-only) |
 | `list_stubs` | repair worklist: empty bodies, `panic("not implemented")`, `UnsupportedOperationException` |
 
+## Banned API as policy data
+
+Organisational constraints ("no direct stdout", "never import X") change far
+faster than the checker does, so they live in the policy file instead of in Go.
+The engine compiles each entry into the same tree-sitter rule pipeline:
+identical findings, severities, SARIF catalogue, suppression syntax, and the
+same lines show up in `metricgate context` / `get_constraints` — a prompt can
+never be told a different rule set from the one the gate enforces.
+
+```yaml
+languages:
+  go:
+    banned-api:
+      - match: fmt.Print*            # trailing "*" = name prefix
+        reason: use the project logger
+      - match: panic
+        except_files: ["_test.go"]   # file-name suffixes out of scope
+      - kind: import                 # ban a package and its subpackages
+        match: os/exec
+        reason: only the git adapter may shell out
+```
+
+Every ban gets a stable id — `banned-` plus the pattern with dots and slashes
+folded to dashes (`banned-fmt-Print*`, `banned-os-exec`,
+`banned-System-out-print*`) — so it can be retuned like any other rule:
+
+```yaml
+    rules:
+      banned-fmt-Print*:
+        severity: error
+        options:
+          allowed_files: ["cmd/tool/main.go"]
+```
+
+Both grammars are covered: Go matches `pkg.Name(...)` and unqualified
+`name(...)`; Java matches `receiver.method(...)`, `Object.field.method(...)`
+and unqualified `method(...)`. Deeper Java receivers need type resolution and
+are deliberately out of scope — that is adapter territory
+([docs/roadmap-research.md](docs/roadmap-research.md)), not AST territory.
+
 ## Suppression (inline ignore directives)
 
 Legitimate exceptions are silenced in place, visibly (the report counts what
 was suppressed):
 
 ```go
-fmt.Println("boot")        // metricgate: ignore no-fmt-print CLI entrypoint
+fmt.Println("boot")        // metricgate: ignore banned-fmt-Print* CLI entrypoint
 
 // metricgate: ignore params-count legacy signature, do not break callers
 func Parse(a, b, c, d, e, f, g int) int { ... }
@@ -110,7 +152,6 @@ Semantics:
 
 The gate verdict uses the filtered result; the header shows how much was
 hidden. Metric snapshots stored for trends are always the full measurements.
-hidden. Metric snapshots stored for trends are always the full measurements.
 
 Policy example (full reference in the generated `policy.yaml`):
 
@@ -119,9 +160,12 @@ gate:
   fail_on: error          # exit 1 on any error-severity finding
 languages:
   go:
+    banned-api:                      # 组织约束：改配置，不改代码
+      - match: fmt.Print*
+        reason: use the project logger
     rules:
-      no-fmt-print:
-        severity: warning
+      banned-fmt-Print*:             # 生成的规则 id，可单独调
+        severity: error
         options:
           allowed_files: ["cmd/tool/main.go"]   # suffix allow-list
     metrics:
@@ -137,7 +181,7 @@ policy.yaml（约束模型）
   Engine（纯库：无打印、无文件写、无网络）
   ├── parser   tree-sitter grammar per language
   ├── metrics  AST visitors → complexity / size / nesting
-  ├── rules    tree-sitter query + Go filter（禁用 API / 空块 / panic …）
+  ├── rules    tree-sitter query + Go filter（结构规则 + policy 编译出的 banned-api）
   └── thresholds → findings（source: rule | metric）
      │
      ▼
@@ -163,7 +207,7 @@ published specs where possible; deviations are documented inline.
 | Ver | Scope |
 |-----|-------|
 | v0  | Checker core + CLI + SARIF + gate + SQLite schema (this release) |
-| v1  | diff-only mode ✅ · next: suppression comments, Python/TS rule packs, trend report |
+| v1  | diff-only mode ✅ · banned-api as policy data ✅ · next: architecture/layering constraints, clone detection, class metrics, Python/TS packs |
 | v2  | HTTP/gRPC service (SDK), LLM adapter interface + context generator |
 | v3  | Skeleton generator (IR + render backends), end-to-end LLM repair loop demo |
 

@@ -10,10 +10,9 @@ exclude: [".git", "vendor", "node_modules", "testdata"]
 languages:
   go:
     rules:
-      no-fmt-print:
-        severity: warning
+      banned-fmt-Print*:
+        # The CLI is the one place where direct printing is the job.
         options:
-          # The CLI is the one place where direct printing is the job.
           allowed_files: ["cmd/metricgate/main.go"]
       todo-comment:
         enabled: false
@@ -25,13 +24,22 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
+    # Organisational constraints live here, not in Go code: the engine compiles
+    # each entry into the same deterministic rule pipeline (same findings, same
+    # severities, same `metricgate: ignore` suppression).
+    banned-api:
+      - match: fmt.Print*
+        reason: direct fmt.Print* writes to stdout; use the project logger
+      - match: panic
+        reason: direct panic(); return an error so callers can decide
+        except_files: ["_test.go"]
+      - kind: import
+        match: os/exec
+        reason: only the git adapter may shell out
+        except_files: ["internal/diff/diff.go", "cmd/metricgate/main.go", "_test.go"]
 
   java:
     rules:
-      system-out-print:
-        severity: warning
-        options:
-          allowed_files: []
       print-stack-trace:
         severity: warning
       empty-block:
@@ -46,6 +54,12 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
+    banned-api:
+      - match: System.out.print*
+        reason: direct System.out.print* writes to the console; use the project logger
+      - match: System.err.print*
+        reason: direct System.err.print* writes to the console; use the project logger
+
 store:
   enabled: false
   path: ".metricgate/history.db"

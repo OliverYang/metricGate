@@ -18,7 +18,7 @@ import "fmt"
 
 func A() {
 	fmt.Println("kept")
-	fmt.Println("ignored on this line") // metricgate: ignore no-fmt-print demo
+	fmt.Println("ignored on this line") // metricgate: ignore banned-fmt-Print* demo
 	fmt.Println("kept too")
 }
 `
@@ -28,7 +28,7 @@ func A() {
 	}
 	prints := 0
 	for _, f := range findings {
-		if f.RuleID == "no-fmt-print" {
+		if f.RuleID == "banned-fmt-Print*" {
 			prints++
 			if strings.Contains(f.Message, "ignored on this line") {
 				t.Error("line-directed finding was not suppressed")
@@ -36,7 +36,7 @@ func A() {
 		}
 	}
 	if prints != 2 {
-		t.Errorf("no-fmt-print = %d, want 2 (one suppressed)", prints)
+		t.Errorf("banned-fmt-Print* = %d, want 2 (one suppressed)", prints)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestSuppressBeginEnd(t *testing.T) {
 
 import "fmt"
 
-// metricgate: ignore-begin no-fmt-print
+// metricgate: ignore-begin banned-fmt-Print*
 func D() {
 	fmt.Println("in range")
 }
@@ -99,7 +99,7 @@ func E() {
 	for _, f := range findings {
 		counts[f.RuleID]++
 	}
-	if counts["no-fmt-print"] != 1 {
-		t.Errorf("no-fmt-print = %d, want 1 (two suppressed by range)", counts["no-fmt-print"])
+	if counts["banned-fmt-Print*"] != 1 {
+		t.Errorf("banned-fmt-Print* = %d, want 1 (two suppressed by range)", counts["banned-fmt-Print*"])
 	}
 }
