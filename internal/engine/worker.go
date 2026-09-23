@@ -89,7 +89,7 @@ func feedJobs(jobs chan<- string, files []string) {
 // foldResults merges per-file results into the summary and gathers the
 // whole-graph inputs: architecture files, clone fingerprints and the
 // suppression map keyed by reported path.
-func foldResults(summary *model.RunSummary, results <-chan fileResult, archFiles *[]arch.File, cloneFns *[]clones.Func) map[string][]suppression {
+func foldResults(summary *model.RunSummary, results <-chan fileResult, archFiles *[]arch.File, cloneFns *[]clones.Func, typeKinds map[string]arch.TypeKinds) map[string][]suppression {
 	supsByFile := map[string][]suppression{}
 	for res := range results {
 		summary.Findings = append(summary.Findings, res.findings...)
@@ -97,6 +97,10 @@ func foldResults(summary *model.RunSummary, results <-chan fileResult, archFiles
 		summary.Ignored += res.ignored
 		if res.archFile.Pkg != "" {
 			*archFiles = append(*archFiles, res.archFile)
+			k := typeKinds[res.archFile.Pkg]
+			k.Total += res.types.Total
+			k.Abstract += res.types.Abstract
+			typeKinds[res.archFile.Pkg] = k
 		}
 		if res.archFile.Name != "" && len(res.sups) > 0 {
 			supsByFile[res.archFile.Name] = res.sups

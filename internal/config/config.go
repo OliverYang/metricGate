@@ -71,6 +71,7 @@ type CloneConfig struct {
 type ArchConfig struct {
 	Edges  string        `yaml:"edges,omitempty"`  // severity of layer/edge violations
 	Cycles string        `yaml:"cycles,omitempty"` // severity of import cycles
+	SDP    string        `yaml:"sdp,omitempty"`    // severity of stable-dependency violations (default warning)
 	Layers []arch.Layer  `yaml:"layers,omitempty"`
 	Forbid []arch.Forbid `yaml:"forbid,omitempty"`
 }
@@ -324,6 +325,9 @@ func (c *Config) ArchSeverity(kind string) model.Severity {
 	value := c.Architecture.Edges
 	if kind == "cycles" {
 		value = c.Architecture.Cycles
+	}
+	if kind == "sdp" {
+		value = c.Architecture.SDP
 	}
 	if value == "" {
 		return model.SevWarning

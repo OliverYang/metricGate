@@ -77,6 +77,7 @@ type fileResult struct {
 	sups     []suppression // the file's own ignore directives
 	archFile arch.File     // package + imports, for the dependency graph
 	cloneFns []clones.Func // normalised function fingerprints, for clone grouping
+	types    arch.TypeKinds // type census of the package, for abstractness
 }
 
 // Rules returns rule metadata for reports: built-in rules, the bans compiled
@@ -100,8 +101,9 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 
 	var archFiles []arch.File
 	var cloneFns []clones.Func
-	supsByFile := foldResults(summary, results, &archFiles, &cloneFns)
-	e.checkArchitecture(summary, archFiles, supsByFile)
+	typeKinds := map[string]arch.TypeKinds{}
+	supsByFile := foldResults(summary, results, &archFiles, &cloneFns, typeKinds)
+	e.checkArchitecture(summary, archFiles, typeKinds, supsByFile)
 	e.checkClones(summary, cloneFns, supsByFile)
 
 	model.SortFindings(summary.Findings)
@@ -188,6 +190,7 @@ func (e *Engine) checkFile(w *worker, root, path string) fileResult {
 	res.findings, res.metrics, res.ignored, res.sups = e.analyze(lang, path, src, tree)
 	res.archFile = archFileOf(lang, root, path, src, tree)
 	res.cloneFns = clones.Extract(lang, path, src, tree, e.cfg.ClonePolicy())
+	res.types = typeCensus(lang, src, tree)
 	return res
 }
 
@@ -357,6 +360,25 @@ func (e *Engine) metricFindings(lang parser.LanguageID, stats *metrics.FileStats
 		add(metrics.MetricDIT, c.Name, c.DIT)
 	}
 	return findings
+}
+
+// thresholdsByLang resolves a language-agnostic metric's thresholds as the
+// most permissive configured value across the known languages, so a policy
+// only has to set it once.
+func (e *Engine) thresholdsByLang(langs ...string) (warn, errAt int) {
+	for _, lang := range langs {
+		w, er, enabled := e.cfg.MetricThresholds(lang, "pkg-coupling")
+		if enabled != nil && !*enabled {
+			continue
+		}
+		if w > warn {
+			warn = w
+		}
+		if er > errAt {
+			errAt = er
+		}
+	}
+	return warn, errAt
 }
 
 // CheckSource analyses in-memory source as if it were the virtual file name

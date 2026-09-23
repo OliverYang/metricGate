@@ -15,6 +15,11 @@ type Raw struct {
 	// its directory, supplied by the caller).
 	Package string
 	Imports []Import
+	// Type census for Martin's abstractness: total type declarations in
+	// the file and how many are abstract (Go interfaces; Java interfaces
+	// and abstract classes).
+	Types    int
+	Abstract int
 }
 
 // Extract reads the package clause and the imports of one parsed file.
@@ -45,6 +50,16 @@ func extractGo(src []byte, root *sitter.Node) Raw {
 		case "package_clause":
 			if id := childByKind(decl, "package_identifier"); id != nil {
 				out.Package = text(src, id)
+			}
+		case "type_declaration":
+			for _, spec := range children(decl) {
+				if !strings.HasPrefix(spec.Kind(), "type_spec") {
+					continue
+				}
+				out.Types++
+				if t := spec.ChildByFieldName("type"); t != nil && t.Kind() == "interface_type" {
+					out.Abstract++
+				}
 			}
 		case "import_declaration":
 			out.Imports = append(out.Imports, goImports(src, decl)...)
@@ -88,6 +103,16 @@ func extractJava(src []byte, root *sitter.Node) Raw {
 		case "import_declaration":
 			if path := dottedName(src, decl); path != "" {
 				out.Imports = append(out.Imports, Import{Path: slash(path), Line: line(decl)})
+			}
+		case "class_declaration", "interface_declaration":
+			out.Types++
+			if decl.Kind() == "interface_declaration" {
+				out.Abstract++
+				break
+			}
+			if mods := decl.ChildByFieldName("modifiers"); mods != nil &&
+				strings.Contains(text(src, mods), "abstract") {
+				out.Abstract++
 			}
 		}
 	}

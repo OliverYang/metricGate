@@ -33,6 +33,14 @@ func archFileOf(lang parser.LanguageID, root, path string, src []byte, tree *sit
 	return arch.File{Name: path, Pkg: pkg, Java: java, Imports: raw.Imports}
 }
 
+// typeCensus reports a file's type declarations for Martin's abstractness.
+// The arch extractor already walks the top level for package and imports;
+// this reads its census so the graph pass needs no extra traversal.
+func typeCensus(lang parser.LanguageID, src []byte, tree *sitter.Tree) arch.TypeKinds {
+	raw := arch.Extract(lang, src, tree.RootNode())
+	return arch.TypeKinds{Abstract: raw.Abstract, Total: raw.Types}
+}
+
 // packageID is the graph node a Go file contributes: its directory relative to
 // the run root, so a policy can name a package without repeating the module
 // path that the imports carry.
@@ -47,14 +55,50 @@ func packageID(root, path string) string {
 
 // checkArchitecture evaluates the policy's architecture section over the
 // run's package graph and appends the findings to the summary, honouring
-// inline directives on the import lines.
-func (e *Engine) checkArchitecture(summary *model.RunSummary, files []arch.File, supsByFile map[string][]suppression) {
-	policy := e.cfg.ArchPolicy()
-	if policy.Empty() || len(files) < 2 {
+// inline directives on the import lines. The Martin package metrics ride
+// the same graph: snapshots always, SDP findings when the policy asks.
+func (e *Engine) checkArchitecture(summary *model.RunSummary, files []arch.File, kinds map[string]arch.TypeKinds, supsByFile map[string][]suppression) {
+	if len(files) < 2 {
 		return
 	}
-	for _, v := range arch.Check(arch.Build(files), policy) {
-		finding := e.archFinding(v)
+	g := arch.Build(files)
+	policy := e.cfg.ArchPolicy()
+	if !policy.Empty() {
+		for _, v := range arch.Check(g, policy) {
+			finding := e.archFinding(v)
+			kept, n := suppress([]model.Finding{finding}, supsByFile[finding.File])
+			if n > 0 {
+				summary.Ignored += n
+				continue
+			}
+			summary.Findings = append(summary.Findings, kept...)
+		}
+	}
+
+	ms := arch.ComputePkgMetrics(g, kinds)
+	for _, m := range ms {
+		w, er := e.thresholdsByLang("go", "java")
+		if w > 0 || er > 0 {
+			summary.Metrics = append(summary.Metrics,
+				model.MetricResult{Metric: "pkg-ca", File: "packages/" + m.Pkg, Value: m.Ca, Warn: w, Err: er},
+				model.MetricResult{Metric: "pkg-ce", File: "packages/" + m.Pkg, Value: m.Ce, Warn: w, Err: er})
+		}
+		summary.Metrics = append(summary.Metrics,
+			model.MetricResult{Metric: "pkg-i", File: "packages/" + m.Pkg, Value: int(m.I * 100), Warn: 0, Err: 0},
+			model.MetricResult{Metric: "pkg-a", File: "packages/" + m.Pkg, Value: int(m.A * 100), Warn: 0, Err: 0},
+			model.MetricResult{Metric: "pkg-d", File: "packages/" + m.Pkg, Value: int(m.D * 100), Warn: 0, Err: 0},
+		)
+	}
+	for _, v := range arch.SdpViolations(g, ms) {
+		finding := model.Finding{
+			RuleID:    v.RuleID,
+			Severity:  e.cfg.ArchSeverity("sdp"),
+			Source:    model.SrcRule,
+			File:      v.File,
+			StartLine: v.Line,
+			EndLine:   v.Line,
+			Message:   v.Message,
+		}
 		kept, n := suppress([]model.Finding{finding}, supsByFile[finding.File])
 		if n > 0 {
 			summary.Ignored += n
