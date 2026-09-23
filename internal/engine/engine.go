@@ -279,6 +279,19 @@ func (e *Engine) metricResults(lang parser.LanguageID, stats *metrics.FileStats)
 			})
 		}
 	}
+	if out == nil && !e.metricEnabled(lang, metrics.MetricMaintainability) {
+		return nil
+	}
+	if mi := e.metricEnabled(lang, metrics.MetricMaintainability); mi {
+		// MI is "higher is better", the pipeline is "value > threshold is
+		// bad" — so we snapshot the debt (100-MI) and threshold that.
+		w, er := e.thresholds(lang, metrics.MetricMaintainability)
+		debt := 100 - int(stats.MI+0.5)
+		out = append(out, model.MetricResult{
+			Metric: metrics.MetricMaintainability, File: stats.File, Scope: "",
+			Value: debt, Warn: w, Err: er,
+		})
+	}
 	return out
 }
 
@@ -358,6 +371,9 @@ func (e *Engine) metricFindings(lang parser.LanguageID, stats *metrics.FileStats
 		add(metrics.MetricLCOM, c.Name, c.LCOM)
 		add(metrics.MetricCBO, c.Name, c.CBO)
 		add(metrics.MetricDIT, c.Name, c.DIT)
+	}
+	if e.metricEnabled(lang, metrics.MetricMaintainability) && stats.MI > 0 {
+		add(metrics.MetricMaintainability, stats.MIScope, 100-int(stats.MI+0.5))
 	}
 	return findings
 }

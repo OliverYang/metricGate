@@ -24,6 +24,11 @@ type FuncStats struct {
 	Cyclomatic int
 	Cognitive  int
 	MaxNesting int
+	// Maintainability (B-2): Halstead volume of the body and this
+	// function's MI. Body is retained for the census walk only.
+	Body   *sitter.Node `json:"-"`
+	Volume int
+	MI     float64
 }
 
 // FileStats is the result of measuring one file.
@@ -32,6 +37,9 @@ type FileStats struct {
 	Lines     int
 	Functions []FuncStats
 	Classes   []ClassStats // Java only (CK family); empty for Go
+	MI        float64      // worst function MI, 0 when no functions (see mi.go)
+	MIScope   string       // the function that scored the MI
+	MILine    int          // its declaration line
 }
 
 // Metric identifiers produced by this package.
@@ -72,6 +80,12 @@ var DefaultThresholds = map[string]struct {
 	MetricLCOM: {20, 40},
 	MetricCBO:  {15, 25},
 	MetricDIT:  {5, 8},
+
+	// Maintainability debt = 100 - MI (function-level; see mi.go).
+	// Report-only by default: MI is a design smell for the metrics table
+	// and the trend store, not a gate verdict (design round 3, FP clause).
+	// A policy may set warn/error to gate it.
+	MetricMaintainability: {0, 0},
 }
 
 // langProfile declares the grammar-specific node kinds the metric walks
@@ -180,6 +194,32 @@ func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.Languag
 		}
 	}
 	walk(tree.RootNode())
+
+	// Function-level Maintainability Index (design doc B-2, as corrected
+	// by its own dogfood check: at file scale the ln(LOC) term dominates
+	// and the classic 65/85 bands are unreachable, so MI is computed per
+	// function — the Visual Studio code-metrics scope — and the file
+	// reports its worst function). Functions absent -> 0 (not measured).
+	fs.MI = 0
+	worst := 100.0
+	for i := range fs.Functions {
+		fn := &fs.Functions[i]
+		if fn.Body == nil {
+			continue
+		}
+		hal := CountHalstead(src, fn.Body)
+		fn.Volume = int(hal.Volume() + 0.5)
+		fn.MI = MaintainabilityIndex(fn.Volume, fn.Cyclomatic, fn.Length)
+		if fn.MI < worst {
+			worst = fn.MI
+			fs.MI = fn.MI
+			fs.MIScope = fn.Name
+			fs.MILine = fn.StartLine
+		}
+	}
+	if len(fs.Functions) == 0 {
+		fs.MI = 0
+	}
 	return fs
 }
 
@@ -195,6 +235,7 @@ func measureFunc(lang parser.LanguageID, prof langProfile, src []byte, fn *sitte
 		st.Params = countParams(lang, params)
 	}
 	if body := fn.ChildByFieldName("body"); body != nil {
+		st.Body = body
 		st.Cyclomatic = cyclomatic(prof, body, src)
 		st.Cognitive, st.MaxNesting = cognitive(prof, body, src)
 	}
