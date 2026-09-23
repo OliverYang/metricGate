@@ -167,7 +167,11 @@ func langConstraints(cfg *config.Config, lang parser.LanguageID) []string {
 			lines = append(lines, l)
 		}
 	}
-	for _, id := range metricIDs {
+	ids := metricIDs
+	if lang == parser.LangJava {
+		ids = javaMetricIDs
+	}
+	for _, id := range ids {
 		if l := limitLine(cfg, lang, id); l != "" {
 			lines = append(lines, l)
 		}
@@ -218,6 +222,12 @@ var metricIDs = []string{
 	metrics.MetricNesting,
 	metrics.MetricParams,
 }
+
+// javaMetricIDs extends metricIDs with the CK class metrics, which only
+// exist for Java.
+var javaMetricIDs = append(append([]string{}, metricIDs...),
+	metrics.MetricWMC, metrics.MetricNOM, metrics.MetricLCOM,
+	metrics.MetricCBO, metrics.MetricDIT)
 
 const tail = "\n… (truncated — raise -max-chars or narrow the path)"
 

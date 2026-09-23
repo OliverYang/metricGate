@@ -258,43 +258,78 @@ func (e *Engine) metricResults(lang parser.LanguageID, stats *metrics.FileStats)
 			})
 		}
 	}
+	for _, c := range stats.Classes {
+		for metric, value := range map[string]int{
+			metrics.MetricWMC:  c.WMC,
+			metrics.MetricNOM:  c.NOM,
+			metrics.MetricLCOM: c.LCOM,
+			metrics.MetricCBO:  c.CBO,
+			metrics.MetricDIT:  c.DIT,
+		} {
+			if !e.metricEnabled(lang, metric) {
+				continue
+			}
+			w, er := e.thresholds(lang, metric)
+			out = append(out, model.MetricResult{
+				Metric: metric, File: stats.File, Scope: c.Name,
+				Value: value, Warn: w, Err: er,
+			})
+		}
+	}
 	return out
 }
 
-// metricFindings turns threshold crossings into findings. A value crosses a
-// threshold when strictly greater than it.
+// metricVerdict resolves the severity a measured value earns for a metric
+// and the threshold that fired; ok is false when nothing is crossed. A
+// value crosses a threshold when strictly greater than it.
+func (e *Engine) metricVerdict(lang parser.LanguageID, metric string, value int) (sev model.Severity, threshold int, ok bool) {
+	warn, errAt := e.thresholds(lang, metric)
+	if warn == 0 && errAt == 0 {
+		return "", 0, false
+	}
+	switch {
+	case errAt > 0 && value > errAt:
+		return model.SevError, errAt, true
+	case warn > 0 && value > warn:
+		return model.SevWarning, warn, true
+	default:
+		return "", 0, false
+	}
+}
+
+// scopeRange returns the reported range of a named function or class; a
+// file-scoped metric (empty scope) reports line 1.
+func scopeRange(stats *metrics.FileStats, scope string) (line, end int) {
+	line, end = 1, 1
+	if scope == "" {
+		return line, end
+	}
+	for _, fn := range stats.Functions {
+		if fn.Name == scope {
+			return fn.StartLine, fn.EndLine
+		}
+	}
+	for _, c := range stats.Classes {
+		if c.Name == scope {
+			return c.StartLine, c.EndLine
+		}
+	}
+	return line, end
+}
+
+// metricFindings turns threshold crossings into findings, anchored on the
+// measured scope (function, class, or the file).
 func (e *Engine) metricFindings(lang parser.LanguageID, stats *metrics.FileStats) []model.Finding {
 	var findings []model.Finding
 	add := func(metric, scope string, value int) {
 		if !e.metricEnabled(lang, metric) {
 			return
 		}
-		warn, errAt := e.thresholds(lang, metric)
-		if warn == 0 && errAt == 0 {
+		sev, threshold, crossed := e.metricVerdict(lang, metric, value)
+		if !crossed {
 			return
 		}
-		var sev model.Severity
-		switch {
-		case errAt > 0 && value > errAt:
-			sev = model.SevError
-		case warn > 0 && value > warn:
-			sev = model.SevWarning
-		default:
-			return
-		}
-		threshold := warn
-		if sev == model.SevError {
-			threshold = errAt
-		}
-		line, end := 1, 1
-		if scope != "" {
-			for _, fn := range stats.Functions {
-				if fn.Name == scope {
-					line, end = fn.StartLine, fn.EndLine
-					break
-				}
-			}
-		}
+		line, end := scopeRange(stats, scope)
 		scopeLabel := scope
 		if scopeLabel == "" {
 			scopeLabel = stats.File
@@ -313,6 +348,13 @@ func (e *Engine) metricFindings(lang parser.LanguageID, stats *metrics.FileStats
 		add(metrics.MetricFuncLength, fn.Name, fn.Length)
 		add(metrics.MetricNesting, fn.Name, fn.MaxNesting)
 		add(metrics.MetricParams, fn.Name, fn.Params)
+	}
+	for _, c := range stats.Classes {
+		add(metrics.MetricWMC, c.Name, c.WMC)
+		add(metrics.MetricNOM, c.Name, c.NOM)
+		add(metrics.MetricLCOM, c.Name, c.LCOM)
+		add(metrics.MetricCBO, c.Name, c.CBO)
+		add(metrics.MetricDIT, c.Name, c.DIT)
 	}
 	return findings
 }

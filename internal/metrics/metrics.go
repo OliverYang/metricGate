@@ -31,6 +31,7 @@ type FileStats struct {
 	File      string
 	Lines     int
 	Functions []FuncStats
+	Classes   []ClassStats // Java only (CK family); empty for Go
 }
 
 // Metric identifiers produced by this package.
@@ -41,6 +42,13 @@ const (
 	MetricFileLength = "file-length"
 	MetricNesting    = "nesting-depth"
 	MetricParams     = "params-count"
+
+	// Class-level (CK family, Java only).
+	MetricWMC  = "wmc"
+	MetricNOM  = "nom"
+	MetricLCOM = "lcom"
+	MetricCBO  = "cbo"
+	MetricDIT  = "dit"
 )
 
 // DefaultThresholds is the built-in warn/error pair per metric — the single
@@ -56,6 +64,14 @@ var DefaultThresholds = map[string]struct {
 	MetricFileLength: {400, 800},
 	MetricNesting:    {4, 6},
 	MetricParams:     {5, 8},
+
+	// CK family, Java only. LCOM is advisory by default (the original CK
+	// definition flags real designs often); WMC/NOM/CBO/DIT warn high.
+	MetricWMC:  {40, 60},
+	MetricNOM:  {20, 30},
+	MetricLCOM: {20, 40},
+	MetricCBO:  {15, 25},
+	MetricDIT:  {5, 8},
 }
 
 // langProfile declares the grammar-specific node kinds the metric walks
@@ -148,6 +164,8 @@ func hasToken(src []byte, n *sitter.Node, tok string) bool {
 func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID) *FileStats {
 	prof := profileFor(lang)
 	fs := &FileStats{File: file, Lines: bytes.Count(src, []byte{'\n'}) + 1}
+
+	measureClasses(lang, src, tree.RootNode(), fs, prof)
 
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {

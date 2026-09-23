@@ -153,6 +153,12 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
+      # CK class metrics (per class/interface):
+      wmc:                   { warn: 40, error: 60 }
+      nom:                   { warn: 20, error: 30 }
+      lcom:                  { warn: 20, error: 40 }
+      cbo:                   { warn: 15, error: 25 }
+      dit:                   { warn: 5,  error: 8 }
     banned-api:
       - match: System.out.print*
         reason: direct System.out.print* writes to the console; use the project logger

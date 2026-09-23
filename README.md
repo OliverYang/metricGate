@@ -290,7 +290,7 @@ published specs where possible; deviations are documented inline.
 | Ver | Scope |
 |-----|-------|
 | v0  | Checker core + CLI + SARIF + gate + SQLite schema (this release) |
-| v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · duplicate-code gate ✅ · next: class metrics, symbol index, Python/TS packs |
+| v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · duplicate-code gate ✅ · CK class metrics (Java) ✅ · next: symbol index, Python/TS packs |
 | v2  | HTTP/gRPC service (SDK), LLM adapter interface + context generator |
 | v3  | Skeleton generator (IR + render backends), end-to-end LLM repair loop demo |
 

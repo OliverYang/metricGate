@@ -200,3 +200,35 @@ SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
     取决于归一化粒度；当前粒度在无实测误报前提下偏保守（`+`/`-` 保留精确）。
   - 窗口检测（winnowing）与"新增代码与既有代码部分重复"（<100% 相同）留给
     下一轮，需要先积累 diff-only 模式下的真实误报数据再调粒度。
+
+---
+
+## 落地记录（Phase A-4：Java CK 类度量）
+
+**已落地**（提交 `metrics: CK class metrics for Java (Phase A-4)`）：
+
+- 新文件 `internal/metrics/classes.go`（core 层，纯测量，policy-free）：
+  - `ClassStats{Name,Kind,StartLine,EndLine,WMC,NOM,NOF,LCOM,CBO,DIT}`，挂在
+    `FileStats.Classes` 上，`AnalyzeFile` 一次解析顺带产出（Go 为空）。
+  - **WMC**：类/接口全部方法+构造器圈复杂度求和；无 body（abstract/interface
+    方法）记最小值 1——承诺的分发也要计入。
+  - **NOM**：直接声明的方法+构造器数；嵌套类型归属自身。
+  - **LCOM**：原始 CK 定义 max(0, P−Q)，字段使用按名字匹配；局部变量遮蔽
+    只会抬高共享度 → LCOM 偏低（保守方向）。
+  - **CBO**：类引用的非自身、非基本类型的不同类型名数量（JDK 类型计入——
+    对平台的耦合也是耦合）；嵌套类型是边界。
+  - **DIT**：同文件继承链深度；跨文件父类记 1 层（跨文件解析属于未来的
+    符号索引）；`implements` 不加深，`interface extends` 加深；环有防御。
+- 默认阈值（`metrics.DefaultThresholds`）：WMC 40/60、NOM 20/30、
+  LCOM 20/40（advisory 语义，先观察再收紧）、CBO 15/25、DIT 5/8。
+- 引擎：类级快照与 findings 完全走既有 metric 管线；finding 锚定类声明行；
+  顺带把 `metricFindings` 重构为 `metricVerdict`+`scopeRange`（本轮自吃狗粮
+  报出该函数 cognitive 31 > error 25，真实重构而非豁免）。
+- context/MCP：Java 的 limits 区多渲染 5 条 CK 限额（Go 不渲染）。
+- 测试：`internal/metrics/classes_test.go`（Alpha 精确值断言、split-brain
+  LCOM、平凡类为 0、DIT 链/跨文件/接口语义、Go 空输出）+ 引擎端到端
+  （fixture `testdata/ck/SplitBrain`，快照存在 + lcom warning 锚定第 5 行）。
+- 自吃狗粮结果：`metricgate check .` 0 errors / 20 warnings，比 A-3 基线
+  23 还低 3（重构顺带消掉旧债），gate PASSED。
+- 已知边界（诚实记录）：全部 name-based（无类型解析）；LCOM 对 setter/getter
+  泛滥型代码会偏高，属于真实设计问题而非误报；跨文件 DIT 低估不高估。

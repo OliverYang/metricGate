@@ -64,3 +64,50 @@ Node kinds come from the tree-sitter-java grammar:
 - function units are methods and constructors; lambdas are not counted as
   separate functions
 - `a, b` style multi-name parameters count per name; varargs count as 1
+
+## wmc (Weighted Methods per Class) — Java
+
+Sum of the cyclomatic complexity of every method and constructor declared by
+the class or interface. A bodyless (abstract, or interface) method contributes
+the minimum of 1: the class still pays for the dispatch it promises. Defaults:
+warn >40, error >60.
+
+## nom (Number of Methods) — Java
+
+Methods plus constructors declared directly by the class (nested types belong
+to themselves). Defaults: warn >20, error >30.
+
+## lcom (Lack of Cohesion of Methods) — Java
+
+The original Chidamber–Kemerer definition: over all method pairs, P is the
+number of pairs sharing **no** field and Q the pairs sharing at least one;
+the metric is max(0, P−Q). Field usage is name-based — a local shadowing a
+field name counts as a share, which can only bias the number **down** (more
+cohesive), the conservative direction. Classes with fewer than two methods or
+no fields measure 0. Defaults: warn >20, error >40 (advisory: the strict CK
+definition flags real designs often — tune before raising the gate).
+
+## cbo (Coupling Between Objects) — Java
+
+Distinct type names referenced by the class other than itself and the Java
+primitives (`int`, `boolean`, …). Name-based: JDK types count too (coupling
+to the platform is still coupling). Nested types are boundaries — their
+references are theirs, not the outer class's. Defaults: warn >15, error >25.
+
+## dit (Depth of Inheritance Tree) — Java
+
+Depth of the inheritance chain: a superclass declared in the same file
+contributes its own depth + 1; a superclass declared elsewhere counts as one
+level (cross-file resolution belongs to the symbol index, not the per-file
+pass). Implementing an interface never adds depth; an interface extending one
+does. Cycles terminate defensively. Defaults: warn >5, error >8.
+
+### Deviations from strict CK (all deliberate, all conservative)
+
+- Everything is name-based: no type resolution, no symbol tables.
+- `this.field` and bare `field` are equal field shares; shadowing can only
+  *lower* reported LCOM.
+- CBO includes the JDK by design — a name-based pass cannot tell a project
+  class from a platform one, and coupling to the platform is still coupling.
+- DIT outside the file under-counts (1 instead of the true depth), never
+  over-counts.
