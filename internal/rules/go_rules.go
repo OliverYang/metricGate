@@ -109,31 +109,4 @@ func panicCall() *Rule {
 }
 
 // todoComment reports TODO/FIXME comments (disabled by default).
-func todoComment() *Rule {
-	return &Rule{
-		ID:              "todo-comment",
-		Title:           "TODO/FIXME comment left in code",
-		DefaultSeverity: model.SevInfo,
-		DefaultEnabled:  false,
-		Query: `
-(comment) @c
-`,
-		OnMatch: func(ctx *MatchCtx) *model.Finding {
-			c := ctx.Text(ctx.Captures["c"])
-			what := ""
-			switch {
-			case strings.Contains(c, "FIXME"):
-				what = "FIXME"
-			case strings.Contains(c, "TODO"):
-				what = "TODO"
-			default:
-				return nil
-			}
-			return &model.Finding{
-				StartLine: int(ctx.Captures["c"].StartPosition().Row) + 1,
-				EndLine:   int(ctx.Captures["c"].EndPosition().Row) + 1,
-				Message:   what + " comment found; track it in an issue",
-			}
-		},
-	}
-}
+func todoComment() *Rule { return todoCommentRule("(comment) @c") }

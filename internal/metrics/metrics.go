@@ -1,7 +1,7 @@
 // Package metrics computes structural metrics directly from the tree-sitter
 // AST. It is policy-free: it only measures. Threshold enforcement lives in
-// the engine. See docs/metrics.md for the exact definitions and their
-// (documented) deviations from SonarSource's published specs.
+// the engine. See docs/metrics.md for the exact definitions per language and
+// their (documented) deviations from SonarSource's published specs.
 package metrics
 
 import (
@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
+
+	"metricgate/internal/parser"
 )
 
 // FuncStats carries every per-function measurement in one pass.
@@ -41,6 +43,53 @@ const (
 	MetricParams     = "params-count"
 )
 
+// langProfile declares the grammar-specific node kinds the metric walks
+// care about. This is the single place where node names live.
+type langProfile struct {
+	funcKinds   map[string]bool // function-like units
+	branchKinds map[string]bool // cyclomatic +1; cognitive +1+nesting; nesting++
+	switchKinds map[string]bool // cognitive +1+nesting (cyclomatic counts cases instead)
+	caseKinds   map[string]bool // cyclomatic +1 (Java: `default` labels excluded)
+	flatCog     map[string]bool // cognitive +1 flat (Java catch)
+	lambdaKinds map[string]bool // nesting++ only (Go func literals, Java lambdas)
+	ternaryKind string          // cyclomatic +1, or "" when the language has none
+}
+
+func kindSet(kindList ...string) map[string]bool {
+	m := make(map[string]bool, len(kindList))
+	for _, k := range kindList {
+		m[k] = true
+	}
+	return m
+}
+
+var profiles = map[parser.LanguageID]langProfile{
+	parser.LangGo: {
+		funcKinds:   kindSet("function_declaration", "method_declaration"),
+		branchKinds: kindSet("if_statement", "for_statement"),
+		switchKinds: kindSet("expression_switch_statement", "type_switch_statement", "select_statement"),
+		caseKinds:   kindSet("expression_case", "type_case", "communication_case"),
+		flatCog:     kindSet(),
+		lambdaKinds: kindSet("func_literal"),
+	},
+	parser.LangJava: {
+		funcKinds:   kindSet("method_declaration", "constructor_declaration"),
+		branchKinds: kindSet("if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement"),
+		switchKinds: kindSet("switch_expression"),
+		caseKinds:   kindSet("switch_label"),
+		flatCog:     kindSet("catch_clause"),
+		ternaryKind: "ternary_expression",
+		lambdaKinds: kindSet("lambda_expression"),
+	},
+}
+
+func profileFor(lang parser.LanguageID) langProfile {
+	if p, ok := profiles[lang]; ok {
+		return p
+	}
+	return profiles[parser.LangGo]
+}
+
 // text returns the source slice covered by a node.
 func text(src []byte, n *sitter.Node) string {
 	if n == nil {
@@ -49,30 +98,60 @@ func text(src []byte, n *sitter.Node) string {
 	return string(src[n.StartByte():n.EndByte()])
 }
 
-// AnalyzeFile measures one parsed file.
-func AnalyzeFile(file string, src []byte, tree *sitter.Tree) *FileStats {
+// logicOp returns "&&"/"||" for logical binary expressions, "" otherwise.
+// Go names the operator field; Java emits the operator as an anonymous child.
+func logicOp(src []byte, n *sitter.Node) string {
+	if op := n.ChildByFieldName("operator"); op != nil {
+		if t := text(src, op); t == "&&" || t == "||" {
+			return t
+		}
+	}
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if !c.IsNamed() {
+			if t := text(src, c); t == "&&" || t == "||" {
+				return t
+			}
+		}
+	}
+	return ""
+}
+
+// hasToken reports whether one of the node's anonymous children is exactly
+// the given token (e.g. the `default` keyword inside a Java switch label).
+func hasToken(src []byte, n *sitter.Node, tok string) bool {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if !c.IsNamed() && text(src, c) == tok {
+			return true
+		}
+	}
+	return false
+}
+
+// AnalyzeFile measures one parsed file of the given language.
+func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID) *FileStats {
+	prof := profileFor(lang)
 	fs := &FileStats{File: file, Lines: bytes.Count(src, []byte{'\n'}) + 1}
-	root := tree.RootNode()
 
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {
 		if n == nil {
 			return
 		}
-		switch n.Kind() {
-		case "function_declaration", "method_declaration":
-			fs.Functions = append(fs.Functions, measureFunc(src, n))
+		if prof.funcKinds[n.Kind()] {
+			fs.Functions = append(fs.Functions, measureFunc(lang, prof, src, n))
 		}
 		for i := uint(0); i < n.ChildCount(); i++ {
 			walk(n.Child(i))
 		}
 	}
-	walk(root)
+	walk(tree.RootNode())
 	return fs
 }
 
 // measureFunc computes all function-level metrics for one declaration.
-func measureFunc(src []byte, fn *sitter.Node) FuncStats {
+func measureFunc(lang parser.LanguageID, prof langProfile, src []byte, fn *sitter.Node) FuncStats {
 	st := FuncStats{
 		Name:      funcName(src, fn),
 		StartLine: int(fn.StartPosition().Row) + 1,
@@ -80,76 +159,90 @@ func measureFunc(src []byte, fn *sitter.Node) FuncStats {
 	}
 	st.Length = st.EndLine - st.StartLine + 1
 	if params := fn.ChildByFieldName("parameters"); params != nil {
-		st.Params = countParams(params)
+		st.Params = countParams(lang, params)
 	}
 	if body := fn.ChildByFieldName("body"); body != nil {
-		st.Cyclomatic = cyclomatic(body, src)
-		st.Cognitive, st.MaxNesting = cognitive(body, src)
+		st.Cyclomatic = cyclomatic(prof, body, src)
+		st.Cognitive, st.MaxNesting = cognitive(prof, body, src)
 	}
 	return st
 }
 
-// countParams counts declared parameters: "a, b int" is two parameters, an
-// unnamed "(int)" is one, and a variadic declaration is one.
-func countParams(list *sitter.Node) int {
+func funcName(src []byte, fn *sitter.Node) string {
+	name := text(src, fn.ChildByFieldName("name"))
+	if name == "" {
+		return "<anonymous>"
+	}
+	// Go methods: receiver "(t *T)" → "T.Name".
+	if recv := fn.ChildByFieldName("receiver"); recv != nil {
+		r := strings.TrimSpace(text(src, recv))
+		r = strings.TrimPrefix(r, "(")
+		r = strings.TrimSuffix(r, ")")
+		if fields := strings.Fields(r); len(fields) > 0 {
+			r = fields[len(fields)-1]
+		}
+		r = strings.TrimPrefix(r, "*")
+		if r != "" {
+			return fmt.Sprintf("%s.%s", r, name)
+		}
+	}
+	return name
+}
+
+// countParams counts declared parameters.
+// Go: "a, b int" is two parameters, an unnamed "(int)" is one, a variadic
+// declaration is one. Java: every formal_parameter / spread_parameter is one.
+func countParams(lang parser.LanguageID, list *sitter.Node) int {
+	if lang == parser.LangJava {
+		n := 0
+		for i := uint(0); i < list.NamedChildCount(); i++ {
+			switch list.NamedChild(i).Kind() {
+			case "formal_parameter", "spread_parameter":
+				n++
+			}
+		}
+		return n
+	}
 	n := 0
 	for i := uint(0); i < list.NamedChildCount(); i++ {
 		decl := list.NamedChild(i)
-		switch decl.Kind() {
-		case "parameter_declaration":
-			ids := 0
-			for j := uint(0); j < decl.NamedChildCount(); j++ {
-				if decl.NamedChild(j).Kind() == "identifier" {
-					ids++
-				}
-			}
-			if ids == 0 {
-				n++ // unnamed parameter: (int)
-			} else {
-				n += ids
-			}
-		default:
+		if decl.Kind() != "parameter_declaration" {
 			n++ // variadic_parameter_declaration and friends
+			continue
+		}
+		ids := 0
+		for j := uint(0); j < decl.NamedChildCount(); j++ {
+			if decl.NamedChild(j).Kind() == "identifier" {
+				ids++
+			}
+		}
+		if ids == 0 {
+			n++ // unnamed parameter: (int)
+		} else {
+			n += ids
 		}
 	}
 	return n
 }
 
-func funcName(src []byte, fn *sitter.Node) string {
-	name := text(src, fn.ChildByFieldName("name"))
-	if recv := fn.ChildByFieldName("receiver"); recv != nil && name != "" {
-		// Render methods as "(*T).Name" style shorthand.
-		r := strings.TrimSpace(text(src, recv))
-		r = strings.TrimPrefix(r, "(")
-		r = strings.TrimSuffix(r, ")")
-		// "(t *T)" — keep the type token and drop the pointer star.
-		if fields := strings.Fields(r); len(fields) > 0 {
-			r = fields[len(fields)-1]
-		}
-		r = strings.TrimPrefix(r, "*")
-		return fmt.Sprintf("%s.%s", r, name)
-	}
-	if name == "" {
-		return "<anonymous>"
-	}
-	return name
-}
-
-// cyclomatic counts decision points per the definition in docs/metrics.md:
-// 1 + every if/for, every case (including select communication cases) and
-// every && / || operator.
-func cyclomatic(body *sitter.Node, src []byte) int {
+// cyclomatic: 1 + decision points. Per language the decision points are the
+// branch kinds, the case entries (Java `default` opens no new path), the
+// ternary operator (Java) and the && / || operators. See docs/metrics.md.
+func cyclomatic(prof langProfile, body *sitter.Node, src []byte) int {
 	cc := 1
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {
 		if n == nil {
 			return
 		}
-		switch n.Kind() {
-		case "if_statement", "for_statement", "expression_case", "type_case", "communication_case":
+		kind := n.Kind()
+		switch {
+		case prof.caseKinds[kind] && hasToken(src, n, "default"):
+			// `default:` opens no new path.
+		case prof.branchKinds[kind], prof.caseKinds[kind], prof.ternaryKind == kind:
 			cc++
-		case "binary_expression":
-			if op := text(src, n.ChildByFieldName("operator")); op == "&&" || op == "||" {
+		case kind == "binary_expression":
+			if logicOp(src, n) != "" {
 				cc++
 			}
 		}
@@ -161,28 +254,30 @@ func cyclomatic(body *sitter.Node, src []byte) int {
 	return cc
 }
 
-// cognitive computes a cognitive complexity and the deepest nesting reached,
+// cognitive computes cognitive complexity and the deepest nesting reached,
 // in one walk. nesting is 0 at the function body top level.
-func cognitive(body *sitter.Node, src []byte) (cog, maxNest int) {
+func cognitive(prof langProfile, body *sitter.Node, src []byte) (cog, maxNest int) {
 	var walk func(n *sitter.Node, nesting int)
 	walk = func(n *sitter.Node, nesting int) {
 		if n == nil {
 			return
 		}
 		inner := nesting
-		switch n.Kind() {
-		case "if_statement", "for_statement", "expression_switch_statement", "type_switch_statement", "select_statement":
+		kind := n.Kind()
+		switch {
+		case prof.branchKinds[kind], prof.switchKinds[kind]:
 			cog += 1 + nesting
 			inner = nesting + 1
-		case "func_literal":
-			// Nested functions add a nesting level but no flat bonus (see
-			// docs/metrics.md for the deviation note).
+		case prof.flatCog[kind]:
+			// catch: +1 flat, no nesting change.
+			cog++
+		case prof.lambdaKinds[kind]:
+			// Nested functions add a nesting level but no flat bonus.
 			inner = nesting + 1
-		case "binary_expression":
-			if op := text(src, n.ChildByFieldName("operator")); op == "&&" || op == "||" {
+		case kind == "binary_expression":
+			if op := logicOp(src, n); op != "" {
 				parent := n.Parent()
-				if parent == nil || parent.Kind() != "binary_expression" ||
-					text(src, parent.ChildByFieldName("operator")) != op {
+				if parent == nil || parent.Kind() != "binary_expression" || logicOp(src, parent) != op {
 					// Start of a run of the same logical operator.
 					cog++
 				}

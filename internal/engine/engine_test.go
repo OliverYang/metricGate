@@ -18,14 +18,28 @@ func testConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-func ruleCounts(s *model.RunSummary) map[string]int {
-	counts := map[string]int{}
+func countsByLang(s *model.RunSummary) (goCounts, javaCounts map[string]int) {
+	goCounts, javaCounts = map[string]int{}, map[string]int{}
 	for _, f := range s.Findings {
-		if f.Source == model.SrcRule {
-			counts[f.RuleID]++
+		if f.Source != model.SrcRule {
+			continue
+		}
+		if strings.HasSuffix(f.File, ".go") {
+			goCounts[f.RuleID]++
+		} else {
+			javaCounts[f.RuleID]++
 		}
 	}
-	return counts
+	return goCounts, javaCounts
+}
+
+func checkCounts(t *testing.T, want, got map[string]int, label string) {
+	t.Helper()
+	for id, n := range want {
+		if got[id] != n {
+			t.Errorf("%s %s = %d, want %d (all: %v)", label, id, got[id], n, got)
+		}
+	}
 }
 
 func TestRunOnTestdata(t *testing.T) {
@@ -39,37 +53,36 @@ func TestRunOnTestdata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Files != 1 {
-		t.Fatalf("files = %d, want 1", s.Files)
+	if s.Files != 2 {
+		t.Fatalf("files = %d, want 2", s.Files)
 	}
 	if n := len(s.ParseErrors); n != 0 {
 		t.Fatalf("unexpected parse errors: %v", s.ParseErrors)
-	}
-
-	counts := ruleCounts(s)
-	want := map[string]int{
-		"no-fmt-print": 1,
-		"empty-block":  2,
-		"panic-call":   1,
-	}
-	for id, n := range want {
-		if counts[id] != n {
-			t.Errorf("%s = %d, want %d (all: %v)", id, counts[id], n, counts)
-		}
 	}
 	if s.Count(model.SevError) != 0 {
 		t.Errorf("errors = %d, want 0", s.Count(model.SevError))
 	}
 
-	// params-count: Many takes 7 params, warn threshold is 5.
+	goCounts, javaCounts := countsByLang(s)
+	checkCounts(t, map[string]int{
+		"no-fmt-print": 1,
+		"empty-block":  2,
+		"panic-call":   1,
+	}, goCounts, "go")
+	checkCounts(t, map[string]int{
+		"system-out-print":  1,
+		"print-stack-trace": 1,
+		"empty-block":       2,
+	}, javaCounts, "java")
+
 	var paramsFinding bool
 	for _, f := range s.Findings {
-		if f.RuleID == "params-count" && strings.Contains(f.Message, "Many") {
+		if f.RuleID == "params-count" && strings.Contains(f.Message, "many") {
 			paramsFinding = true
 		}
 	}
 	if !paramsFinding {
-		t.Error("expected params-count finding for Many")
+		t.Error("expected params-count finding for Sample.many")
 	}
 }
 
@@ -77,6 +90,11 @@ func TestTodoRuleToggle(t *testing.T) {
 	cfg := testConfig(t)
 	enabled := true
 	cfg.Languages["go"] = config.LanguageConfig{
+		Rules: map[string]config.RuleConfig{
+			"todo-comment": {Enabled: &enabled},
+		},
+	}
+	cfg.Languages["java"] = config.LanguageConfig{
 		Rules: map[string]config.RuleConfig{
 			"todo-comment": {Enabled: &enabled},
 		},
@@ -91,8 +109,11 @@ func TestTodoRuleToggle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	counts := ruleCounts(s)
-	if counts["todo-comment"] != 1 {
-		t.Errorf("todo-comment = %d, want 1 (all: %v)", counts["todo-comment"], counts)
+	goCounts, javaCounts := countsByLang(s)
+	if goCounts["todo-comment"] != 1 {
+		t.Errorf("go todo-comment = %d, want 1", goCounts["todo-comment"])
+	}
+	if javaCounts["todo-comment"] != 1 {
+		t.Errorf("java todo-comment = %d, want 1", javaCounts["todo-comment"])
 	}
 }

@@ -5,9 +5,12 @@
 package rules
 
 import (
+	"strings"
+
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/model"
+	"metricgate/internal/parser"
 )
 
 // MatchCtx is handed to a rule's OnMatch callback for every query match.
@@ -195,11 +198,51 @@ type Meta struct {
 	Title string
 }
 
-// GoMetas returns metadata for the Go rule set.
-func GoMetas(all []*Rule) []Meta {
+// Metas returns rule metadata for a rule set.
+func Metas(all []*Rule) []Meta {
 	metas := make([]Meta, 0, len(all))
 	for _, r := range all {
 		metas = append(metas, Meta{ID: r.ID, Title: r.Title})
 	}
 	return metas
+}
+
+// ForLanguage returns the rule pack registered for a language.
+func ForLanguage(id parser.LanguageID) []*Rule {
+	switch id {
+	case parser.LangGo:
+		return GoRules()
+	case parser.LangJava:
+		return JavaRules()
+	default:
+		return nil
+	}
+}
+
+// todoCommentRule builds the TODO/FIXME rule for a language's comment nodes.
+func todoCommentRule(commentQuery string) *Rule {
+	return &Rule{
+		ID:              "todo-comment",
+		Title:           "TODO/FIXME comment left in code",
+		DefaultSeverity: model.SevInfo,
+		DefaultEnabled:  false,
+		Query:           commentQuery,
+		OnMatch: func(ctx *MatchCtx) *model.Finding {
+			c := ctx.Text(ctx.Captures["c"])
+			what := ""
+			switch {
+			case strings.Contains(c, "FIXME"):
+				what = "FIXME"
+			case strings.Contains(c, "TODO"):
+				what = "TODO"
+			default:
+				return nil
+			}
+			return &model.Finding{
+				StartLine: int(ctx.Captures["c"].StartPosition().Row) + 1,
+				EndLine:   int(ctx.Captures["c"].EndPosition().Row) + 1,
+				Message:   what + " comment found; track it in an issue",
+			}
+		},
+	}
 }

@@ -16,11 +16,12 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
 
 ## Status: v0.1.0 (MVP)
 
-- Go language support (tree-sitter grammar, incremental-friendly)
+- Go + Java language support (tree-sitter grammars, incremental-friendly)
 - 6 metrics: cyclomatic complexity, cognitive complexity, function length,
   file length, nesting depth, parameter count
-- 4 pattern rules (tree-sitter query + Go filter): `no-fmt-print`,
-  `empty-block`, `panic-call`, `todo-comment`
+- 8 pattern rules (tree-sitter query + Go filter) —
+  Go: `no-fmt-print`, `empty-block`, `panic-call`, `todo-comment`;
+  Java: `system-out-print`, `print-stack-trace`, `empty-block`, `todo-comment`
 - Policy file (`policy.yaml`) = the project's constraint model
 - SARIF 2.1.0 output (GitHub code scanning compatible)
 - Local SQLite trend store (write-only in v0)

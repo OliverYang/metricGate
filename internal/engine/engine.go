@@ -21,13 +21,13 @@ import (
 	"metricgate/internal/rules"
 )
 
-// metricDefault is the built-in threshold pair for one metric.
+// metricDefault is the built-in threshold pair for one metric. The same
+// defaults apply to every language in v0; policies override per language.
 type metricDefault struct {
 	Warn, Error int
 }
 
-// goMetricDefaults mirrors the default policy; policy values override these.
-var goMetricDefaults = map[string]metricDefault{
+var metricDefaults = map[string]metricDefault{
 	metrics.MetricCyclomatic: {Warn: 10, Error: 15},
 	metrics.MetricCognitive:  {Warn: 15, Error: 25},
 	metrics.MetricFuncLength: {Warn: 50, Error: 100},
@@ -36,36 +36,58 @@ var goMetricDefaults = map[string]metricDefault{
 	metrics.MetricParams:     {Warn: 5, Error: 8},
 }
 
-// Engine runs the checker over a directory tree.
+// Engine runs the checker over a directory tree, with one rule runner per
+// registered language.
 type Engine struct {
-	cfg    *config.Config
-	runner *rules.Runner
-	goLang *parser.Parser // only used for its *sitter.Language handle
+	cfg     *config.Config
+	langs   map[parser.LanguageID]*parser.Parser
+	runners map[parser.LanguageID]*rules.Runner
 }
 
 // New builds an engine for the given policy. All rule queries are compiled
 // here so malformed patterns fail before any file is read.
 func New(cfg *config.Config) (*Engine, error) {
-	p, err := parser.New(parser.LangGo)
-	if err != nil {
-		return nil, err
+	e := &Engine{
+		cfg:     cfg,
+		langs:   map[parser.LanguageID]*parser.Parser{},
+		runners: map[parser.LanguageID]*rules.Runner{},
 	}
-	runner, err := rules.NewRunner(string(parser.LangGo), p.Lang, rules.GoRules())
-	if err != nil {
-		p.Close()
-		return nil, fmt.Errorf("compile rules: %w", err)
+	for _, id := range parser.Supported() {
+		p, err := parser.New(id)
+		if err != nil {
+			e.Close()
+			return nil, err
+		}
+		runner, err := rules.NewRunner(string(id), p.Lang, rules.ForLanguage(id))
+		if err != nil {
+			p.Close()
+			e.Close()
+			return nil, fmt.Errorf("compile %s rules: %w", id, err)
+		}
+		e.langs[id] = p
+		e.runners[id] = runner
 	}
-	return &Engine{cfg: cfg, runner: runner, goLang: p}, nil
+	return e, nil
 }
 
 // Close releases engine resources.
 func (e *Engine) Close() {
-	e.runner.Close()
-	e.goLang.Close()
+	for _, r := range e.runners {
+		r.Close()
+	}
+	for _, p := range e.langs {
+		p.Close()
+	}
 }
 
-// Rules returns rule metadata for reports.
-func (e *Engine) Rules() []rules.Meta { return rules.GoMetas(rules.GoRules()) }
+// Rules returns rule metadata for reports across all languages.
+func (e *Engine) Rules() []rules.Meta {
+	var metas []rules.Meta
+	for _, id := range parser.Supported() {
+		metas = append(metas, rules.Metas(rules.ForLanguage(id))...)
+	}
+	return metas
+}
 
 type fileResult struct {
 	findings []model.Finding
@@ -96,13 +118,9 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			pp, err := parser.New(parser.LangGo)
-			if err != nil {
-				return
-			}
-			defer pp.Close()
+			w := &worker{ps: map[parser.LanguageID]*parser.Parser{}}
 			for path := range jobs {
-				results <- e.checkFile(pp, path)
+				results <- e.checkFile(w, path)
 			}
 		}()
 	}
@@ -126,6 +144,24 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 	model.SortMetrics(summary.Metrics)
 	summary.Duration = time.Since(start)
 	return summary, nil
+}
+
+// worker holds the per-goroutine parser pool; tree-sitter parsers are not
+// thread-safe, so each worker lazily creates one per language it meets.
+type worker struct {
+	ps map[parser.LanguageID]*parser.Parser
+}
+
+func (w *worker) parserFor(id parser.LanguageID) (*parser.Parser, error) {
+	if p := w.ps[id]; p != nil {
+		return p, nil
+	}
+	p, err := parser.New(id)
+	if err != nil {
+		return nil, err
+	}
+	w.ps[id] = p
+	return p, nil
 }
 
 // collect walks root and returns files for supported languages, skipping
@@ -161,8 +197,12 @@ func (e *Engine) collect(root string) ([]string, error) {
 // checkFile parses and analyses one file. Parse errors are reported as an
 // info finding instead of failing the run: partial trees still yield useful
 // findings, which matters when checking freshly generated LLM output.
-func (e *Engine) checkFile(pp *parser.Parser, path string) fileResult {
+func (e *Engine) checkFile(w *worker, path string) fileResult {
 	var res fileResult
+	lang, ok := parser.LanguageForFile(filepath.Base(path))
+	if !ok {
+		return res
+	}
 	src, err := os.ReadFile(path)
 	if err != nil {
 		res.findings = append(res.findings, model.Finding{
@@ -173,6 +213,14 @@ func (e *Engine) checkFile(pp *parser.Parser, path string) fileResult {
 		return res
 	}
 
+	pp, err := w.parserFor(lang)
+	if err != nil {
+		res.findings = append(res.findings, model.Finding{
+			RuleID: "parse-error", Severity: model.SevInfo, Source: model.SrcRule,
+			File: path, StartLine: 1, EndLine: 1, Message: err.Error(),
+		})
+		return res
+	}
 	tree, err := pp.Parse(src)
 	if err != nil {
 		res.findings = append(res.findings, model.Finding{
@@ -191,18 +239,18 @@ func (e *Engine) checkFile(pp *parser.Parser, path string) fileResult {
 		})
 	}
 
-	stats := metrics.AnalyzeFile(path, src, tree)
-	res.metrics = e.metricResults(stats)
-	res.findings = append(res.findings, e.metricFindings(stats)...)
-	res.findings = append(res.findings, e.runner.Run(path, src, tree, e.cfg)...)
+	stats := metrics.AnalyzeFile(path, src, tree, lang)
+	res.metrics = e.metricResults(lang, stats)
+	res.findings = append(res.findings, e.metricFindings(lang, stats)...)
+	res.findings = append(res.findings, e.runners[lang].Run(path, src, tree, e.cfg)...)
 	return res
 }
 
 // thresholds resolves the effective warn/error thresholds for a metric.
-func (e *Engine) thresholds(metricID string) (warn, errAt int) {
-	def := goMetricDefaults[metricID]
+func (e *Engine) thresholds(lang parser.LanguageID, metricID string) (warn, errAt int) {
+	def := metricDefaults[metricID]
 	warn, errAt = def.Warn, def.Error
-	w, er, enabled := e.cfg.MetricThresholds(string(parser.LangGo), metricID)
+	w, er, enabled := e.cfg.MetricThresholds(string(lang), metricID)
 	if enabled != nil && !*enabled {
 		return 0, 0
 	}
@@ -216,18 +264,18 @@ func (e *Engine) thresholds(metricID string) (warn, errAt int) {
 }
 
 // metricEnabled reports whether a metric is switched on in policy.
-func (e *Engine) metricEnabled(metricID string) bool {
-	_, _, enabled := e.cfg.MetricThresholds(string(parser.LangGo), metricID)
+func (e *Engine) metricEnabled(lang parser.LanguageID, metricID string) bool {
+	_, _, enabled := e.cfg.MetricThresholds(string(lang), metricID)
 	return enabled == nil || *enabled
 }
 
 // metricResults records every measured value (for trend storage and the
 // metrics command), regardless of whether a threshold was crossed.
-func (e *Engine) metricResults(stats *metrics.FileStats) []model.MetricResult {
-	if !e.metricEnabled(metrics.MetricFileLength) {
+func (e *Engine) metricResults(lang parser.LanguageID, stats *metrics.FileStats) []model.MetricResult {
+	if !e.metricEnabled(lang, metrics.MetricFileLength) {
 		return nil
 	}
-	warn, errAt := e.thresholds(metrics.MetricFileLength)
+	warn, errAt := e.thresholds(lang, metrics.MetricFileLength)
 	out := []model.MetricResult{{
 		Metric: metrics.MetricFileLength, File: stats.File, Scope: "",
 		Value: stats.Lines, Warn: warn, Err: errAt,
@@ -240,10 +288,10 @@ func (e *Engine) metricResults(stats *metrics.FileStats) []model.MetricResult {
 			metrics.MetricNesting:    fn.MaxNesting,
 			metrics.MetricParams:     fn.Params,
 		} {
-			if !e.metricEnabled(metric) {
+			if !e.metricEnabled(lang, metric) {
 				continue
 			}
-			w, er := e.thresholds(metric)
+			w, er := e.thresholds(lang, metric)
 			out = append(out, model.MetricResult{
 				Metric: metric, File: stats.File, Scope: fn.Name,
 				Value: value, Warn: w, Err: er,
@@ -255,28 +303,30 @@ func (e *Engine) metricResults(stats *metrics.FileStats) []model.MetricResult {
 
 // metricFindings turns threshold crossings into findings. A value crosses a
 // threshold when strictly greater than it.
-func (e *Engine) metricFindings(stats *metrics.FileStats) []model.Finding {
+func (e *Engine) metricFindings(lang parser.LanguageID, stats *metrics.FileStats) []model.Finding {
 	var findings []model.Finding
 	add := func(metric, scope string, value int) {
-		if !e.metricEnabled(metric) {
+		if !e.metricEnabled(lang, metric) {
 			return
 		}
-		warn, errAt := e.thresholds(metric)
+		warn, errAt := e.thresholds(lang, metric)
 		if warn == 0 && errAt == 0 {
 			return
 		}
 		var sev model.Severity
-		var which string
 		switch {
 		case errAt > 0 && value > errAt:
-			sev, which = model.SevError, "error"
+			sev = model.SevError
 		case warn > 0 && value > warn:
-			sev, which = model.SevWarning, "warn"
+			sev = model.SevWarning
 		default:
 			return
 		}
-		line := 1
-		end := 1
+		threshold := warn
+		if sev == model.SevError {
+			threshold = errAt
+		}
+		line, end := 1, 1
 		if scope != "" {
 			for _, fn := range stats.Functions {
 				if fn.Name == scope {
@@ -285,11 +335,15 @@ func (e *Engine) metricFindings(stats *metrics.FileStats) []model.Finding {
 				}
 			}
 		}
+		scopeLabel := scope
+		if scopeLabel == "" {
+			scopeLabel = stats.File
+		}
 		findings = append(findings, model.Finding{
 			RuleID: metric, Severity: sev, Source: model.SrcMetric, File: stats.File,
 			StartLine: line, EndLine: end,
 			Message: fmt.Sprintf("%s of %q is %d (threshold %s %d)",
-				metric, scopeName(scope, stats.File), value, which, map[bool]int{true: errAt, false: warn}[sev == model.SevError]),
+				metric, scopeLabel, value, sev, threshold),
 		})
 	}
 	add(metrics.MetricFileLength, "", stats.Lines)
@@ -301,11 +355,4 @@ func (e *Engine) metricFindings(stats *metrics.FileStats) []model.Finding {
 		add(metrics.MetricParams, fn.Name, fn.Params)
 	}
 	return findings
-}
-
-func scopeName(scope, file string) string {
-	if scope == "" {
-		return file
-	}
-	return scope
 }

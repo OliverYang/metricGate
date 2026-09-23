@@ -50,3 +50,17 @@ Total physical lines of the file.
 Declared parameters of the function: `a, b int` counts as **2**; an unnamed
 `(int)` counts as 1; a variadic `rest ...string` counts as 1. The receiver is
 not counted.
+
+## Language notes: Java
+
+Node kinds come from the tree-sitter-java grammar:
+
+- cyclomatic adds a point for `if`, all four loop forms (`for`,
+  `enhanced_for`, `while`, `do`), each `switch` label (`switch_label`,
+  excluding `default:` which opens no new path), the ternary `?:`,
+  every `catch` clause and each `&&` / `||`
+- cognitive: `if` / loops / `switch_expression` follow the `+1+nesting`
+  rule, `catch` adds +1 flat, lambdas add a nesting level
+- function units are methods and constructors; lambdas are not counted as
+  separate functions
+- `a, b` style multi-name parameters count per name; varargs count as 1

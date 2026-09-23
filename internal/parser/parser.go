@@ -7,17 +7,32 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"unsafe"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	tree_sitter_go "github.com/tree-sitter/tree-sitter-go/bindings/go"
+	tree_sitter_java "github.com/tree-sitter/tree-sitter-java/bindings/go"
 )
 
 // LanguageID names a supported language.
 type LanguageID string
 
-// LangGo is the only language in v0; the registry below is where new
-// grammars plug in for v1+.
-const LangGo LanguageID = "go"
+const (
+	LangGo   LanguageID = "go"
+	LangJava LanguageID = "java"
+)
+
+// grammars is the language registry: adding a language is one entry here
+// plus a rule pack and (if needed) a metrics profile.
+var grammars = map[LanguageID]func() unsafe.Pointer{
+	LangGo:   tree_sitter_go.Language,
+	LangJava: tree_sitter_java.Language,
+}
+
+// Supported lists the registered languages in stable order.
+func Supported() []LanguageID {
+	return []LanguageID{LangGo, LangJava}
+}
 
 // Parser parses source files into tree-sitter trees for one language.
 type Parser struct {
@@ -29,18 +44,17 @@ type Parser struct {
 
 // New creates a parser for the given language.
 func New(id LanguageID) (*Parser, error) {
-	switch id {
-	case LangGo:
-		lang := sitter.NewLanguage(tree_sitter_go.Language())
-		p := sitter.NewParser()
-		if err := p.SetLanguage(lang); err != nil {
-			p.Close()
-			return nil, fmt.Errorf("set language %s: %w", id, err)
-		}
-		return &Parser{ID: id, Lang: lang, p: p}, nil
-	default:
+	grammar, ok := grammars[id]
+	if !ok {
 		return nil, fmt.Errorf("unsupported language %q", id)
 	}
+	lang := sitter.NewLanguage(grammar())
+	p := sitter.NewParser()
+	if err := p.SetLanguage(lang); err != nil {
+		p.Close()
+		return nil, fmt.Errorf("set language %s: %w", id, err)
+	}
+	return &Parser{ID: id, Lang: lang, p: p}, nil
 }
 
 // Parse parses source bytes into a tree. The caller must Close the tree
@@ -62,6 +76,8 @@ func LanguageForFile(name string) (LanguageID, bool) {
 	switch filepath.Ext(name) {
 	case ".go":
 		return LangGo, true
+	case ".java":
+		return LangJava, true
 	default:
 		return "", false
 	}

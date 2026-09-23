@@ -94,6 +94,28 @@ languages:
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
 
+  java:
+    rules:
+      system-out-print:
+        severity: warning
+        options:
+          # Files (name suffixes) where direct printing is allowed.
+          allowed_files: []
+      print-stack-trace:
+        severity: warning
+      empty-block:
+        severity: warning
+      todo-comment:
+        enabled: false
+        severity: info
+    metrics:
+      cyclomatic-complexity: { warn: 10, error: 15 }
+      cognitive-complexity:  { warn: 15, error: 25 }
+      function-length:       { warn: 50, error: 100 }
+      file-length:           { warn: 400, error: 800 }
+      nesting-depth:         { warn: 4,  error: 6 }
+      params-count:          { warn: 5,  error: 8 }
+
 store:
   enabled: false
   path: ".metricgate/history.db"
