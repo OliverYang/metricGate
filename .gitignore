@@ -1,0 +1,4 @@
+metricgate
+*.sarif
+.metricgate/
+*.db

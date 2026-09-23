@@ -1,0 +1,205 @@
+// Package rules implements the pattern-rule layer. A rule is a tree-sitter
+// query plus a small Go filter that decides whether a match is a finding.
+// Predicates are deliberately kept out of the .scm patterns and expressed in
+// Go so rules stay easy to test and to port across grammars.
+package rules
+
+import (
+	sitter "github.com/tree-sitter/go-tree-sitter"
+
+	"metricgate/internal/model"
+)
+
+// MatchCtx is handed to a rule's OnMatch callback for every query match.
+type MatchCtx struct {
+	File     string
+	Src      []byte
+	Severity model.Severity
+	Options  map[string]any
+	Captures map[string]*sitter.Node // first node per capture name
+}
+
+// Text returns the source text covered by a node.
+func (c *MatchCtx) Text(n *sitter.Node) string {
+	if n == nil {
+		return ""
+	}
+	return string(c.Src[n.StartByte():n.EndByte()])
+}
+
+// OptBool reads a boolean option, returning def when absent.
+func (c *MatchCtx) OptBool(key string, def bool) bool {
+	v, ok := c.Options[key]
+	if !ok {
+		return def
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return def
+	}
+	return b
+}
+
+// OptStrings reads a string-list option ([]any from YAML).
+func (c *MatchCtx) OptStrings(key string) []string {
+	v, ok := c.Options[key]
+	if !ok {
+		return nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Rule is a declarative pattern rule.
+type Rule struct {
+	ID              string
+	Title           string
+	DefaultSeverity model.Severity
+	DefaultEnabled  bool
+	Query           string
+	OnMatch         func(ctx *MatchCtx) *model.Finding
+}
+
+// Policy resolves per-rule configuration overrides. Implemented by the engine.
+type Policy interface {
+	// RuleSeverity returns "" when the policy does not override the severity.
+	RuleSeverity(lang, ruleID string) string
+	// RuleEnabled returns nil when the policy does not override the flag.
+	RuleEnabled(lang, ruleID string) *bool
+	// RuleOptions returns nil when the policy has no options.
+	RuleOptions(lang, ruleID string) map[string]any
+}
+
+// compiledRule pairs a rule with its pre-compiled query and capture indexes.
+type compiledRule struct {
+	rule   *Rule
+	query  *sitter.Query
+	names  map[string]uint
+	capIdx []string // capture name by index, for building the map fast
+}
+
+// Runner executes the rules of one language over parsed files.
+type Runner struct {
+	lang     string
+	compiled []*compiledRule
+}
+
+// NewRunner compiles all rule queries against a language at startup, so a
+// bad pattern fails fast instead of mid-run.
+func NewRunner(lang string, langPtr *sitter.Language, all []*Rule) (*Runner, error) {
+	r := &Runner{lang: lang}
+	for _, rule := range all {
+		q, err := sitter.NewQuery(langPtr, rule.Query)
+		if err != nil {
+			return nil, err
+		}
+		cr := &compiledRule{rule: rule, query: q, names: map[string]uint{}}
+		for i, name := range q.CaptureNames() {
+			cr.names[name] = uint(i)
+			cr.capIdx = append(cr.capIdx, name)
+		}
+		r.compiled = append(r.compiled, cr)
+	}
+	return r, nil
+}
+
+// Close releases compiled queries.
+func (r *Runner) Close() {
+	for _, cr := range r.compiled {
+		cr.query.Close()
+	}
+}
+
+// Enabled reports whether a rule should run under the given policy.
+func (r *Runner) Enabled(p Policy, id string, def bool) bool {
+	if p == nil {
+		return def
+	}
+	if b := p.RuleEnabled(r.lang, id); b != nil {
+		return *b
+	}
+	return def
+}
+
+// Severity resolves the effective severity for a rule.
+func (r *Runner) Severity(p Policy, id string, def model.Severity) model.Severity {
+	if p == nil {
+		return def
+	}
+	if s := p.RuleSeverity(r.lang, id); s != "" {
+		return model.Severity(s)
+	}
+	return def
+}
+
+// Run applies every enabled rule to one parsed file.
+func (r *Runner) Run(file string, src []byte, tree *sitter.Tree, p Policy) []model.Finding {
+	var findings []model.Finding
+	root := tree.RootNode()
+
+	for _, cr := range r.compiled {
+		rule := cr.rule
+		if !r.Enabled(p, rule.ID, rule.DefaultEnabled) {
+			continue
+		}
+		sev := r.Severity(p, rule.ID, rule.DefaultSeverity)
+		opts := map[string]any(nil)
+		if p != nil {
+			opts = p.RuleOptions(r.lang, rule.ID)
+		}
+
+		cursor := sitter.NewQueryCursor()
+		matches := cursor.Matches(cr.query, root, src)
+		for {
+			m := matches.Next()
+			if m == nil {
+				break
+			}
+			caps := make(map[string]*sitter.Node, len(m.Captures))
+			for _, cap := range m.Captures {
+				name := "unknown"
+				if int(cap.Index) < len(cr.capIdx) {
+					name = cr.capIdx[cap.Index]
+				}
+				if _, seen := caps[name]; !seen {
+					node := cap.Node
+					caps[name] = &node
+				}
+			}
+			ctx := &MatchCtx{File: file, Src: src, Severity: sev, Options: opts, Captures: caps}
+			if f := rule.OnMatch(ctx); f != nil {
+				f.RuleID = rule.ID
+				f.Severity = sev
+				f.Source = model.SrcRule
+				f.File = file
+				findings = append(findings, *f)
+			}
+		}
+		cursor.Close()
+	}
+	return findings
+}
+
+// Meta is rule metadata for reports (SARIF driver.rules).
+type Meta struct {
+	ID    string
+	Title string
+}
+
+// GoMetas returns metadata for the Go rule set.
+func GoMetas(all []*Rule) []Meta {
+	metas := make([]Meta, 0, len(all))
+	for _, r := range all {
+		metas = append(metas, Meta{ID: r.ID, Title: r.Title})
+	}
+	return metas
+}

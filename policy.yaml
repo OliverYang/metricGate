@@ -1,0 +1,31 @@
+# metricgate policy — this repository dogfoods itself.
+# `metricgate check .` must PASS this gate.
+version: 1
+
+gate:
+  fail_on: error
+
+exclude: [".git", "vendor", "node_modules", "testdata"]
+
+languages:
+  go:
+    rules:
+      no-fmt-print:
+        severity: warning
+        options:
+          # The CLI is the one place where direct printing is the job.
+          allowed_files: ["cmd/metricgate/main.go"]
+      todo-comment:
+        enabled: false
+        severity: info
+    metrics:
+      cyclomatic-complexity: { warn: 10, error: 15 }
+      cognitive-complexity:  { warn: 15, error: 25 }
+      function-length:       { warn: 50, error: 100 }
+      file-length:           { warn: 400, error: 800 }
+      nesting-depth:         { warn: 4,  error: 6 }
+      params-count:          { warn: 5,  error: 8 }
+
+store:
+  enabled: false
+  path: ".metricgate/history.db"
