@@ -8,16 +8,15 @@
 package facts
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unicode"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/parser"
+	"metricgate/internal/sources"
 )
 
 // Symbol is one declaration worth constraining an LLM with.
@@ -56,43 +55,11 @@ func Extract(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID)
 // Collect walks root (file or directory) and returns the fact sheets of
 // every supported file, sorted by path.
 func Collect(root string) ([]*FileFacts, error) {
-	files, err := collectFiles(root)
+	files, err := sources.Files(root)
 	if err != nil {
 		return nil, err
 	}
 	return parseFacts(files)
-}
-
-// collectFiles gathers the paths of supported source files under root.
-func collectFiles(root string) ([]string, error) {
-	info, err := os.Stat(root)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return []string{root}, nil
-	}
-	var files []string
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if d.Name() == ".git" && p != root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if _, ok := parser.LanguageForFile(d.Name()); ok {
-			files = append(files, p)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(files)
-	return files, nil
 }
 
 // parseFacts parses every file and extracts its facts, reusing one parser

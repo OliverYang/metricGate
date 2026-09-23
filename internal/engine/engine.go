@@ -341,3 +341,38 @@ func (e *Engine) metricFindings(lang parser.LanguageID, stats *metrics.FileStats
 	}
 	return findings
 }
+
+// CheckSource analyses in-memory source as if it were the virtual file name
+// (the extension selects the language) and returns its findings. It exists
+// for programmatic callers such as the MCP server: the LLM's edited snippet
+// can be checked without writing it to disk.
+func (e *Engine) CheckSource(name string, src []byte) ([]model.Finding, error) {
+	lang, ok := parser.LanguageForFile(filepath.Base(name))
+	if !ok {
+		return nil, fmt.Errorf("unsupported language for %q (use .go or .java)", name)
+	}
+	pp, err := parser.New(lang)
+	if err != nil {
+		return nil, err
+	}
+	defer pp.Close()
+	tree, err := pp.Parse(src)
+	if err != nil {
+		return nil, err
+	}
+	defer tree.Close()
+
+	var findings []model.Finding
+	if tree.RootNode().HasError() {
+		findings = append(findings, model.Finding{
+			RuleID: "parse-error", Severity: model.SevInfo, Source: model.SrcRule,
+			File: name, StartLine: 1, EndLine: 1,
+			Message: "source has syntax errors; results may be incomplete",
+		})
+	}
+	stats := metrics.AnalyzeFile(name, src, tree, lang)
+	findings = append(findings, e.metricFindings(lang, stats)...)
+	findings = append(findings, e.runners[lang].Run(name, src, tree, e.cfg)...)
+	model.SortFindings(findings)
+	return findings, nil
+}

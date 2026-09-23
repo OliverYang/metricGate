@@ -26,6 +26,9 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
 - SARIF 2.1.0 output (GitHub code scanning compatible)
 - Local SQLite trend store (write-only in v0)
 - `metricgate context <path>`: token-budgeted constraint pack (signatures + active policy) for LLM prompts
+- CI gate: exit code 1 on violations
+- MCP stdio server (`metricgate-mcp`): get_constraints / check_code / check_path / list_stubs
+- Stub detection (completeness audit) for Go and Java
 
 ## Quick start
 
@@ -45,6 +48,25 @@ go build -o metricgate ./cmd/metricgate
 # 4. constraint pack for an LLM prompt — facts + policy, budget-capped
 ./metricgate context internal/parser
 ```
+
+## MCP server (call it from your coding agent)
+
+metricgate ships an MCP (Model Context Protocol) stdio server so agents can
+ground themselves in real constraints instead of hallucinating APIs:
+
+```bash
+go build -o metricgate-mcp ./cmd/metricgate-mcp
+claude mcp add metricgate -- /path/to/metricgate-mcp -config /path/to/policy.yaml
+```
+
+Tools exposed:
+
+| Tool | Purpose |
+|------|---------|
+| `get_constraints` | dense fact+constraint pack to paste into the prompt BEFORE generating (signatures, imports, rules, limits) |
+| `check_code` | deterministic check of in-memory code after EVERY edit — 0 tokens, milliseconds |
+| `check_path` | check files on disk (optionally diff-only) |
+| `list_stubs` | repair worklist: empty bodies, `panic("not implemented")`, `UnsupportedOperationException` |
 
 ## Diff-only mode (incremental adoption)
 
