@@ -100,31 +100,43 @@ func FindNear(cands []NearFunc, cfg NearConfig) []NearMatch {
 	if cfg.Threshold <= 0 || cfg.Threshold >= 1 {
 		return nil
 	}
-	maxPer := cfg.MaxPerAnchor
-	if maxPer <= 0 {
-		maxPer = 3
+	postings := shinglePostings(cands, cfg)
+	pairs := rarePairs(postings)
+	matches := similarPairs(cands, pairs, cfg)
+	return capPerAnchor(matches, cfg.maxPerAnchor())
+}
+
+// maxPerAnchor resolves the report cap (0 means the default 3).
+func (c NearConfig) maxPerAnchor() int {
+	if c.MaxPerAnchor > 0 {
+		return c.MaxPerAnchor
 	}
-	// Inverted index: shingle -> candidate indexes. Rare shingles only:
-	// a shingle shared by nearly everything (e.g. the "return" idiom)
-	// carries no signal and would explode the candidate pairs.
+	return 3
+}
+
+// shinglePostings inverts candidate shingles; functions below the size
+// gates and shingles shared by nearly everything (no signal) drop out.
+func shinglePostings(cands []NearFunc, cfg NearConfig) map[uint64][]int {
+	sizeGate := Config{MinLines: cfg.MinLines, MinTokens: cfg.MinTokens}
 	postings := map[uint64][]int{}
 	for i, c := range cands {
-		if !bigEnough(c.Func, Config{MinLines: cfg.MinLines, MinTokens: cfg.MinTokens}) {
+		if !bigEnough(c.Func, sizeGate) {
 			continue
 		}
 		for sh := range c.Shingles.Set {
 			postings[sh] = append(postings[sh], i)
 		}
 	}
-	rare := func(sh uint64) bool {
-		return len(postings[sh]) <= 8
-	}
+	return postings
+}
 
-	// Candidate pairs from shared rare shingles.
-	type pairKey struct{ a, b int }
-	pairs := map[pairKey]bool{}
-	for sh, idxs := range postings {
-		if !rare(sh) {
+// rarePairs collects the candidate index pairs that share at least one
+// rare shingle (a shingle posted by few functions carries signal; a
+// common one would explode the pairing).
+func rarePairs(postings map[uint64][]int) map[[2]int]bool {
+	pairs := map[[2]int]bool{}
+	for _, idxs := range postings {
+		if len(idxs) > 8 {
 			continue
 		}
 		for a := 0; a < len(idxs); a++ {
@@ -133,19 +145,24 @@ func FindNear(cands []NearFunc, cfg NearConfig) []NearMatch {
 				if ia > ib {
 					ia, ib = ib, ia
 				}
-				pairs[pairKey{ia, ib}] = true
+				pairs[[2]int{ia, ib}] = true
 			}
 		}
 	}
+	return pairs
+}
 
+// similarPairs scores each candidate pair and keeps the matches at or
+// above the threshold, anchored on the first-defined member.
+func similarPairs(cands []NearFunc, pairs map[[2]int]bool, cfg NearConfig) []NearMatch {
 	var out []NearMatch
-	seenPair := map[pairKey]bool{}
+	seen := map[[2]int]bool{}
 	for pk := range pairs {
-		if seenPair[pk] {
+		if seen[pk] {
 			continue
 		}
-		seenPair[pk] = true
-		a, b := cands[pk.a], cands[pk.b]
+		seen[pk] = true
+		a, b := cands[pk[0]], cands[pk[1]]
 		if a.Lang != b.Lang {
 			continue
 		}
@@ -159,13 +176,18 @@ func FindNear(cands []NearFunc, cfg NearConfig) []NearMatch {
 		}
 		out = append(out, NearMatch{Anchor: first, Other: second, Similarity: sim})
 	}
-	// Anchor cap + stable ordering.
 	sort.SliceStable(out, func(i, j int) bool {
 		return lessFunc(out[i].Anchor, out[j].Anchor)
 	})
+	return out
+}
+
+// capPerAnchor bounds how many matches one anchor may contribute, so a
+// fan-out clone family cannot flood the report.
+func capPerAnchor(matches []NearMatch, maxPer int) []NearMatch {
 	perAnchor := map[string]int{}
 	var kept []NearMatch
-	for _, m := range out {
+	for _, m := range matches {
 		k := m.Anchor.File + "|" + m.Anchor.Name + "|" + itoa2(m.Anchor.StartLine)
 		if perAnchor[k] >= maxPer {
 			continue
@@ -220,11 +242,23 @@ func ScanNear(root string, cfg NearConfig) ([]NearMatch, error) {
 		return nil, err
 	}
 	parsers := map[parser.LanguageID]*parser.Parser{}
-	defer func() {
-		for _, p := range parsers {
-			p.Close()
-		}
-	}()
+	defer closeParsers(parsers)
+	cands, err := collectShingles(files, parsers, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return FindNear(cands, cfg), nil
+}
+
+func closeParsers(parsers map[parser.LanguageID]*parser.Parser) {
+	for _, p := range parsers {
+		p.Close()
+	}
+}
+
+// collectShingles parses every file and extracts one candidate per
+// function-like declaration, keeping its shingle set.
+func collectShingles(files []string, parsers map[parser.LanguageID]*parser.Parser, cfg NearConfig) ([]NearFunc, error) {
 	var cands []NearFunc
 	for _, path := range files {
 		lang, ok := parser.LanguageForFile(filepath.Base(path))
@@ -235,44 +269,64 @@ func ScanNear(root string, cfg NearConfig) ([]NearMatch, error) {
 		if err != nil {
 			continue
 		}
-		pp := parsers[lang]
-		if pp == nil {
-			fresh, err := parser.New(lang)
-			if err != nil {
-				continue
-			}
-			pp, parsers[lang] = fresh, fresh
-		}
-		tree, err := pp.Parse(src)
+		tree, err := parseWith(parsers, lang, src)
 		if err != nil {
 			continue
 		}
-		for _, f := range Extract(lang, path, src, tree, Config{MinLines: cfg.MinLines, MinTokens: cfg.MinTokens}) {
-			// Locate this declaration's body again (Extract returns no node).
-			var body *sitter.Node
-			var find func(n *sitter.Node)
-			find = func(n *sitter.Node) {
-				if n == nil || body != nil {
-					return
-				}
-				if isDeclKind(n) {
-					if name := nodeText(src, n.ChildByFieldName("name")); name == f.Name &&
-						int(n.StartPosition().Row)+1 == f.StartLine {
-						body = n.ChildByFieldName("body")
-					}
-				}
-				for i := uint(0); i < n.ChildCount(); i++ {
-					find(n.Child(i))
-				}
-			}
-			find(tree.RootNode())
-			if body != nil {
-				cands = append(cands, NearFunc{Func: f, Shingles: FingerprintShingles(src, body)})
-			}
-		}
+		cands = append(cands, fileShingles(lang, path, src, tree, cfg)...)
 		tree.Close()
 	}
-	return FindNear(cands, cfg), nil
+	return cands, nil
+}
+
+// parseWith returns a parsed tree from the shared per-language parser.
+func parseWith(parsers map[parser.LanguageID]*parser.Parser, lang parser.LanguageID, src []byte) (*sitter.Tree, error) {
+	pp := parsers[lang]
+	if pp == nil {
+		fresh, err := parser.New(lang)
+		if err != nil {
+			return nil, err
+		}
+		pp, parsers[lang] = fresh, fresh
+	}
+	return pp.Parse(src)
+}
+
+// fileShingles extracts one shingle candidate per declaration in a file.
+func fileShingles(lang parser.LanguageID, path string, src []byte, tree *sitter.Tree, cfg NearConfig) []NearFunc {
+	var out []NearFunc
+	for _, f := range Extract(lang, path, src, tree, Config{MinLines: cfg.MinLines, MinTokens: cfg.MinTokens}) {
+		body := findBody(tree.RootNode(), src, f)
+		if body == nil {
+			continue
+		}
+		out = append(out, NearFunc{Func: f, Shingles: FingerprintShingles(src, body)})
+	}
+	return out
+}
+
+// findBody locates the body node of a previously extracted declaration
+// (Extract returns values, not nodes, so the declaration is re-located by
+// name and start line).
+func findBody(root *sitter.Node, src []byte, f Func) *sitter.Node {
+	var body *sitter.Node
+	var find func(n *sitter.Node)
+	find = func(n *sitter.Node) {
+		if n == nil || body != nil {
+			return
+		}
+		if isDeclKind(n) && int(n.StartPosition().Row)+1 == f.StartLine {
+			if name := nodeText(src, n.ChildByFieldName("name")); name == f.Name {
+				body = n.ChildByFieldName("body")
+				return
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			find(n.Child(i))
+		}
+	}
+	find(root)
+	return body
 }
 
 // isDeclKind reports whether a node is a function-like declaration.
