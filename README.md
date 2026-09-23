@@ -25,7 +25,7 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
 - Policy file (`policy.yaml`) = the project's constraint model
 - SARIF 2.1.0 output (GitHub code scanning compatible)
 - Local SQLite trend store (write-only in v0)
-- CI gate: exit code 1 on violations
+- `metricgate context <path>`: token-budgeted constraint pack (signatures + active policy) for LLM prompts
 
 ## Quick start
 
@@ -41,6 +41,9 @@ go build -o metricgate ./cmd/metricgate
 
 # 3. metric table only
 ./metricgate metrics .
+
+# 4. constraint pack for an LLM prompt — facts + policy, budget-capped
+./metricgate context internal/parser
 ```
 
 ## Diff-only mode (incremental adoption)
@@ -63,6 +66,7 @@ Semantics:
 - **untracked (non-ignored) files** count as fully new
 
 The gate verdict uses the filtered result; the header shows how much was
+hidden. Metric snapshots stored for trends are always the full measurements.
 hidden. Metric snapshots stored for trends are always the full measurements.
 
 Policy example (full reference in the generated `policy.yaml`):

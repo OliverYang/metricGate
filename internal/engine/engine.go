@@ -21,21 +21,6 @@ import (
 	"metricgate/internal/rules"
 )
 
-// metricDefault is the built-in threshold pair for one metric. The same
-// defaults apply to every language in v0; policies override per language.
-type metricDefault struct {
-	Warn, Error int
-}
-
-var metricDefaults = map[string]metricDefault{
-	metrics.MetricCyclomatic: {Warn: 10, Error: 15},
-	metrics.MetricCognitive:  {Warn: 15, Error: 25},
-	metrics.MetricFuncLength: {Warn: 50, Error: 100},
-	metrics.MetricFileLength: {Warn: 400, Error: 800},
-	metrics.MetricNesting:    {Warn: 4, Error: 6},
-	metrics.MetricParams:     {Warn: 5, Error: 8},
-}
-
 // Engine runs the checker over a directory tree, with one rule runner per
 // registered language.
 type Engine struct {
@@ -248,7 +233,7 @@ func (e *Engine) checkFile(w *worker, path string) fileResult {
 
 // thresholds resolves the effective warn/error thresholds for a metric.
 func (e *Engine) thresholds(lang parser.LanguageID, metricID string) (warn, errAt int) {
-	def := metricDefaults[metricID]
+	def := metrics.DefaultThresholds[metricID]
 	warn, errAt = def.Warn, def.Error
 	w, er, enabled := e.cfg.MetricThresholds(string(lang), metricID)
 	if enabled != nil && !*enabled {

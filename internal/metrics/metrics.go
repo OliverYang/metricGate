@@ -43,6 +43,21 @@ const (
 	MetricParams     = "params-count"
 )
 
+// DefaultThresholds is the built-in warn/error pair per metric — the single
+// source of truth shared by the engine and the context renderer. Policies
+// override these per language.
+var DefaultThresholds = map[string]struct {
+	Warn  int
+	Error int
+}{
+	MetricCyclomatic: {10, 15},
+	MetricCognitive:  {15, 25},
+	MetricFuncLength: {50, 100},
+	MetricFileLength: {400, 800},
+	MetricNesting:    {4, 6},
+	MetricParams:     {5, 8},
+}
+
 // langProfile declares the grammar-specific node kinds the metric walks
 // care about. This is the single place where node names live.
 type langProfile struct {
