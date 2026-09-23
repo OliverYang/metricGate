@@ -68,6 +68,27 @@ Tools exposed:
 | `check_path` | check files on disk (optionally diff-only) |
 | `list_stubs` | repair worklist: empty bodies, `panic("not implemented")`, `UnsupportedOperationException` |
 
+## Suppression (inline ignore directives)
+
+Legitimate exceptions are silenced in place, visibly (the report counts what
+was suppressed):
+
+```go
+fmt.Println("boot")        // metricgate: ignore no-fmt-print CLI entrypoint
+
+// metricgate: ignore params-count legacy signature, do not break callers
+func Parse(a, b, c, d, e, f, g int) int { ... }
+
+// metricgate: ignore-begin cyclomatic-complexity
+... generated table dispatch ...
+// metricgate: ignore-end
+```
+
+Scope: same line (+ the next line when the comment starts its own line),
+or a begin/end range. Rule list is comma-separated; `all` or omitted means
+everything; the rest is a free-form reason. Suppressed findings never trip
+the gate but are counted in the report ("N findings suppressed").
+
 ## Diff-only mode (incremental adoption)
 
 Legacy codebase with thousands of pre-existing violations? Gate only the new

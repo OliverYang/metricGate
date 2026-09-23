@@ -10,9 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
+
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/config"
 	"metricgate/internal/metrics"
@@ -77,6 +80,7 @@ func (e *Engine) Rules() []rules.Meta {
 type fileResult struct {
 	findings []model.Finding
 	metrics  []model.MetricResult
+	ignored  int
 }
 
 // Run checks every supported file under root and returns the summary.
@@ -96,6 +100,7 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 		workers = 1
 	}
 
+	bigSem := make(chan struct{}, 2) // at most 2 huge trees in memory at once
 	jobs := make(chan string)
 	results := make(chan fileResult, workers)
 	var wg sync.WaitGroup
@@ -105,7 +110,18 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 			defer wg.Done()
 			w := &worker{ps: map[parser.LanguageID]*parser.Parser{}}
 			for path := range jobs {
-				results <- e.checkFile(w, path)
+				if bigFile(path) {
+					bigSem <- struct{}{}
+				}
+				res := e.checkFile(w, path)
+				if bigFile(path) {
+					<-bigSem
+					// Huge files allocate large C-side trees; force Go to
+					// return everything it can before the next big file.
+					runtime.GC()
+					debug.FreeOSMemory()
+				}
+				results <- res
 			}
 		}()
 	}
@@ -123,6 +139,7 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 	for res := range results {
 		summary.Findings = append(summary.Findings, res.findings...)
 		summary.Metrics = append(summary.Metrics, res.metrics...)
+		summary.Ignored += res.ignored
 	}
 
 	model.SortFindings(summary.Findings)
@@ -135,6 +152,17 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 // thread-safe, so each worker lazily creates one per language it meets.
 type worker struct {
 	ps map[parser.LanguageID]*parser.Parser
+}
+
+// bigFileThreshold is the source size above which a parse tree is large
+// enough that concurrent big trees dominate peak memory (a 3.8MB machine-
+// generated file produces a ~200MB tree).
+const bigFileThreshold = 1 << 20 // 1 MB
+
+// bigFile reports whether the file must gate on the big-file semaphore.
+func bigFile(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Size() >= bigFileThreshold
 }
 
 func (w *worker) parserFor(id parser.LanguageID) (*parser.Parser, error) {
@@ -224,11 +252,21 @@ func (e *Engine) checkFile(w *worker, path string) fileResult {
 		})
 	}
 
-	stats := metrics.AnalyzeFile(path, src, tree, lang)
-	res.metrics = e.metricResults(lang, stats)
-	res.findings = append(res.findings, e.metricFindings(lang, stats)...)
-	res.findings = append(res.findings, e.runners[lang].Run(path, src, tree, e.cfg)...)
+	res.findings, res.metrics, res.ignored = e.analyze(lang, path, src, tree)
 	return res
+}
+
+// analyze computes findings and metric results for one parsed file with
+// suppressions applied. Shared by the file-walk path and CheckSource.
+func (e *Engine) analyze(lang parser.LanguageID, name string, src []byte, tree *sitter.Tree) (findings []model.Finding, mets []model.MetricResult, ignored int) {
+	stats := metrics.AnalyzeFile(name, src, tree, lang)
+	mets = e.metricResults(lang, stats)
+	findings = append(findings, e.metricFindings(lang, stats)...)
+	findings = append(findings, e.runners[lang].Run(name, src, tree, e.cfg)...)
+	if sups := buildSuppressions(lang, src, tree.RootNode()); len(sups) > 0 {
+		findings, ignored = suppress(findings, sups)
+	}
+	return findings, mets, ignored
 }
 
 // thresholds resolves the effective warn/error thresholds for a metric.
@@ -370,9 +408,7 @@ func (e *Engine) CheckSource(name string, src []byte) ([]model.Finding, error) {
 			Message: "source has syntax errors; results may be incomplete",
 		})
 	}
-	stats := metrics.AnalyzeFile(name, src, tree, lang)
-	findings = append(findings, e.metricFindings(lang, stats)...)
-	findings = append(findings, e.runners[lang].Run(name, src, tree, e.cfg)...)
+	findings, _, _ = e.analyze(lang, name, src, tree)
 	model.SortFindings(findings)
 	return findings, nil
 }

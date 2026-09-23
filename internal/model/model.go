@@ -68,6 +68,7 @@ type RunSummary struct {
 	ParseErrors []string       `json:"parseErrors,omitempty"`
 	Findings    []Finding      `json:"findings"`
 	Metrics     []MetricResult `json:"metrics"`
+	Ignored     int            `json:"ignored,omitempty"`
 	Duration    time.Duration  `json:"-"`
 }
 

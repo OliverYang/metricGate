@@ -22,6 +22,9 @@ func Text(s *model.RunSummary, cfg *config.Config, toolVersion string) string {
 	}
 	fmt.Fprintf(&b, "\nsummary: %d errors, %d warnings, %d notes, %d metric snapshots\n",
 		s.Count(model.SevError), s.Count(model.SevWarning), s.Count(model.SevInfo), len(s.Metrics))
+	if s.Ignored > 0 {
+		fmt.Fprintf(&b, "note: %d findings suppressed by metricgate: ignore directives\n", s.Ignored)
+	}
 	return b.String()
 }
 
