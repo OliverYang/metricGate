@@ -71,7 +71,8 @@ Tools exposed:
 | `get_constraints` | dense fact+constraint pack to paste into the prompt BEFORE generating (signatures, imports, rules, limits) |
 | `check_code` | deterministic check of in-memory code after EVERY edit — 0 tokens, milliseconds |
 | `check_path` | check files on disk (optionally diff-only) |
-| `list_stubs` | repair worklist: empty bodies, `panic("not implemented")`, `UnsupportedOperationException` |
+| `list_stubs` | repair worklist: empty bodies, `panic("not implemented")`, `UnsupportedOperationException` — each with its exact definition site |
+| `find_symbols` | deterministic cross-file symbol index: exact lookups + near-miss suggestions (typos, case twins), 0 tokens |
 
 ## Banned API as policy data
 
@@ -300,6 +301,14 @@ published specs where possible; deviations are documented inline.
 go test ./...      # unit + engine e2e tests
 go vet ./...
 gofmt -l .
+```
+
+The cross-file symbol index is also a CLI verb — "does this helper already
+exist?" answered deterministically:
+
+```bash
+metricgate symbols . -q ClonePolicy      # exact: internal/config/config.go:306
+metricgate symbols . -q ClonePolcy       # near-miss suggestion (typo)
 ```
 
 The engine dogfoods itself: `metricgate check .` on this repository must

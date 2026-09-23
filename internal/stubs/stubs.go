@@ -30,6 +30,10 @@ type Item struct {
 	Symbol string `json:"symbol,omitempty"`
 	Kind   string `json:"kind"`
 	Detail string `json:"detail,omitempty"`
+	// At is the canonical definition of Symbol elsewhere or in place,
+	// "file:line (signature)" — filled by callers that hold a symbol
+	// index (the repair worklist shows where the body to finish lives).
+	At string `json:"at,omitempty"`
 }
 
 // stubPhrases marks Go panic bodies as deliberate placeholders.

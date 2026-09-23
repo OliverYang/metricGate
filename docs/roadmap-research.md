@@ -232,3 +232,38 @@ SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
   23 还低 3（重构顺带消掉旧债），gate PASSED。
 - 已知边界（诚实记录）：全部 name-based（无类型解析）；LCOM 对 setter/getter
   泛滥型代码会偏高，属于真实设计问题而非误报；跨文件 DIT 低估不高估。
+
+---
+
+## 落地记录（Phase A-5：符号索引 v1）
+
+**已落地**（提交 `symbols: cross-file definition index, near-miss hints, located stubs (Phase A-5)`）：
+
+- 新包 `internal/symbols`（core 层，零项目依赖、零 tree-sitter 依赖）：
+  - `Def{Name,Receiver,Kind,File,Line,Signature,Language,Package,Visibility}`；
+    `Build(defs)` 构建不可变索引；`Lookup` 精确名查找；`Similar`/`SimilarElsewhere`
+    近似名建议。
+  - 相似度优先级：精确 > 大小写折叠 > 小编辑距离 > 包含（≥5 字符）；
+    编辑距离用 restricted Damerau-Levenshtein（OSA）——相邻换位记 1 距离，
+    "Rneder"→"Render" 是一键盘移的 typo 而非两个错误（这个 bug 是 context-pack
+    端到端测试抓出来的）。
+  - 打分上限随查询长度收缩（≤4:1，≤9:2，>9:3），防止短名泛滥匹配。
+- facts 桥接（adapter 层）：`Defs` 把事实表展平为可索引定义（Java 类成员
+  以类名为 receiver 独立成条），`Index(files)` 一次构建，
+  `CollectWithIndex(root)` 一次遍历同时返回事实与索引；
+  `SimilarSymbols` 生成"已有符号，对齐勿重造"提示（精确孪生优先于近似）。
+- 三个消费端：
+  - **context pack / MCP `get_constraints`**：新增
+    `## existing symbols (align, do not reinvent)` 区（在 clone 复用区之后）；
+  - **MCP `find_symbols`**（新工具）：exact + suggestions + 索引规模；
+  - **MCP `list_stubs`**：每条 stub 附 `at` 字段（定义点 `file:line (签名)`），
+    修复工单直接指向待补的函数体。
+- CLI：`metricgate symbols [path] -q NAME [-max N]`——回答"这个 helper
+  是不是已经存在"；无名命中时给 near-miss 建议。
+- 测试：`internal/symbols/index_test.go`（精确/大小写/换位/包含/松匹配拒绝/
+  确定性排序/nil 安全），`internal/facts/symbols_test.go`（跨文件查找、
+  Java receiver、context pack 渲染、提示内容）。
+- 已知边界（诚实记录）：索引 = 单次遍历边界内的文件（没有跨 repo /
+  vendor 解析）；成员索引来自 facts（interface 方法集与类成员），裸函数
+  与方法全覆盖，局部变量不在索引内；`SimilarElsewhere` 排除自身文件以
+  避免自指提示。

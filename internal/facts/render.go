@@ -77,20 +77,9 @@ func render(files []*FileFacts, cfg *config.Config, o renderOpts) string {
 		b.WriteByte('\n')
 	}
 
-	// Reuse hints first: the deterministic "reuse before you generate" rule.
-	var cloneFns []clones.Func
-	for _, f := range files {
-		cloneFns = append(cloneFns, f.CloneFns...)
-	}
-	if groups := clones.Find(cloneFns, cfg.ClonePolicy()); len(groups) > 0 {
-		b.WriteString("## reuse before you generate\n")
-		for _, l := range clones.Summary(groups) {
-			b.WriteString("- ")
-			b.WriteString(l)
-			b.WriteByte('\n')
-		}
-		b.WriteByte('\n')
-	}
+	// The "reuse before you generate" sections, then the policy.
+	writeCloneHints(&b, files, cfg)
+	writeSymbolHints(&b, files)
 
 	if lines := constraints(cfg, langs); len(lines) > 0 {
 		b.WriteString("## constraints (policy)\n")
@@ -249,4 +238,40 @@ func cutTail(s string, maxChars int) string {
 		cut = cut[:i]
 	}
 	return cut + tail
+}
+
+// writeCloneHints renders the clone classes as the deterministic
+// "reuse before you generate" rule: never reimplement what already exists.
+func writeCloneHints(b *strings.Builder, files []*FileFacts, cfg *config.Config) {
+	var cloneFns []clones.Func
+	for _, f := range files {
+		cloneFns = append(cloneFns, f.CloneFns...)
+	}
+	groups := clones.Find(cloneFns, cfg.ClonePolicy())
+	if len(groups) == 0 {
+		return
+	}
+	b.WriteString("## reuse before you generate\n")
+	for _, l := range clones.Summary(groups) {
+		b.WriteString("- ")
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+}
+
+// writeSymbolHints renders the existing symbols a file may have duplicated
+// by a near-miss name, so generated code aligns with the live API surface.
+func writeSymbolHints(b *strings.Builder, files []*FileFacts) {
+	hints := SimilarSymbols(files, Index(files), 3)
+	if len(hints) == 0 {
+		return
+	}
+	b.WriteString("## existing symbols (align, do not reinvent)\n")
+	for _, l := range hints {
+		b.WriteString("- ")
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
 }

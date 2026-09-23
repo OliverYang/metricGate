@@ -18,6 +18,7 @@ import (
 	"metricgate/internal/clones"
 	"metricgate/internal/parser"
 	"metricgate/internal/sources"
+	"metricgate/internal/symbols"
 )
 
 // Symbol is one declaration worth constraining an LLM with.
@@ -62,6 +63,21 @@ func Collect(root string) ([]*FileFacts, error) {
 		return nil, err
 	}
 	return parseFacts(files)
+}
+
+// RepoRoot is the directory whose fact sheets a CollectWithIndex run
+// covers; a symbol hint pointing outside it would be wrong, so the walk
+// root is the index boundary.
+type RepoRoot string
+
+// CollectWithIndex collects the fact sheets and the definition index over
+// them in one walk. The index covers exactly the collected files.
+func CollectWithIndex(root string) ([]*FileFacts, *symbols.Index, error) {
+	files, err := Collect(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	return files, Index(files), nil
 }
 
 // parseFacts parses every file and extracts its facts, reusing one parser

@@ -55,9 +55,9 @@ func TestRunOnTestdata(t *testing.T) {
 	}
 	// sample.go + java/Sample.java + the arch fixture (3) + the archsup
 	// fixture (2) + the clone fixtures (2) + the clone-suppression fixture
-	// (2) + the CK fixture (1)
-	if s.Files != 12 {
-		t.Fatalf("files = %d, want 12", s.Files)
+	// (2) + the CK fixture (1) + the stub fixture (1)
+	if s.Files != 13 {
+		t.Fatalf("files = %d, want 13", s.Files)
 	}
 	if n := len(s.ParseErrors); n != 0 {
 		t.Fatalf("unexpected parse errors: %v", s.ParseErrors)
@@ -70,7 +70,8 @@ func TestRunOnTestdata(t *testing.T) {
 	checkCounts(t, map[string]int{
 		"banned-fmt-Print*": 1,
 		"empty-block":       2,
-		"banned-panic":      1,
+		"banned-panic":      2, // sample.go and the stub fixture
+		"function-clone":    2, // the fixture clone class minus anchor and suppression
 	}, goCounts, "go")
 	checkCounts(t, map[string]int{
 		"banned-System-out-print*": 1,

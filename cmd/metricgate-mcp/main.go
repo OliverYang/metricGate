@@ -13,6 +13,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -22,6 +24,7 @@ import (
 	"metricgate/internal/git"
 	"metricgate/internal/model"
 	"metricgate/internal/stubs"
+	"metricgate/internal/symbols"
 )
 
 const toolVersion = "0.1.0"
@@ -58,8 +61,12 @@ func main() {
 	}, svc.checkPath)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_stubs",
-		Description: "List unfinished code: empty bodies, panic(\"not implemented\") bodies, Java UnsupportedOperationException throws. Use as the repair worklist.",
+		Description: "List unfinished code: empty bodies, panic(\"not implemented\") bodies, Java UnsupportedOperationException throws — each with its exact definition site. Use as the repair worklist.",
 	}, svc.listStubs)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "find_symbols",
+		Description: "Deterministic cross-file symbol index (0 tokens): exact lookups by name and near-miss suggestions (typos, case twins) so generated code aligns with the existing API surface. Call before inventing a new helper name.",
+	}, svc.findSymbols)
 
 	if err := srv.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "metricgate-mcp:", err)
@@ -190,7 +197,77 @@ func (s *service) listStubs(ctx context.Context, req *mcp.CallToolRequest, in st
 	if err != nil {
 		return nil, stubsOut{}, err
 	}
+	annotateStubs(path, items)
 	return nil, stubsOut{Count: len(items), Items: items}, nil
+}
+
+// annotateStubs fills each item's At with the symbol's definition site so
+// the worklist points at the exact body to finish. Failures are silent:
+// the worklist is still correct without the annotations.
+func annotateStubs(path string, items []stubs.Item) {
+	files, ix, err := facts.CollectWithIndex(path)
+	if err != nil || ix.Len() == 0 {
+		return
+	}
+	for i := range items {
+		if items[i].Symbol == "" {
+			continue
+		}
+		for _, d := range ix.Lookup(items[i].Symbol) {
+			if d.Signature != "" {
+				items[i].At = d.File + ":" + strconv.Itoa(d.Line) + " (" + oneLine(d.Signature, 90) + ")"
+				break
+			}
+		}
+	}
+	_ = files
+}
+
+func oneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) > max {
+		r = append(r[:max], []rune("…")...)
+	}
+	return string(r)
+}
+
+type findSymbolsIn struct {
+	Path  string `json:"path,omitempty" jsonschema:"file or directory to index (default .)"`
+	Query string `json:"query" jsonschema:"symbol name to look up; near-miss suggestions are returned when the exact name does not exist"`
+	Max   int    `json:"max,omitempty" jsonschema:"maximum suggestions to return (default 5)"`
+}
+
+type findSymbolsOut struct {
+	Exact       []symbols.Def   `json:"exact,omitempty"`
+	Suggestions []symbols.Match `json:"suggestions,omitempty"`
+	Symbols     int             `json:"symbols"`
+}
+
+func (s *service) findSymbols(ctx context.Context, req *mcp.CallToolRequest, in findSymbolsIn) (*mcp.CallToolResult, findSymbolsOut, error) {
+	if strings.TrimSpace(in.Query) == "" {
+		return nil, findSymbolsOut{}, fmt.Errorf("query is empty")
+	}
+	path := in.Path
+	if path == "" {
+		path = "."
+	}
+	_, ix, err := facts.CollectWithIndex(path)
+	if err != nil {
+		return nil, findSymbolsOut{}, err
+	}
+	max := in.Max
+	if max <= 0 {
+		max = 5
+	}
+	out := findSymbolsOut{
+		Exact:   ix.Lookup(in.Query),
+		Symbols: ix.Len(),
+	}
+	if len(out.Exact) == 0 {
+		out.Suggestions = ix.Similar(in.Query, max)
+	}
+	return nil, out, nil
 }
 
 // summarizeFindings renders a check_code verdict.
