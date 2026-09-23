@@ -43,6 +43,28 @@ go build -o metricgate ./cmd/metricgate
 ./metricgate metrics .
 ```
 
+## Diff-only mode (incremental adoption)
+
+Legacy codebase with thousands of pre-existing violations? Gate only the new
+code — the old debt stays visible in full runs but never blocks the gate:
+
+```bash
+./metricgate check -diff                    # working tree vs HEAD
+./metricgate check -diff -base origin/main  # PR semantics (diffs from merge-base)
+```
+
+Semantics:
+
+- **rule findings**: kept when their line is part of the diff
+- **function-scoped metrics** (complexity, length, params, nesting): kept
+  when the touched range intersects the function — "you touched it, you own it"
+- **file-length**: only brand-new files are flagged; growing legacy files do
+  not re-alarm
+- **untracked (non-ignored) files** count as fully new
+
+The gate verdict uses the filtered result; the header shows how much was
+hidden. Metric snapshots stored for trends are always the full measurements.
+
 Policy example (full reference in the generated `policy.yaml`):
 
 ```yaml
@@ -94,7 +116,7 @@ published specs where possible; deviations are documented inline.
 | Ver | Scope |
 |-----|-------|
 | v0  | Checker core + CLI + SARIF + gate + SQLite schema (this release) |
-| v1  | diff-only mode, suppression comments, Python/TS rule packs, trend report |
+| v1  | diff-only mode ✅ · next: suppression comments, Python/TS rule packs, trend report |
 | v2  | HTTP/gRPC service (SDK), LLM adapter interface + context generator |
 | v3  | Skeleton generator (IR + render backends), end-to-end LLM repair loop demo |
 
