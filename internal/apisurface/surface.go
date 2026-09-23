@@ -8,7 +8,9 @@
 package apisurface
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"metricgate/internal/facts"
 )
@@ -34,21 +36,27 @@ type Snapshot struct {
 func Current(files []*facts.FileFacts) *Snapshot {
 	snap := &Snapshot{Version: 1, Packages: map[string][]Entry{}}
 	for _, f := range files {
+		if !productionFile(f.File) {
+			continue // tests/fixtures are not the shipped API contract
+		}
 		for _, s := range f.Symbols {
-			if s.Visibility != "exported" || s.Name == "" {
-				continue
+			if s.Visibility == "exported" && s.Name != "" {
+				appendEntry(snap, f, Entry{
+					Name: s.Name, Receiver: s.Receiver, Signature: s.Signature,
+					File: f.File, Line: s.StartLine,
+				})
 			}
-			pkg := f.Package
-			if pkg == "" {
-				pkg = "(root)"
+			// Java facts nest methods/fields under their class symbol; they
+			// are still part of that class's public API and must be snapshotted.
+			for _, c := range s.Children {
+				if c.Visibility != "exported" || c.Name == "" {
+					continue
+				}
+				appendEntry(snap, f, Entry{
+					Name: c.Name, Receiver: s.Name, Signature: c.Signature,
+					File: f.File, Line: c.StartLine,
+				})
 			}
-			snap.Packages[pkg] = append(snap.Packages[pkg], Entry{
-				Name:      s.Name,
-				Receiver:  s.Receiver,
-				Signature: s.Signature,
-				File:      f.File,
-				Line:      s.StartLine,
-			})
 		}
 	}
 	for pkg := range snap.Packages {
@@ -63,6 +71,30 @@ func Current(files []*facts.FileFacts) *Snapshot {
 		snap.Packages[pkg] = entries
 	}
 	return snap
+}
+
+// appendEntry adds a definition to its package bucket, normalising the
+// package name only when the fact sheet does not provide one.
+func appendEntry(snap *Snapshot, f *facts.FileFacts, e Entry) {
+	pkg := f.Package
+	if pkg == "" {
+		pkg = "(root)"
+	}
+	snap.Packages[pkg] = append(snap.Packages[pkg], e)
+}
+
+// productionFile excludes tests and fixtures: they are useful to the
+// checker, but are not the library's shipped API contract.
+func productionFile(path string) bool {
+	if strings.HasSuffix(path, "_test.go") || strings.HasSuffix(path, "Test.java") {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == "testdata" || strings.HasPrefix(part, "Test") {
+			return false
+		}
+	}
+	return true
 }
 
 // key identifies one exported symbol across snapshots: package, name and

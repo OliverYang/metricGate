@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"metricgate/internal/facts"
 )
 
 func TestCompareRemovedAndAdded(t *testing.T) {
@@ -93,5 +95,39 @@ func TestSnapshotJSONRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"version":1`) {
 		t.Errorf("json = %s", data)
+	}
+}
+
+func TestCurrentExcludesTestsAndFixtures(t *testing.T) {
+	files := []*facts.FileFacts{
+		{File: "internal/pkg/pkg.go", Package: "pkg", Language: "go", Symbols: []facts.Symbol{{Name: "Run", Signature: "func Run()", Visibility: "exported", StartLine: 1}}},
+		{File: "internal/pkg/pkg_test.go", Package: "pkg", Language: "go", Symbols: []facts.Symbol{{Name: "TestRun", Signature: "func TestRun(t *testing.T)", Visibility: "exported", StartLine: 1}}},
+		{File: "internal/pkg/testdata/fixture.go", Package: "pkg", Language: "go", Symbols: []facts.Symbol{{Name: "Fixture", Signature: "func Fixture()", Visibility: "exported", StartLine: 1}}},
+	}
+	snap := Current(files)
+	entries := snap.Packages["pkg"]
+	if len(entries) != 1 || entries[0].Name != "Run" {
+		t.Errorf("surface = %+v, want only production Run", entries)
+	}
+}
+
+func TestCurrentIncludesExportedJavaMembers(t *testing.T) {
+	files := []*facts.FileFacts{{
+		File: "src/Store.java", Package: "a", Language: "java",
+		Symbols: []facts.Symbol{{
+			Name: "Store", Kind: "class", Visibility: "exported", Signature: "public class Store",
+			Children: []facts.Symbol{
+				{Name: "size", Kind: "method", Visibility: "exported", Signature: "public int size()", StartLine: 3},
+				{Name: "secret", Kind: "method", Visibility: "private", Signature: "private void secret()", StartLine: 4},
+			},
+		}},
+	}}
+	snap := Current(files)
+	entries := snap.Packages["a"]
+	if len(entries) != 2 {
+		t.Fatalf("entries = %+v, want public Store + size only", entries)
+	}
+	if entries[0].Name != "Store" || entries[1].Name != "size" || entries[1].Receiver != "Store" {
+		t.Errorf("Java API entries = %+v", entries)
 	}
 }
