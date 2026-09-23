@@ -24,6 +24,9 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
 - **Data-driven bans**: `banned-api:` entries in `policy.yaml` compile into the
   same deterministic pipeline — an organisation adds a constraint by editing
   YAML, not Go (see [Banned API as policy data](#banned-api-as-policy-data))
+- **Architecture constraints**: the package dependency graph — layer boundaries,
+  forbidden edges and import cycles (Go + Java), anchored at the import line and
+  reported through the same gate ([details](#architecture-constraints))
 - Policy file (`policy.yaml`) = the project's constraint model
 - SARIF 2.1.0 output (GitHub code scanning compatible)
 - Local SQLite trend store (write-only in v0)
@@ -110,6 +113,52 @@ and unqualified `method(...)`. Deeper Java receivers need type resolution and
 are deliberately out of scope — that is adapter territory
 ([docs/roadmap-research.md](docs/roadmap-research.md)), not AST territory.
 
+## Architecture constraints
+
+A per-file rule can never see a dependency direction, so every run also builds
+the package graph — from the same parse pass, no external tooling — and checks
+it against the policy:
+
+```yaml
+architecture:
+  cycles: error          # import cycles (Tarjan SCC over the package graph)
+  edges: warning         # severity of layer / forbidden-edge findings
+  layers:
+    - name: handler
+      packages: ["internal/handler/**"]
+      may_depend_on: [service]                      # layer names or patterns
+    - name: service
+      packages: ["internal/service/**"]
+      may_depend_on: [storage, "pkg/logging"]
+    - name: storage
+      packages: ["internal/storage/**"]
+  forbid:
+    - from: internal/storage/**
+      to: internal/handler/**
+      reason: storage must not know about HTTP
+```
+
+Semantics chosen to work on a real codebase:
+
+- **Packages are directories (Go) or package clauses (Java).** Imports of
+  standard-library and third-party code are not nodes, so the graph describes
+  *your* architecture. Patterns match on trailing segments, so `internal/rules`
+  also names `yourmodule/internal/rules`; `/**` spans depth, `*` is one segment.
+- **Only layered packages are constrained.** A package in no layer, and any edge
+  pointing outside every layer, stays legal: describe the part you own.
+- **A `forbid` match wins over the layer verdict** for that edge — one finding
+  per illegal dependency, never two.
+- **Findings anchor at the import line**, so `-diff` mode gates brand-new edges
+  and `metricgate: ignore import-cycle …` silences exactly one of them.
+- The same constraints are rendered into `metricgate context` and
+  `get_constraints`, so a prompt states the layering the gate will enforce.
+
+Dogfooding note: switching this on for metricgate itself reported that the
+checker core depended on the package that shells out to git. The fix was a real
+split — `internal/diff` (pure line-range arithmetic, core) versus
+`internal/git` (the git adapter) — which is exactly the kind of fact this check
+exists to surface.
+
 ## Suppression (inline ignore directives)
 
 Legitimate exceptions are silenced in place, visibly (the report counts what
@@ -182,6 +231,7 @@ policy.yaml（约束模型）
   ├── parser   tree-sitter grammar per language
   ├── metrics  AST visitors → complexity / size / nesting
   ├── rules    tree-sitter query + Go filter（结构规则 + policy 编译出的 banned-api）
+  ├── arch     包依赖图：分层边界 / 禁止边 / 循环依赖（同一次 parse，whole-run pass）
   └── thresholds → findings（source: rule | metric）
      │
      ▼
@@ -190,7 +240,9 @@ policy.yaml（约束模型）
 
 Design invariants:
 
-1. **Core is a pure library.** CLI, service and future LLM stages are shells.
+1. **Core is a pure library.** CLI, service and future LLM stages are shells —
+   and the policy's `architecture:` section proves it on every run.
+
 2. **One policy, many consumers.** The checker validates code against the
    constraint model today; the context generator (v2) and skeleton generator
    (v3) produce code that must pass the same gate.
@@ -207,7 +259,7 @@ published specs where possible; deviations are documented inline.
 | Ver | Scope |
 |-----|-------|
 | v0  | Checker core + CLI + SARIF + gate + SQLite schema (this release) |
-| v1  | diff-only mode ✅ · banned-api as policy data ✅ · next: architecture/layering constraints, clone detection, class metrics, Python/TS packs |
+| v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · next: clone detection, class metrics, symbol index, Python/TS packs |
 | v2  | HTTP/gRPC service (SDK), LLM adapter interface + context generator |
 | v3  | Skeleton generator (IR + render backends), end-to-end LLM repair loop demo |
 

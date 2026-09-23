@@ -62,7 +62,7 @@ SonarQube（服务端重）；进程内嵌入 semgrep 引擎（许可与复杂�
 
 **Phase A — 约束核心自研冲刺（~1.5 周）**
 1. ~~policy banned-api 数据化（0.5d）~~ ✅ 已完成 → 组织约束从"改源码"变"改配置"
-2. 依赖图 + 分层规则 + 循环依赖（2-3d）→ 约束族 B 落地，组织级约束的最强载体
+2. ~~依赖图 + 分层规则 + 循环依赖（2-3d）~~ ✅ 已完成 → 约束族 B 落地，组织级约束的最强载体
 3. 重复检测 + diff-aware 新增重复闸门（3-4d）→ 约束族 D，"先复用再生成"
 4. Java CK 类度量（2d）→ 约束族 C 补全
 5. 符号索引 v1（2d）→ context 质量跃升（相似符号/工单定位）
@@ -124,3 +124,41 @@ flag 被静默忽略**（`check . -format json`、`check . -config prod.yaml` �
 验证：`go test ./...` 全绿（新增 7 个 ban 用例 + 4 个参数解析用例）；
 `metricgate check .` 自吃狗粮 0 error（19 warning，均为既有度量债）；
 MCP `check_code` / `get_constraints` 冒烟通过，禁令在两个触点上同源。
+
+### A-2 依赖图 + 分层约束 + 循环检测 ✅
+
+实现要点（新包 `internal/arch`：pattern / graph / tarjan / check / extract）：
+
+- **whole-run pass**：每文件 parse 时顺手抽 `package + imports[行号]`
+  （`arch.Extract`，Go/Java 各自形状：Java 的包节点是 `package_declaration`），
+  文件遍历结束后建图、跑策略；不额外 parse 一次，成本 O(边数)
+- **包身份**：Go 用「相对 run root 的目录」，Java 用 package 子句（点转斜杠）。
+  策略里的模式按**尾段对齐**匹配，所以 `internal/rules` 同时命中
+  `metricgate/internal/rules`；`*` 一段、`/**` 跨段；字面模式可后缀匹配
+- **解析方向按语言区分**（测试逼出来的）：Go import 路径即包路径（后缀匹配），
+  Java import 是「包 + 类型名」（前缀匹配），因此 `arch.File.Java` 决定 resolve 方向；
+  取最长匹配包，`com/foo` 不会被 `com/foobot` 误命中
+- **只有被分层覆盖的包受约束**：未分层包、指向"层外代码"的边一律放过 ——
+  老仓库可以只描述自己在意的那部分架构，避免上线即 500 条噪音
+- **forbid 优先于 layer**：同一条边只出一条结论，不重复报
+- **循环 = Tarjan SCC**（>1 成员才报；自环视为解析噪声）
+- 三类结论（`layer-violation` / `forbidden-edge` / `import-cycle`）走**统一 findings
+  模型**：同一闸门、同一 SARIF 目录（配置了才登记）、锚在 import 行 →
+  `-diff` 天然只卡新增边，`metricgate: ignore import-cycle ...` 可定点豁免；
+  `architecture.cycles` / `architecture.edges` 单独定级（默认 warning，不吓人）
+- context 同源：`arch.Summary(policy)` 渲染成 `layer X (…) may depend on: …` /
+  `forbid A -> B: reason` 行，进 `metricgate context` 与 MCP `get_constraints`
+
+**自吃狗粮的真实产出**：给自己打开架构层后，立刻报出
+`internal/engine → internal/diff`（core 依赖了会 `os/exec` shell out 的包），
+即"core 是纯库"这条不变量当时并不成立。处理方式不是放宽规则，而是**真拆分**：
+`internal/diff` 只留纯区间运算（Range/Intersects/Len，归 core），
+git 相关（ResolveBase/ChangedLines/parseDiff/exec）搬到新包 `internal/git`（归 adapter），
+CLI 与 MCP 改调 `git.*`。仓库现 policy 里落的三层模型：
+`cli → core/adapter`、`core → core`、`adapter → core/adapter`，
+外加 `forbid internal/** → cmd/**`（谁都不许依赖 CLI 壳）；当前 0 违规，闸门通过。
+
+测试：`internal/arch` 20 个用例（模式匹配、解析方向、外部 import 丢弃、
+SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
+（`testdata/arch` 三包真实循环、锚点行号、`testdata/archsup` 定点豁免并计入
+`Ignored`、未配置时不污染规则目录、配置后进入 SARIF 目录）。

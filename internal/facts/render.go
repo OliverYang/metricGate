@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"metricgate/internal/arch"
 	"metricgate/internal/config"
 	"metricgate/internal/metrics"
 	"metricgate/internal/model"
@@ -111,20 +112,34 @@ func symbolLine(s Symbol, o renderOpts) string {
 func constraints(cfg *config.Config, langs map[parser.LanguageID]bool) []string {
 	var out []string
 	seen := map[string]bool{}
-
-	langOrder := []parser.LanguageID{parser.LangGo, parser.LangJava}
-	for _, lang := range langOrder {
-		if !langs[lang] {
-			continue
-		}
-		for _, line := range langConstraints(cfg, lang) {
-			if !seen[line] {
-				seen[line] = true
-				out = append(out, line)
+	add := func(lines []string) {
+		for _, l := range lines {
+			if !seen[l] {
+				seen[l] = true
+				out = append(out, l)
 			}
 		}
 	}
+
+	for _, lang := range []parser.LanguageID{parser.LangGo, parser.LangJava} {
+		if langs[lang] {
+			add(langConstraints(cfg, lang))
+		}
+	}
+	// Architecture constraints are global (a dependency direction is never
+	// single-language), so they are added once, however many languages ran.
+	add(bullets(arch.Summary(cfg.ArchPolicy())))
+
 	sort.Strings(out)
+	return out
+}
+
+// bullets turns bare policy lines into context-pack bullets.
+func bullets(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, "- "+l)
+	}
 	return out
 }
 

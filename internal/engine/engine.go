@@ -17,6 +17,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
+	"metricgate/internal/arch"
 	"metricgate/internal/config"
 	"metricgate/internal/metrics"
 	"metricgate/internal/model"
@@ -71,16 +72,18 @@ func (e *Engine) Close() {
 	}
 }
 
-// Rules returns rule metadata for reports: built-in rules plus the bans
-// compiled from the policy that built this engine.
-func (e *Engine) Rules() []rules.Meta {
-	return rules.Metas(e.packs)
-}
-
 type fileResult struct {
 	findings []model.Finding
 	metrics  []model.MetricResult
 	ignored  int
+	sups     []suppression // the file's own ignore directives
+	archFile arch.File     // package + imports, for the dependency graph
+}
+
+// Rules returns rule metadata for reports: built-in rules, the bans compiled
+// from the policy, and the architecture checks when the policy declares them.
+func (e *Engine) Rules() []rules.Meta {
+	return append(rules.Metas(e.packs), archRuleMetas(e.cfg)...)
 }
 
 // Run checks every supported file under root and returns the summary.
@@ -113,7 +116,7 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 				if bigFile(path) {
 					bigSem <- struct{}{}
 				}
-				res := e.checkFile(w, path)
+				res := e.checkFile(w, root, path)
 				if bigFile(path) {
 					<-bigSem
 					// Huge files allocate large C-side trees; force Go to
@@ -136,11 +139,22 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 		close(results)
 	}()
 
+	var archFiles []arch.File
+	supsByFile := map[string][]suppression{}
 	for res := range results {
 		summary.Findings = append(summary.Findings, res.findings...)
 		summary.Metrics = append(summary.Metrics, res.metrics...)
 		summary.Ignored += res.ignored
+		if res.archFile.Pkg != "" {
+			archFiles = append(archFiles, res.archFile)
+		}
+		if res.archFile.Name != "" && len(res.sups) > 0 {
+			supsByFile[res.archFile.Name] = res.sups
+		}
 	}
+	archFindings, archIgnored := e.checkArchitecture(archFiles, supsByFile)
+	summary.Findings = append(summary.Findings, archFindings...)
+	summary.Ignored += archIgnored
 
 	model.SortFindings(summary.Findings)
 	model.SortMetrics(summary.Metrics)
@@ -210,7 +224,7 @@ func (e *Engine) collect(root string) ([]string, error) {
 // checkFile parses and analyses one file. Parse errors are reported as an
 // info finding instead of failing the run: partial trees still yield useful
 // findings, which matters when checking freshly generated LLM output.
-func (e *Engine) checkFile(w *worker, path string) fileResult {
+func (e *Engine) checkFile(w *worker, root, path string) fileResult {
 	var res fileResult
 	lang, ok := parser.LanguageForFile(filepath.Base(path))
 	if !ok {
@@ -252,21 +266,24 @@ func (e *Engine) checkFile(w *worker, path string) fileResult {
 		})
 	}
 
-	res.findings, res.metrics, res.ignored = e.analyze(lang, path, src, tree)
+	res.findings, res.metrics, res.ignored, res.sups = e.analyze(lang, path, src, tree)
+	res.archFile = archFileOf(lang, root, path, src, tree)
 	return res
 }
 
 // analyze computes findings and metric results for one parsed file with
-// suppressions applied. Shared by the file-walk path and CheckSource.
-func (e *Engine) analyze(lang parser.LanguageID, name string, src []byte, tree *sitter.Tree) (findings []model.Finding, mets []model.MetricResult, ignored int) {
+// suppressions applied, and returns the file's suppression regions so
+// whole-graph stages (architecture) can honour them too.
+func (e *Engine) analyze(lang parser.LanguageID, name string, src []byte, tree *sitter.Tree) (findings []model.Finding, mets []model.MetricResult, ignored int, sups []suppression) {
 	stats := metrics.AnalyzeFile(name, src, tree, lang)
 	mets = e.metricResults(lang, stats)
 	findings = append(findings, e.metricFindings(lang, stats)...)
 	findings = append(findings, e.runners[lang].Run(name, src, tree, e.cfg)...)
-	if sups := buildSuppressions(lang, src, tree.RootNode()); len(sups) > 0 {
+	sups = buildSuppressions(lang, src, tree.RootNode())
+	if len(sups) > 0 {
 		findings, ignored = suppress(findings, sups)
 	}
-	return findings, mets, ignored
+	return findings, mets, ignored, sups
 }
 
 // thresholds resolves the effective warn/error thresholds for a metric.
@@ -408,7 +425,7 @@ func (e *Engine) CheckSource(name string, src []byte) ([]model.Finding, error) {
 			Message: "source has syntax errors; results may be incomplete",
 		})
 	}
-	findings, _, _ = e.analyze(lang, name, src, tree)
+	findings, _, _, _ = e.analyze(lang, name, src, tree)
 	model.SortFindings(findings)
 	return findings, nil
 }

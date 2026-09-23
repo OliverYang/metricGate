@@ -35,8 +35,8 @@ languages:
         except_files: ["_test.go"]
       - kind: import
         match: os/exec
-        reason: only the git adapter may shell out
-        except_files: ["internal/diff/diff.go", "cmd/metricgate/main.go", "_test.go"]
+        reason: only the git adapter and the CLI may shell out
+        except_files: ["internal/git/git.go", "cmd/metricgate/main.go", "_test.go"]
 
   java:
     rules:
@@ -59,6 +59,41 @@ languages:
         reason: direct System.out.print* writes to the console; use the project logger
       - match: System.err.print*
         reason: direct System.err.print* writes to the console; use the project logger
+
+# The design invariants of this project, enforced on every run instead of
+# living in a README nobody re-reads: the checker core is a pure library with no
+# process boundaries and no dependence on its output adapters, and the CLI is
+# the only shell.
+architecture:
+  cycles: error
+  layers:
+    - name: cli
+      packages: ["cmd/**"]
+      may_depend_on: [core, adapter]
+    - name: core
+      packages:
+        - internal/engine
+        - internal/arch
+        - internal/rules
+        - internal/metrics
+        - internal/parser
+        - internal/config
+        - internal/model
+        - internal/diff
+      may_depend_on: [core]
+    - name: adapter
+      packages:
+        - internal/report
+        - internal/store
+        - internal/git
+        - internal/facts
+        - internal/stubs
+        - internal/sources
+      may_depend_on: [core, adapter]
+  forbid:
+    - from: internal/**
+      to: cmd/**
+      reason: nothing may depend on the CLI shell
 
 store:
   enabled: false

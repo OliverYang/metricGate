@@ -17,9 +17,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"metricgate/internal/config"
-	"metricgate/internal/diff"
 	"metricgate/internal/engine"
 	"metricgate/internal/facts"
+	"metricgate/internal/git"
 	"metricgate/internal/model"
 	"metricgate/internal/stubs"
 )
@@ -157,7 +157,7 @@ func (s *service) checkPath(ctx context.Context, req *mcp.CallToolRequest, in ch
 	}
 	out := checkPathOut{Files: summary.Files}
 	if in.DiffOnly {
-		changed, err := diff.ChangedLines("", diff.ResolveBase("", "HEAD"))
+		changed, err := git.ChangedLines("", git.ResolveBase("", "HEAD"))
 		if err != nil {
 			return nil, checkPathOut{}, err
 		}

@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"metricgate/internal/arch"
 	"metricgate/internal/model"
 )
 
@@ -56,6 +57,15 @@ type LanguageConfig struct {
 	Banned  []BanConfig             `yaml:"banned-api,omitempty"`
 }
 
+// ArchConfig is the architecture section: layer boundaries and forbidden
+// dependency directions, enforced over the package graph built by internal/arch.
+type ArchConfig struct {
+	Edges  string        `yaml:"edges,omitempty"`  // severity of layer/edge violations
+	Cycles string        `yaml:"cycles,omitempty"` // severity of import cycles
+	Layers []arch.Layer  `yaml:"layers,omitempty"`
+	Forbid []arch.Forbid `yaml:"forbid,omitempty"`
+}
+
 // GateConfig controls when the check command exits non-zero.
 type GateConfig struct {
 	FailOn string `yaml:"fail_on"` // "error" (default) or "warning"
@@ -69,11 +79,12 @@ type StoreConfig struct {
 
 // Config is the parsed policy file.
 type Config struct {
-	Version   int                       `yaml:"version"`
-	Gate      GateConfig                `yaml:"gate"`
-	Exclude   []string                  `yaml:"exclude,omitempty"`
-	Languages map[string]LanguageConfig `yaml:"languages,omitempty"`
-	Store     StoreConfig               `yaml:"store"`
+	Version      int                       `yaml:"version"`
+	Gate         GateConfig                `yaml:"gate"`
+	Exclude      []string                  `yaml:"exclude,omitempty"`
+	Languages    map[string]LanguageConfig `yaml:"languages,omitempty"`
+	Architecture ArchConfig                `yaml:"architecture,omitempty"`
+	Store        StoreConfig               `yaml:"store"`
 }
 
 // DefaultYAML is the policy emitted by `metricgate init` and used when no
@@ -138,6 +149,29 @@ languages:
       - match: System.err.print*
         reason: direct System.err.print* writes to the console; use the project logger
 
+
+# Architecture: the dependency directions this repository must keep.
+# Patterns match package names on their trailing segments, so "internal/rules"
+# also matches "yourmodule/internal/rules":
+#   internal/rules   that package only
+#   internal/*       direct children of internal
+#   internal/**      internal and everything below it
+# A package in no layer, and any dependency on code outside every layer, is
+# unconstrained: describe only the part you care about.
+# architecture:
+#   edges: error     # severity of layer / forbidden-edge violations (default warning)
+#   cycles: error    # severity of import cycles (default warning)
+#   layers:
+#     - name: handler
+#       packages: ["internal/handler/**"]
+#       may_depend_on: [service]
+#     - name: service
+#       packages: ["internal/service/**"]
+#       may_depend_on: [storage]
+#   forbid:
+#     - from: internal/storage/**
+#       to: internal/handler/**
+#       reason: storage must not know about HTTP
 
 store:
   enabled: false
@@ -242,4 +276,24 @@ func (c *Config) FailOn() model.Severity {
 		return model.SevWarning
 	}
 	return model.SevError
+}
+
+// ArchPolicy returns the architecture constraint model of this policy.
+func (c *Config) ArchPolicy() arch.Policy {
+	return arch.Policy{Layers: c.Architecture.Layers, Forbids: c.Architecture.Forbid}
+}
+
+// ArchSeverity is the severity of architecture findings. kind is "edges" for
+// layer and forbidden-edge findings, "cycles" for import cycles; both default
+// to warning so that switching architecture checking on never breaks a build
+// by surprise.
+func (c *Config) ArchSeverity(kind string) model.Severity {
+	value := c.Architecture.Edges
+	if kind == "cycles" {
+		value = c.Architecture.Cycles
+	}
+	if value == "" {
+		return model.SevWarning
+	}
+	return model.Severity(value)
 }
