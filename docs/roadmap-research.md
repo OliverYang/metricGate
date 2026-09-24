@@ -267,3 +267,55 @@ SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
   vendor 解析）；成员索引来自 facts（interface 方法集与类成员），裸函数
   与方法全覆盖，局部变量不在索引内；`SimilarElsewhere` 排除自身文件以
   避免自指提示。
+
+---
+
+## 落地记录（Phase D3：Delegate Bundle / `metricgate bundle`）
+
+**已落地**：`internal/bundle`（adapter，core 之外）+ CLI `metricgate bundle`
++ MCP `get_review_bundle`，共用唯一 builder `bundle.Build`（CLI/MCP schema
+不可能漂移）。
+
+- **Git 数据面补齐**：设计文档指出的缺口（`ChangedLines` 只有区间、无
+  unified diff/hunks）已补：`internal/git` 新增
+  `LoadChanges(ChangeRequest) ([]FileChange, error)`，支持
+  `workspace | range | commit` 三模式，返回 repo-relative path / status /
+  hunks；`ChangedLines` 改为由同一解析结果派生（
+  `ChangedLinesFromChanges`），于是 bundle 的 ranges 与 `-diff` 过滤管线
+  **输入同源**。shell-out 仍只在 `internal/git`。
+  真实临时仓库测试覆盖 staged+unstaged、untracked、rename、delete、
+  含空格/tab 的路径、range/commit、NUL name-status 畸形记录拒绝。
+- **bundle schema**：`schemaVersion / run{root,mode,base,head,commit} /
+  policy{digest,source} / selection{candidates,included,excluded,unsupported,
+  decisions} / budget{requested,used,counter,exact,budgetExhausted} /
+  constraints[]（扁平 rule|metric|constraint） / files[]{path,status,language,
+  diff{ranges},facts?,source?} / pack{included,counter,exact} / omitted[] /
+  instructions{findingSchema,onlyReportChangedCode}`。
+- **预算即契约**：预算作用于**完整序列化 JSON envelope**，不是内部片段。
+  原子项先按 required→priority→id 装箱（constraints 与当前 diff 为 required，
+  绝不静默丢失）；可选 facts 按确定性顺序移除直到 fit，否则返回结构化
+  `budget_exhausted`。`pack.Included/Omitted` 记录选取结果；facts 只有在
+  packer 收纳时才挂到 `files[].facts`，避免“报告已包含”却实际丢失。
+- **隐私/路径**：默认只发 diff + 选中 facts；完整源码需 `-include-source`
+  显式开启；`run.root` 归一化为相对路径，绝对机器路径不进入 bundle；
+  `-out` 以 `0600` 写入并提示可能含源码 diff；不联网、不调 LLM。
+- **计量诚实**：`-max-chars` 为精确 UTF-8 字节数；`-token-budget` 用
+  bytes/4 估算并在 `budget.exact` 标 `false`，不声称硬 token 上限。
+- **测试**：`internal/bundle` 8 个用例（workspace schema/selection、
+  deterministic bytes、range、commit、budget 溢出、envelope 预算、
+  绝对路径不泄漏、directory 模式、omitted 与 files 分离）；
+  MCP JSON-RPC 冒烟确认 6 个工具与 CLI 同构。
+
+**顺带修掉的真实仓库缺陷**：`.gitignore` 首行 `metricgate` 把
+`cmd/metricgate/` 目录一并忽略，导致 CLI 主源码 `main.go` **从未被 git
+跟踪**（dogfooding 抓出）。已改为 `/metricgate`、`/metricgate-mcp`
+只忽略根目录二进制，并纳入 `.pi/`。
+
+**自吃狗粮（真实重构，不放宽阈值）**：D3 落地后自家闸门先报 11 个 error，
+逐个真实修复：拆 `Build` 为 `validate/collectChanges/normalizeFacts/
+addFilesAndItems/fitEnvelope`；`cmdBundle` 抽独立文件并按
+`bundleFlags.request/emit` 分解；`cmdRules` 文本渲染抽
+`writeExplainText/printExplainItem`；拆分超标的测试函数；新增
+`internal/gittest` 共享真实 Git 测试 fixture 并让 git/bundle 测试复用，
+消除 3 个 Type-2 clone。当前 `metricgate check .` 为
+`0 errors, gate PASSED`。

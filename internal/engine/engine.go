@@ -6,10 +6,8 @@ package engine
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -112,33 +110,18 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 	return summary, nil
 }
 
-// collect walks root and returns files for supported languages, skipping
-// excluded directory names at any depth.
+// collect returns the selected filesystem paths using the same decisions
+// exposed by Preview. The report paths are relative; the worker paths remain
+// rooted as before.
 func (e *Engine) collect(root string) ([]string, error) {
-	skip := map[string]bool{}
-	for _, name := range e.cfg.Exclude {
-		skip[name] = true
-	}
-	var files []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if skip[d.Name()] && path != root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if _, ok := parser.LanguageForFile(d.Name()); ok {
-			files = append(files, path)
-		}
-		return nil
-	})
+	_, selected, err := e.scanSelection(root)
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(files)
+	files := make([]string, 0, len(selected))
+	for _, f := range selected {
+		files = append(files, f.absolute)
+	}
 	return files, nil
 }
 

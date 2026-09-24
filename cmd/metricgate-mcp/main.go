@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"metricgate/internal/bundle"
 	"metricgate/internal/config"
 	"metricgate/internal/engine"
 	"metricgate/internal/facts"
@@ -67,6 +69,10 @@ func main() {
 		Name:        "find_symbols",
 		Description: "Deterministic cross-file symbol index (0 tokens): exact lookups by name and near-miss suggestions (typos, case twins) so generated code aligns with the existing API surface. Call before inventing a new helper name.",
 	}, svc.findSymbols)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_review_bundle",
+		Description: "Build a deterministic, budgeted review input for a host agent: the current diff plus path selection, active policy constraints, and compact facts. Read-only; metricgate never calls an LLM. Prefer this over sending whole files; pass include_source only when the diff alone is insufficient.",
+	}, svc.getReviewBundle)
 
 	if err := srv.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "metricgate-mcp:", err)
@@ -88,13 +94,21 @@ type service struct {
 }
 
 type constraintsIn struct {
-	Path     string `json:"path" jsonschema:"file or directory to describe"`
-	MaxChars int    `json:"max_chars,omitempty" jsonschema:"character budget for the pack, ~4 chars per token (default 6000)"`
+	Path            string `json:"path" jsonschema:"file or directory to describe"`
+	MaxChars        int    `json:"max_chars,omitempty" jsonschema:"UTF-8 byte budget (default 6000); mutually exclusive with max_tokens"`
+	MaxTokens       int    `json:"max_tokens,omitempty" jsonschema:"approximate model token budget; marked approximate unless a tokenizer is supplied"`
+	IncludeExcluded bool   `json:"include_excluded,omitempty" jsonschema:"include paths excluded by policy, for legacy all-files context"`
 }
 
 type constraintsOut struct {
-	Pack  string `json:"pack"`
-	Files int    `json:"files"`
+	Pack     string           `json:"pack"`
+	Files    int              `json:"files"`
+	Budget   int              `json:"budget"`
+	Used     int              `json:"used"`
+	Counter  string           `json:"counter"`
+	Exact    bool             `json:"exact"`
+	Included []facts.PackRef  `json:"included"`
+	Omitted  []facts.Omission `json:"omitted"`
 }
 
 func (s *service) getConstraints(ctx context.Context, req *mcp.CallToolRequest, in constraintsIn) (*mcp.CallToolResult, constraintsOut, error) {
@@ -102,18 +116,99 @@ func (s *service) getConstraints(ctx context.Context, req *mcp.CallToolRequest, 
 	if path == "" {
 		path = "."
 	}
-	budget := in.MaxChars
-	if budget <= 0 {
-		budget = 6000
+	if in.MaxChars > 0 && in.MaxTokens > 0 {
+		return nil, constraintsOut{}, fmt.Errorf("max_chars and max_tokens are mutually exclusive")
 	}
-	files, err := facts.Collect(path)
+	var files []*facts.FileFacts
+	var err error
+	if in.IncludeExcluded {
+		files, err = facts.Collect(path)
+	} else {
+		files, err = facts.CollectSelected(path, s.cfg)
+	}
 	if err != nil {
 		return nil, constraintsOut{}, err
 	}
 	if len(files) == 0 {
-		return nil, constraintsOut{}, fmt.Errorf("no supported source files under %q", path)
+		return nil, constraintsOut{}, fmt.Errorf("no supported source files selected under %q", path)
 	}
-	return nil, constraintsOut{Pack: facts.Render(files, s.cfg, budget), Files: len(files)}, nil
+	budget, counter := in.MaxChars, facts.TokenCounter(facts.CharCounter{})
+	if in.MaxTokens > 0 {
+		budget, counter = in.MaxTokens, facts.CharEstimate{}
+	}
+	if budget <= 0 {
+		budget = 6000
+	}
+	pack, err := facts.RenderBudgeted(files, s.cfg, facts.BudgetOptions{Budget: budget, Counter: counter})
+	if err != nil {
+		return nil, constraintsOut{}, fmt.Errorf("context budget: %w", err)
+	}
+	return nil, constraintsOut{Pack: pack.Text, Files: len(files), Budget: pack.Budget, Used: pack.Used, Counter: pack.Counter, Exact: pack.Exact, Included: pack.Included, Omitted: pack.Omitted}, nil
+}
+
+type reviewBundleIn struct {
+	Path          string `json:"path,omitempty" jsonschema:"repository root (default .)"`
+	Base          string `json:"base,omitempty" jsonschema:"git base ref compared with merge-base against HEAD (default: working tree vs HEAD)"`
+	From          string `json:"from,omitempty" jsonschema:"range mode start ref (requires to)"`
+	To            string `json:"to,omitempty" jsonschema:"range mode end ref (requires from)"`
+	Commit        string `json:"commit,omitempty" jsonschema:"single-commit mode"`
+	MaxChars      int    `json:"max_chars,omitempty" jsonschema:"UTF-8 byte budget (default 6000); mutually exclusive with max_tokens"`
+	MaxTokens     int    `json:"max_tokens,omitempty" jsonschema:"approximate model token budget"`
+	IncludeSource bool   `json:"include_source,omitempty" jsonschema:"include full source of selected files (default: diff only)"`
+}
+
+// getReviewBundle reuses bundle.Build, the same builder the CLI uses, so the
+// MCP and CLI schemas cannot drift. The output is a decoded map because the
+// SDK cannot infer a schema for the self-referential facts.Symbol type; the
+// map is still returned as structuredContent carrying the full JSON bundle.
+func (s *service) getReviewBundle(ctx context.Context, req *mcp.CallToolRequest, in reviewBundleIn) (*mcp.CallToolResult, map[string]any, error) {
+	path := in.Path
+	if path == "" {
+		path = "."
+	}
+	if in.MaxChars > 0 && in.MaxTokens > 0 {
+		return nil, nil, fmt.Errorf("max_chars and max_tokens are mutually exclusive")
+	}
+	budget, counter := in.MaxChars, facts.TokenCounter(facts.CharCounter{})
+	if in.MaxTokens > 0 {
+		budget, counter = in.MaxTokens, facts.CharEstimate{}
+	}
+	if budget <= 0 {
+		budget, counter = 6000, facts.CharCounter{}
+	}
+	mode := git.ModeWorkspace
+	switch {
+	case in.Commit != "":
+		mode = git.ModeCommit
+	case in.From != "" || in.To != "":
+		if in.From == "" || in.To == "" {
+			return nil, nil, fmt.Errorf("from and to must be provided together")
+		}
+		mode = git.ModeRange
+	default:
+		if in.Base != "" {
+			in.Base = git.ResolveBase(path, in.Base)
+		}
+	}
+	b, err := bundle.Build(bundle.BuildOptions{
+		Request: bundle.Request{
+			Root: path, Mode: mode, From: in.From, To: in.To, Commit: in.Commit,
+			Budget: budget, Counter: counter, IncludeSource: in.IncludeSource,
+		},
+		Config: s.cfg,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err := json.Marshal(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
 type checkCodeIn struct {

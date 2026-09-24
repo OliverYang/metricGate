@@ -96,6 +96,9 @@ type Config struct {
 	Languages    map[string]LanguageConfig `yaml:"languages,omitempty"`
 	Architecture ArchConfig                `yaml:"architecture,omitempty"`
 	Store        StoreConfig               `yaml:"store"`
+	SourcePath   string                    `yaml:"-"`
+	SourceKind   string                    `yaml:"-"`
+	ExplicitKeys map[string]bool           `yaml:"-"`
 }
 
 // DefaultYAML is the policy emitted by `metricgate init` and used when no
@@ -197,13 +200,27 @@ store:
 
 // Default returns the built-in policy. It always parses; the error return
 // exists for symmetry with Load.
-func Default() (*Config, error) { return Load([]byte(DefaultYAML)) }
+func Default() (*Config, error) {
+	return LoadWithSource([]byte(DefaultYAML), "builtin", "")
+}
 
-// Load parses policy data and normalises it.
+// Load parses policy data and normalises it. Values are marked as coming
+// from a policy document; callers loading a known path should use LoadFile.
 func Load(data []byte) (*Config, error) {
+	return LoadWithSource(data, "policy_file", "")
+}
+
+// LoadWithSource loads YAML while retaining explicit-key provenance for
+// explain/report consumers. Existing Config values and YAML semantics are
+// unchanged; provenance is metadata, not a second policy layer.
+func LoadWithSource(data []byte, source, sourcePath string) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse policy: %w", err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parse policy keys: %w", err)
 	}
 	if c.Version == 0 {
 		c.Version = 1
@@ -217,16 +234,56 @@ func Load(data []byte) (*Config, error) {
 	if c.Languages == nil {
 		c.Languages = map[string]LanguageConfig{}
 	}
+	c.SourceKind = source
+	c.SourcePath = sourcePath
+	c.ExplicitKeys = map[string]bool{}
+	if len(doc.Content) > 0 {
+		collectYAMLKeys(doc.Content[0], "", c.ExplicitKeys)
+	}
 	return &c, nil
 }
 
-// LoadFile reads and parses a policy file from disk.
+func collectYAMLKeys(n *yaml.Node, prefix string, keys map[string]bool) {
+	if n == nil {
+		return
+	}
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			path := k.Value
+			if prefix != "" {
+				path = prefix + "." + path
+			}
+			keys[path] = true
+			collectYAMLKeys(v, path, keys)
+		}
+		return
+	}
+	for _, child := range n.Content {
+		collectYAMLKeys(child, prefix, keys)
+	}
+}
+
+// Explicit reports whether the YAML document contained this dotted key.
+func (c *Config) Explicit(key string) bool { return c != nil && c.ExplicitKeys[key] }
+
+// ValueSource returns the configured source if the key was explicitly
+// present, otherwise the supplied built-in source label.
+func (c *Config) ValueSource(key, builtin string) (source, path string, explicit bool) {
+	if c == nil || c.SourceKind == "builtin" || !c.Explicit(key) {
+		return builtin, "", false
+	}
+	return c.SourceKind, c.SourcePath, true
+}
+
+// LoadFile reads and parses a policy file from disk, preserving its path for
+// explain output.
 func LoadFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return Load(data)
+	return LoadWithSource(data, "policy_file", path)
 }
 
 func langSection(c *Config, lang string) (LanguageConfig, bool) {

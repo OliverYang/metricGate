@@ -32,7 +32,7 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
 - Local SQLite trend store (write-only in v0)
 - `metricgate context <path>`: token-budgeted constraint pack (signatures + active policy) for LLM prompts
 - CI gate: exit code 1 on violations
-- MCP stdio server (`metricgate-mcp`): get_constraints / check_code / check_path / list_stubs
+- MCP stdio server (`metricgate-mcp`): get_constraints / check_code / check_path / list_stubs / find_symbols / get_review_bundle
 - Stub detection (completeness audit) for Go and Java
 
 ## Quick start
@@ -52,6 +52,10 @@ go build -o metricgate ./cmd/metricgate
 
 # 4. constraint pack for an LLM prompt — facts + policy, budget-capped
 ./metricgate context internal/parser
+
+# 5. deterministic, budgeted review bundle for a host agent — no LLM call
+./metricgate bundle . -max-chars 6000
+./metricgate bundle . -base origin/main -out review.json
 ```
 
 ## MCP server (call it from your coding agent)
@@ -73,6 +77,7 @@ Tools exposed:
 | `check_path` | check files on disk (optionally diff-only) |
 | `list_stubs` | repair worklist: empty bodies, `panic("not implemented")`, `UnsupportedOperationException` — each with its exact definition site |
 | `find_symbols` | deterministic cross-file symbol index: exact lookups + near-miss suggestions (typos, case twins), 0 tokens |
+| `get_review_bundle` | deterministic, budgeted review input (diff + selection + constraints + facts) for a host agent; metricgate never calls an LLM |
 
 ## Banned API as policy data
 
@@ -252,6 +257,35 @@ languages:
     metrics:
       cyclomatic-complexity: { warn: 10, error: 15 }
 ```
+
+
+## Review bundle (delegate mode for a host agent)
+
+`metricgate bundle` turns a change set into one deterministic, versioned,
+budgeted JSON envelope: the current diff, path selection, active policy
+constraints, and compact facts. metricgate itself never calls an LLM; the host
+agent reasons over the envelope. The same builder backs MCP
+`get_review_bundle`, so the CLI and MCP schemas cannot drift.
+
+```bash
+metricgate bundle . -max-chars 6000            # working tree vs HEAD
+metricgate bundle . -base origin/main          # PR semantics (merge-base)
+metricgate bundle . -from base -to head        # explicit range
+metricgate bundle . -commit <sha>              # single commit
+metricgate bundle . -token-budget 1500         # approximate token budget
+metricgate bundle . -include-source -out r.json  # opt-in full source (0600)
+```
+
+- Budget applies to the **complete serialized JSON envelope**, not an inner
+  fragment. Atomic items are packed with required items first (constraints and
+  the current diff are never silently dropped); optional facts are removed
+  deterministically until it fits, else the build returns `budget_exhausted`.
+- Only the diff and selected facts are sent by default; full source is opt-in
+  (`-include-source`). Absolute machine paths never enter the bundle (`run.root`
+  is relative), and `-out` writes a `0600` file.
+- `-max-chars` reports an exact UTF-8 byte count; `-token-budget` uses a bytes/4
+  **estimate** and the envelope marks `"exact": false` — it never claims a hard
+  model-token guarantee.
 
 ## Architecture
 

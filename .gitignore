@@ -1,4 +1,6 @@
-metricgate
+/metricgate
+/metricgate-mcp
 *.sarif
 .metricgate/
 *.db
+.pi/

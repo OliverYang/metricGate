@@ -8,7 +8,6 @@ package git
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -38,30 +37,11 @@ func ResolveBase(dir, base string) string {
 // non-ignored files count as fully new. Reported paths are relative to the
 // repository root whether or not dir was given.
 func ChangedLines(dir, base string) (map[string][]diff.Range, error) {
-	out, err := run(dir, "diff", "--unified=0", "--no-color", base)
+	changes, err := LoadChanges(dir, ChangeRequest{Mode: ModeWorkspace, Base: base})
 	if err != nil {
-		// git diff exits 1 when differences exist — that is not a failure.
-		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
-			return nil, fmt.Errorf("git diff %s: %w (diff mode requires a git repository)", base, err)
-		}
+		return nil, err
 	}
-	changed := map[string][]diff.Range{}
-	parseDiff(out, changed)
-
-	listing, err := run(dir, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return changed, nil
-	}
-	for _, f := range strings.Split(listing, "\n") {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
-		}
-		if n := countLines(joinPath(dir, f)); n > 0 {
-			changed[f] = append(changed[f], diff.Range{Start: 1, End: n})
-		}
-	}
-	return changed, nil
+	return ChangedLinesFromChanges(changes), nil
 }
 
 // parseDiff collects the "+"-side hunk ranges of unified diff text.

@@ -10,13 +10,16 @@ package facts
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/clones"
+	"metricgate/internal/config"
 	"metricgate/internal/parser"
+	"metricgate/internal/selection"
 	"metricgate/internal/sources"
 	"metricgate/internal/symbols"
 )
@@ -63,6 +66,53 @@ func Collect(root string) ([]*FileFacts, error) {
 		return nil, err
 	}
 	return parseFacts(files)
+}
+
+// CollectSelected collects facts using the same directory-name exclusions
+// as Engine.Run. Collect remains available for callers that explicitly want
+// every supported source file regardless of policy.
+func CollectSelected(root string, cfg *config.Config) ([]*FileFacts, error) {
+	paths, err := sources.Files(root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		if selection.Decide(filepath.Base(root), false, cfg.Exclude).Status == selection.Included {
+			return parseFacts([]string{root})
+		}
+		return nil, nil
+	}
+	relToOriginal := make(map[string]string, len(paths))
+	relPaths := make([]string, 0, len(paths))
+	for _, path := range paths {
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil, relErr
+		}
+		rel = filepath.ToSlash(rel)
+		relPaths = append(relPaths, rel)
+		relToOriginal[rel] = path
+	}
+	var selected []string
+
+	for _, d := range selection.FilterPaths(relPaths, cfg.Exclude) {
+		if d.Status == selection.Included {
+			selected = append(selected, relToOriginal[d.Path])
+		}
+	}
+	return parseFacts(selected)
+}
+
+// CollectPaths parses exactly the supplied files without applying policy.
+// Adapters use it after making a shared selection decision.
+func CollectPaths(paths []string) ([]*FileFacts, error) {
+	ordered := append([]string(nil), paths...)
+	sort.Strings(ordered)
+	return parseFacts(ordered)
 }
 
 // RepoRoot is the directory whose fact sheets a CollectWithIndex run

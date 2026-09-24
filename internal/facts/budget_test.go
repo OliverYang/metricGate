@@ -1,0 +1,106 @@
+package facts
+
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"metricgate/internal/config"
+)
+
+func budgetFixture(t *testing.T) ([]*FileFacts, *config.Config) {
+	t.Helper()
+	cfg, err := config.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []*FileFacts{
+		{File: "pkg/a.go", Language: "go", Package: "pkg", Imports: []string{"fmt", "strings"}, Symbols: []Symbol{
+			{Name: "Run", Kind: "function", Signature: "func Run(input string) error", Visibility: "exported", StartLine: 3},
+			{Name: "privateHelper", Kind: "function", Signature: "func privateHelper() string", Visibility: "private", StartLine: 9},
+		}},
+		{File: "pkg/b.go", Language: "go", Package: "pkg", Symbols: []Symbol{
+			{Name: "Handle", Kind: "function", Signature: "func Handle(ctx Context) Result", Visibility: "exported", StartLine: 1},
+		}},
+	}
+	return files, cfg
+}
+
+func TestRenderBudgetedDeterministicWithinBudgets(t *testing.T) {
+	files, cfg := budgetFixture(t)
+	for _, budget := range []int{1000, 2000, 6000} {
+		a, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: budget, Counter: CharCounter{}, TargetFiles: []string{"pkg/a.go"}})
+		if err != nil {
+			t.Fatalf("budget %d: %v", budget, err)
+		}
+		b, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: budget, Counter: CharCounter{}, TargetFiles: []string{"pkg/a.go"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.Text != b.Text || len(a.Text) > budget || !utf8.ValidString(a.Text) {
+			t.Errorf("budget %d unstable/over/invalid: used=%d exact=%v", budget, a.Used, a.Exact)
+		}
+		if !strings.Contains(a.Text, "## constraints (policy)") {
+			t.Errorf("budget %d omitted hard constraints", budget)
+		}
+		if !containsRef(a.Included, "file:pkg/a.go") {
+			t.Errorf("budget %d omitted required target file", budget)
+		}
+	}
+}
+
+func TestRenderBudgetedReportsRequiredOverflow(t *testing.T) {
+	files, cfg := budgetFixture(t)
+	res, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: 30, Counter: CharCounter{}, TargetFiles: []string{"pkg/a.go"}})
+	if err == nil || err != ErrBudgetExhausted || !res.BudgetExhausted {
+		t.Fatalf("result=%+v err=%v, want explicit budget exhaustion", res, err)
+	}
+	if res.Text != "" {
+		t.Errorf("overflow must not return a misleading partial pack: %q", res.Text)
+	}
+	if len(res.Omitted) == 0 {
+		t.Error("overflow response must identify required items that did not fit")
+	}
+}
+
+func TestRenderBudgetedOptionalOmissionIsAtomic(t *testing.T) {
+	files, cfg := budgetFixture(t)
+	// Required header+constraints fit; required target fact will not. It must
+	// fail rather than being sliced. Without a target, optional facts may be
+	// omitted as whole items while all policy lines remain intact.
+	res, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: 800, Counter: CharCounter{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "## constraints (policy)") {
+		t.Fatal("constraints missing")
+	}
+	for _, o := range res.Omitted {
+		if o.Reason != "budget" {
+			t.Errorf("omission=%+v", o)
+		}
+	}
+	if res.Used > res.Budget || !utf8.ValidString(res.Text) {
+		t.Errorf("invalid result=%+v", res)
+	}
+}
+
+func TestTokenEstimateDeclaresApproximation(t *testing.T) {
+	files, cfg := budgetFixture(t)
+	res, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: 1500, Counter: CharEstimate{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Exact || res.Counter != "bytes-div-4-estimate-v1" || res.Used <= 0 {
+		t.Errorf("estimate metadata = %+v", res)
+	}
+}
+
+func containsRef(refs []PackRef, id string) bool {
+	for _, r := range refs {
+		if r.ID == id {
+			return true
+		}
+	}
+	return false
+}
