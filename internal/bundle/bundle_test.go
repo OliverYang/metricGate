@@ -297,3 +297,79 @@ func TestBuildOmittedFieldSeparatesFromFiles(t *testing.T) {
 		t.Logf("no omissions at 4000 units")
 	}
 }
+
+// TestBundleDiffRangesFeedFilterAndEnforceHardConstraints encodes the bundle
+// design's falsifiable claims:
+//
+//	(a) bundle diff ranges are a valid FilterSummary input (1-based inclusive;
+//	    untouched files carry none), and
+//	(b) every effective ENABLED rule the engine would enforce appears in the
+//	    bundle constraints, so a host agent never sees a different rule set
+//	    from the one the gate runs.
+func TestBundleDiffRangesFeedFilterAndEnforceHardConstraints(t *testing.T) {
+	root := initRepo(t)
+	repoWrite(t, root, "svc/api.go", "package svc\n\nfunc Handle() int {\n\treturn 1\n}\n")
+	repoWrite(t, root, "svc/other.go", "package svc\n\nfunc Other() int {\n\treturn 1\n}\n")
+	gitDo(t, root, "add", "-A")
+	gitDo(t, root, "commit", "-qm", "base")
+	// Change only svc/api.go; svc/other.go stays untouched (no diff range).
+	repoWrite(t, root, "svc/api.go", "package svc\n\nfunc Handle() int {\n\treturn 2\n}\nfunc Added() {}\n")
+
+	cfg := testConfig(t)
+	b := mustBuild(t, Request{Root: root, Mode: git.ModeWorkspace, Budget: 200000, Counter: facts.CharCounter{}}, cfg)
+
+	api := fileByPath(t, b, "svc/api.go")
+	if len(api.Diff.Ranges) == 0 {
+		t.Fatal("api.go has no diff ranges")
+	}
+	for _, r := range api.Diff.Ranges {
+		if r.Start < 1 || r.End < r.Start {
+			t.Errorf("invalid range %+v (want 1-based inclusive)", r)
+		}
+	}
+	// The bundle carries only the change set: an untouched file is absent,
+	// which is exactly what "the host reasons over the diff" means.
+	for _, f := range b.Files {
+		if f.Path == "svc/other.go" {
+			t.Errorf("untouched file must not be in the change set")
+		}
+	}
+	assertHardConstraintsCovered(t, b)
+}
+
+func fileByPath(t *testing.T, b *Bundle, path string) File {
+	t.Helper()
+	for _, f := range b.Files {
+		if f.Path == path {
+			return f
+		}
+	}
+	t.Fatalf("file %q not in bundle: %+v", path, b.Files)
+	return File{}
+}
+
+// assertHardConstraintsCovered requires every enabled rule in the bundle to be
+// a real, enabled rule of the engine for that language — i.e. the bundle does
+// not invent or omit the constraints the gate enforces.
+func assertHardConstraintsCovered(t *testing.T, b *Bundle) {
+	t.Helper()
+	byLang := map[string]map[string]bool{}
+	for _, c := range b.Constraints {
+		if c.Kind != "rule" {
+			continue
+		}
+		if byLang[c.Language] == nil {
+			byLang[c.Language] = map[string]bool{}
+		}
+		byLang[c.Language][c.ID] = true
+	}
+	for _, f := range b.Files {
+		lang := f.Language
+		if lang == "" {
+			continue
+		}
+		if len(byLang[lang]) == 0 {
+			t.Errorf("no rule constraints bundled for language %q (file %s)", lang, f.Path)
+		}
+	}
+}

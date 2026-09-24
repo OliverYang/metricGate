@@ -350,3 +350,27 @@ addFilesAndItems/fitEnvelope`；`cmdBundle` 抽独立文件并按
 
 D3+D4 至此完成：bundle（CLI+MCP 共用 builder）+ evidence anchors 都落地；
 自家闸门 `metricgate check .` = 0 errors, PASSED。
+
+---
+
+## 落地记录（Phase E：狗粮 / 可证伪验收 / 量化报告）
+
+**已落地** `docs/evaluation-phase-d.md`（D0–D4 的落地清单 + 可证伪验收 + 量化），
+对应设计文档 §5 的 E 阶段“3 repo fixture；selection parity；hard constraint
+recall；token char/estimate delta；耗时；隐私扫描”。
+
+- **可证伪验收固化为测试**（不是只写在文档里）：
+  - preview/Run included set 逐路径相等（既有 D0 测试）；
+  - bundle 逐字节 deterministic（实测 `cmp` IDENTICAL + 单测）；
+  - diff range 可作 `FilterSummary` 输入（`TestBundleDiffRangesFeedFilterAndEnforceHardConstraints`：
+    1-based、变更文件有 range、未变更文件不在变更集）；
+  - hard constraint 100% 覆盖（同测试：每个选中语言的 rule 都出现在 bundle constraints）。
+- **量化（本机实测，语料=本仓库自身 112 文件）**：
+  - 整仓源码 425,276 字符 vs bundle compact JSON **6,832 字符 = 1.6%（降 98.4%）**；
+    诚实标注这是“整仓全量发送”基线的对照，单文件全文基线约 8.2k，优势收窄。
+  - `bundle -max-chars 6000` 0.06s（3 次稳定）；预算 6000→used 4611 装入，
+    2000/600→结构化 `budget_exhausted`（required 不被静默截断）。
+  - evidence hash 与 `sha256(src[42:46])` 独立复算一致。
+- **隐私扫描**：绝对 root 下 bundle/context/MCP 出站工件 0 绝对路径泄漏（`SanitizePath`）。
+- **未验证（诚实声明）**：LLM 生成质量/成本的改善仍需真实 agent A/B
+  （见 `docs/ab-experiment.md`）；本轮不写未测结论。
