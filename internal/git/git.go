@@ -48,32 +48,42 @@ func ChangedLines(dir, base string) (map[string][]diff.Range, error) {
 	return ChangedLinesFromChanges(changes), nil
 }
 
-// parseDiff collects the "+"-side hunk ranges of unified diff text.
+// parseDiff collects the "+"-side hunk ranges of unified diff text. The
+// per-line decisions (filename tracker, hunk header matcher) live in a
+// helper so this loop stays flat under the cognitive-complexity gate.
 func parseDiff(d string, changed map[string][]diff.Range) {
 	cur := ""
 	for _, line := range strings.Split(d, "\n") {
-		switch {
-		case strings.HasPrefix(line, "+++ b/"):
+		if strings.HasPrefix(line, "+++ b/") {
 			cur = strings.TrimPrefix(line, "+++ b/")
-		case strings.HasPrefix(line, "@@"):
-			if cur == "" {
-				continue
-			}
-			if m := hunkRe.FindStringSubmatch(line); m != nil {
-				start, _ := strconv.Atoi(m[1])
-				count := 1
-				if m[2] != "" {
-					count, _ = strconv.Atoi(m[2])
-				}
-				if count > 0 {
-					changed[cur] = append(changed[cur], diff.Range{Start: start, End: start + count - 1})
-				}
-			}
+			continue
 		}
+		if !strings.HasPrefix(line, "@@") || cur == "" {
+			continue
+		}
+		recordDiffHunk(cur, line, changed)
 	}
 }
 
 // run runs a git command and returns trimmed stdout.
+
+// recordDiffHunk appends one hunk's "+" range to the changed map when the
+// header parses and the new-side count is non-zero. A malformed header is
+// dropped silently: the next hunk in the same file still gets recorded.
+func recordDiffHunk(file, header string, changed map[string][]diff.Range) {
+	m := hunkRe.FindStringSubmatch(header)
+	if m == nil {
+		return
+	}
+	start, _ := strconv.Atoi(m[1])
+	count := 1
+	if m[2] != "" {
+		count, _ = strconv.Atoi(m[2])
+	}
+	if count > 0 {
+		changed[file] = append(changed[file], diff.Range{Start: start, End: start + count - 1})
+	}
+}
 func run(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	if dir != "" {
@@ -126,6 +136,9 @@ func Archive(dir, ref string) (string, func(), error) {
 	return tmp, cleanup, nil
 }
 
+// extractTar walks a tar stream and materialises each entry under dest. The
+// top-level loop only steers control flow; per-entry materialisation lives
+// in helpers so each function stays under the complexity gates.
 func extractTar(data []byte, dest string) error {
 	tr := tar.NewReader(bytes.NewReader(data))
 	for {
@@ -136,28 +149,40 @@ func extractTar(data []byte, dest string) error {
 		if err != nil {
 			return fmt.Errorf("read archive: %w", err)
 		}
-		// Skip links/odd entries; only materialise regular files and dirs.
-		target := filepath.Join(dest, filepath.FromSlash(hdr.Name))
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			f, err := os.Create(target)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return err
-			}
-			if err := f.Close(); err != nil {
-				return err
-			}
+		if err := materialiseTarEntry(tr, hdr, dest); err != nil {
+			return err
 		}
 	}
+}
+
+// materialiseTarEntry skips symlinks / odd entries and writes either a
+// directory or a regular file. Keeping the per-entry work in one place lets
+// extractTar stay linear and easy to read.
+func materialiseTarEntry(tr *tar.Reader, hdr *tar.Header, dest string) error {
+	target := filepath.Join(dest, filepath.FromSlash(hdr.Name))
+	switch hdr.Typeflag {
+	case tar.TypeDir:
+		return os.MkdirAll(target, 0o755)
+	case tar.TypeReg:
+		return writeRegularTarFile(target, tr)
+	}
+	return nil
+}
+
+// writeRegularTarFile creates the parent directory, copies the entry body,
+// and closes the file. Errors from any step propagate to the caller; the
+// caller has already opened the archive, so a partial file is fine.
+func writeRegularTarFile(target string, src io.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, src); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }

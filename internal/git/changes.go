@@ -173,6 +173,10 @@ func changePaths(c FileChange) []string {
 	return paths
 }
 
+// parseNameStatusZ walks git's `--name-status -z` output. The loop only
+// dispatches on the status code; the rename/copy and plain-status branches
+// each live in their own helper so this function stays flat under the
+// cognitive-complexity gate.
 func parseNameStatusZ(data []byte) ([]FileChange, error) {
 	fields := nulFields(data)
 	var out []FileChange
@@ -182,39 +186,56 @@ func parseNameStatusZ(data []byte) ([]FileChange, error) {
 		if status == "" {
 			continue
 		}
-		code := status[:1]
-		if code == "R" || code == "C" {
-			if i+1 >= len(fields) {
-				return nil, fmt.Errorf("malformed NUL name-status record %q", status)
-			}
-			oldPath, newPath := fields[i], fields[i+1]
-			i += 2
-			if oldPath == "" || newPath == "" {
-				return nil, fmt.Errorf("empty path in NUL name-status record %q", status)
-			}
-			out = append(out, FileChange{Path: newPath, OldPath: oldPath, NewPath: newPath, Status: code})
-			continue
+		change, next, err := parseZRecord(status, fields, i)
+		if err != nil {
+			return nil, err
 		}
-		if i >= len(fields) {
-			return nil, fmt.Errorf("missing path after status %q", status)
-		}
-		path := fields[i]
-		i++
-		if path == "" {
-			return nil, fmt.Errorf("empty path after status %q", status)
-		}
-		oldPath, newPath := path, path
-		if code == "A" {
-			oldPath = ""
-		}
-		if code == "D" {
-			newPath = ""
-		}
-		out = append(out, FileChange{Path: path, OldPath: oldPath, NewPath: newPath, Status: code})
+		i = next
+		out = append(out, change)
 	}
 	return out, nil
 }
 
+// parseZRecord turns one (status, rest-of-fields) pair into a FileChange
+// and reports how many fields it consumed. Rename/copy records take two
+// path slots; everything else takes one. The helper centralises the two
+// error paths so the loop above stays one-directional.
+func parseZRecord(status string, fields []string, i int) (FileChange, int, error) {
+	code := status[:1]
+	switch {
+	case code == "R" || code == "C":
+		if i+1 >= len(fields) {
+			return FileChange{}, i, fmt.Errorf("malformed NUL name-status record %q", status)
+		}
+		oldPath, newPath := fields[i], fields[i+1]
+		if oldPath == "" || newPath == "" {
+			return FileChange{}, i, fmt.Errorf("empty path in NUL name-status record %q", status)
+		}
+		return FileChange{Path: newPath, OldPath: oldPath, NewPath: newPath, Status: code}, i + 2, nil
+	default:
+		return parseZPlain(status, code, fields, i)
+	}
+}
+
+// parseZPlain handles non-rename/copy records: a single path slot, with
+// the empty old/new path conventions for added and deleted entries.
+func parseZPlain(status, code string, fields []string, i int) (FileChange, int, error) {
+	if i >= len(fields) {
+		return FileChange{}, i, fmt.Errorf("missing path after status %q", status)
+	}
+	path := fields[i]
+	if path == "" {
+		return FileChange{}, i, fmt.Errorf("empty path after status %q", status)
+	}
+	oldPath, newPath := path, path
+	if code == "A" {
+		oldPath = ""
+	}
+	if code == "D" {
+		newPath = ""
+	}
+	return FileChange{Path: path, OldPath: oldPath, NewPath: newPath, Status: code}, i + 1, nil
+}
 func nulFields(data []byte) []string {
 	parts := bytes.Split(data, []byte{0})
 	out := make([]string, 0, len(parts))
