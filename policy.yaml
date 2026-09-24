@@ -96,5 +96,5 @@ architecture:
       reason: nothing may depend on the CLI shell
 
 store:
-  enabled: false
+  enabled: true
   path: ".metricgate/history.db"

@@ -194,7 +194,7 @@ languages:
 #       reason: storage must not know about HTTP
 
 store:
-  enabled: false
+  enabled: true
   path: ".metricgate/history.db"
 `
 
