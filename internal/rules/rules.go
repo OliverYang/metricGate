@@ -149,11 +149,13 @@ func (r *Runner) Severity(p Policy, id string, def model.Severity) model.Severit
 	return def
 }
 
-// Run applies every enabled rule to one parsed file.
+// Run applies every enabled rule to one parsed file. The setup (enable
+// check, severity, options) is kept in Run; per-rule cursor iteration and
+// per-match capture handling live in helpers so Run stays under the
+// cognitive-complexity gate.
 func (r *Runner) Run(file string, src []byte, tree *sitter.Tree, p Policy) []model.Finding {
 	var findings []model.Finding
 	root := tree.RootNode()
-
 	for _, cr := range r.compiled {
 		rule := cr.rule
 		if !r.Enabled(p, rule.ID, rule.DefaultEnabled) {
@@ -164,38 +166,55 @@ func (r *Runner) Run(file string, src []byte, tree *sitter.Tree, p Policy) []mod
 		if p != nil {
 			opts = p.RuleOptions(r.lang, rule.ID)
 		}
-
-		cursor := sitter.NewQueryCursor()
-		matches := cursor.Matches(cr.query, root, src)
-		for {
-			m := matches.Next()
-			if m == nil {
-				break
-			}
-			caps := make(map[string]*sitter.Node, len(m.Captures))
-			for _, cap := range m.Captures {
-				name := "unknown"
-				if int(cap.Index) < len(cr.capIdx) {
-					name = cr.capIdx[cap.Index]
-				}
-				if _, seen := caps[name]; !seen {
-					node := cap.Node
-					caps[name] = &node
-				}
-			}
-			ctx := &MatchCtx{File: file, Src: src, Severity: sev, Options: opts, Captures: caps}
-			if f := rule.OnMatch(ctx); f != nil {
-				f.RuleID = rule.ID
-				f.Severity = sev
-				f.Source = model.SrcRule
-				f.File = file
-				attachEvidence(f, ctx, rule.AnchorCapture)
-				findings = append(findings, *f)
-			}
-		}
-		cursor.Close()
+		findings = append(findings, runOneRule(rule, cr, root, src, file, sev, opts)...)
 	}
 	return findings
+}
+
+// runOneRule drives the tree-sitter cursor for one compiled rule and
+// collects the findings produced. Cursor lifetime is owned here so the
+// caller never has to remember to Close it.
+func runOneRule(rule *Rule, cr *compiledRule, root *sitter.Node, src []byte, file string, sev model.Severity, opts map[string]any) []model.Finding {
+	var out []model.Finding
+	cursor := sitter.NewQueryCursor()
+	matches := cursor.Matches(cr.query, root, src)
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		caps := collectCaps(m, cr.capIdx)
+		ctx := &MatchCtx{File: file, Src: src, Severity: sev, Options: opts, Captures: caps}
+		if f := rule.OnMatch(ctx); f != nil {
+			f.RuleID = rule.ID
+			f.Severity = sev
+			f.Source = model.SrcRule
+			f.File = file
+			attachEvidence(f, ctx, rule.AnchorCapture)
+			out = append(out, *f)
+		}
+	}
+	cursor.Close()
+	return out
+}
+
+// collectCaps turns a tree-sitter match's capture slice into a name -> node
+// map. Only the first node per capture name is kept, matching the rest of
+// the engine's "first wins" expectation.
+func collectCaps(m *sitter.QueryMatch, capIdx []string) map[string]*sitter.Node {
+	caps := make(map[string]*sitter.Node, len(m.Captures))
+	for _, cap := range m.Captures {
+		name := "unknown"
+		if int(cap.Index) < len(capIdx) {
+			name = capIdx[cap.Index]
+		}
+		if _, seen := caps[name]; seen {
+			continue
+		}
+		node := cap.Node
+		caps[name] = &node
+	}
+	return caps
 }
 
 // attachEvidence records the finding's deterministic anchor. When the rule
