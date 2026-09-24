@@ -319,3 +319,34 @@ addFilesAndItems/fitEnvelope`；`cmdBundle` 抽独立文件并按
 `internal/gittest` 共享真实 Git 测试 fixture 并让 git/bundle 测试复用，
 消除 3 个 Type-2 clone。当前 `metricgate check .` 为
 `0 errors, gate PASSED`。
+
+---
+
+## 落地记录（Phase D4：Evidence Anchor）
+
+**已落地**：`model.Finding` 新增可选 `evidence`（`startByte/endByte/snippetHash/anchorStatus`），
+把“确定性锚点”做成可机器校验的证据，而不是只有行列号。
+
+- `model.Evidence` + `model.NewEvidence(src,start,end)`：对**原始字节区间**
+  直接 SHA-256（不 trim / 不 normalize）。编辑使 span 位移或改写 → hash 变 →
+  宿主可判定锚点失效。span 越界时降级为 `line_only`，不谎报精确位置。
+- 锚点级别：`exact`（规则命中 AST 节点，有 byte span + hash）/
+  `line_only`（度量、parse/read 错误、架构、clone 等只有行号）/
+  `unanchored`（保留枚举）。
+- `rules.Rule` 新增 `AnchorCapture`：声明哪个 capture 的节点区间成为锚点
+  （`empty-block→blk`、`todo-comment→c`、`banned call→call`、`banned import→path`、
+  Java `print-stack-trace→call`）。`Runner.Run` 集中 `attachEvidence`，
+  规则回调只管匹配决策，不各自算 hash。
+- `Engine.Run` 与 `Engine.CheckSource` 末尾统一 `ensureEvidence`：所有 finding
+  都有 `anchorStatus`（有 span 的保持 exact，其余标 line_only），宿主无需从
+  “字段缺失”去猜。
+- 出口：SARIF `result.properties.evidence`（locations 仍是权威编辑器位置，
+  不改 schema）；check JSON 的 finding 内联 `evidence`。
+- 测试：`CheckSource` 锚点（empty-block=exact 且 span 命中 `{ }`、
+  metric=line_only、所有 finding 都有锚点）；hash 随 span 变化；
+  越界降级；SARIF properties 携带 evidence 且 location 不变。
+- 实测：`check . -format json` 与 `-sarif` 中 `empty-block` 的
+  `snippetHash` 与 `python3 hashlib.sha256(src[42:46])` 完全一致（span 为 `{\n\t}`）。
+
+D3+D4 至此完成：bundle（CLI+MCP 共用 builder）+ evidence anchors 都落地；
+自家闸门 `metricgate check .` = 0 errors, PASSED。

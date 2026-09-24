@@ -69,7 +69,12 @@ type Rule struct {
 	DefaultSeverity model.Severity
 	DefaultEnabled  bool
 	Query           string
-	OnMatch         func(ctx *MatchCtx) *model.Finding
+	// AnchorCapture names the capture whose node span becomes the finding's
+	// Evidence. Empty means the rule has no single AST span (a line_only
+	// anchor is recorded instead). The runner attaches evidence centrally, so
+	// rule callbacks stay focused on the match decision.
+	AnchorCapture string
+	OnMatch       func(ctx *MatchCtx) *model.Finding
 }
 
 // Policy resolves per-rule configuration overrides. Implemented by the engine.
@@ -184,12 +189,27 @@ func (r *Runner) Run(file string, src []byte, tree *sitter.Tree, p Policy) []mod
 				f.Severity = sev
 				f.Source = model.SrcRule
 				f.File = file
+				attachEvidence(f, ctx, rule.AnchorCapture)
 				findings = append(findings, *f)
 			}
 		}
 		cursor.Close()
 	}
 	return findings
+}
+
+// attachEvidence records the finding's deterministic anchor. When the rule
+// names an AST capture, the exact byte span and its hash are captured; the
+// callback's own line/column region is kept as the authoritative editor
+// location either way. Rules without a span get a line_only anchor so a
+// consumer can tell "no byte proof" from "byte proof missing".
+func attachEvidence(f *model.Finding, ctx *MatchCtx, capture string) {
+	n := ctx.Captures[capture]
+	if capture == "" || n == nil {
+		f.Evidence = &model.Evidence{Anchor: model.AnchorLineOnly}
+		return
+	}
+	f.Evidence = model.NewEvidence(ctx.Src, n.StartByte(), n.EndByte())
 }
 
 // Meta is rule metadata for reports (SARIF driver.rules).
@@ -228,6 +248,7 @@ func todoCommentRule(commentQuery string) *Rule {
 		DefaultSeverity: model.SevInfo,
 		DefaultEnabled:  false,
 		Query:           commentQuery,
+		AnchorCapture:   "c",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
 			c := ctx.Text(ctx.Captures["c"])
 			what := ""
@@ -258,6 +279,7 @@ func newEmptyBlockRule(query string) *Rule {
 		DefaultSeverity: model.SevWarning,
 		DefaultEnabled:  true,
 		Query:           query,
+		AnchorCapture:   "blk",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
 			blk := ctx.Captures["blk"]
 			if blk.NamedChildCount() != 0 {

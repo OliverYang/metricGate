@@ -26,6 +26,7 @@ func printStackTrace() *Rule {
 (method_invocation
   name: (identifier) @fn) @call
 `,
+		AnchorCapture: "call",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
 			if ctx.Text(ctx.Captures["fn"]) != "printStackTrace" {
 				return nil

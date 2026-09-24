@@ -4,6 +4,8 @@ package model
 
 import (
 	"cmp"
+	"crypto/sha256"
+	"encoding/hex"
 	"sort"
 	"strings"
 	"time"
@@ -51,6 +53,47 @@ type Finding struct {
 	EndLine   int      `json:"endLine"`
 	EndCol    int      `json:"endColumn"`
 	Message   string   `json:"message"`
+	// Evidence is optional, machine-checkable proof of the finding's exact
+	// source span. It is nil for file-level findings that have no AST node
+	// (metrics anchored only by line). SARIF locations stay authoritative;
+	// Evidence rides in result.properties and is revalidated after an edit
+	// by hashing the same byte range.
+	Evidence *Evidence `json:"evidence,omitempty"`
+}
+
+// AnchorStatus records how precisely a finding's location was captured.
+const (
+	AnchorExact      = "exact"      // byte span + snippet hash from an AST node
+	AnchorLineOnly   = "line_only"  // line/column only, no byte span
+	AnchorUnanchored = "unanchored" // no reliable location
+)
+
+// Evidence is the deterministic anchor for a finding: the byte span it was
+// extracted from and the SHA-256 of those exact bytes. Hashing the raw bytes
+// (no trim/normalize) lets a consumer detect that an edit invalidated the
+// anchor, so a host agent can trust the location it is asked to fix.
+type Evidence struct {
+	StartByte   uint   `json:"startByte,omitempty"`
+	EndByte     uint   `json:"endByte,omitempty"`
+	SnippetHash string `json:"snippetHash,omitempty"`
+	Anchor      string `json:"anchorStatus"` // exact|line_only|unanchored
+}
+
+// NewEvidence builds exact evidence from a source byte span: the raw bytes are
+// hashed as-is (no trim/normalize), so a later edit that shifts or rewrites the
+// span changes the hash and invalidates the anchor. Out-of-range spans degrade
+// to line_only rather than lying about an exact location.
+func NewEvidence(src []byte, start, end uint) *Evidence {
+	if int(end) > len(src) || start > end {
+		return &Evidence{Anchor: AnchorLineOnly}
+	}
+	sum := sha256.Sum256(src[start:end])
+	return &Evidence{
+		StartByte:   start,
+		EndByte:     end,
+		SnippetHash: "sha256:" + hex.EncodeToString(sum[:]),
+		Anchor:      AnchorExact,
+	}
 }
 
 // MetricResult is one measured value for one scope (a function, or the file).

@@ -106,8 +106,22 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 
 	model.SortFindings(summary.Findings)
 	model.SortMetrics(summary.Metrics)
+	ensureEvidence(summary.Findings)
 	summary.Duration = time.Since(start)
 	return summary, nil
+}
+
+// ensureEvidence gives every finding an anchor status. Rules that matched an
+// AST node already set exact evidence; everything else (metrics, parse/read
+// errors, architecture and clone findings) is honestly marked line_only, so a
+// consumer can distinguish "byte-proof" from "location only" rather than
+// guessing from a missing field.
+func ensureEvidence(findings []model.Finding) {
+	for i := range findings {
+		if findings[i].Evidence == nil {
+			findings[i].Evidence = &model.Evidence{Anchor: model.AnchorLineOnly}
+		}
+	}
 }
 
 // collect returns the selected filesystem paths using the same decisions
@@ -410,5 +424,6 @@ func (e *Engine) CheckSource(name string, src []byte) ([]model.Finding, error) {
 	}
 	findings, _, _, _ = e.analyze(lang, name, src, tree)
 	model.SortFindings(findings)
+	ensureEvidence(findings)
 	return findings, nil
 }

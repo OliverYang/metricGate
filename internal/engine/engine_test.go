@@ -121,3 +121,88 @@ func TestTodoRuleToggle(t *testing.T) {
 		t.Errorf("java todo-comment = %d, want 1", javaCounts["todo-comment"])
 	}
 }
+
+// TestCheckSourceAnchorsFindings proves every finding carries an anchor and
+// that a rule match on an AST node yields an exact byte span + snippet hash,
+// while a file-level metric is honestly line_only.
+func TestCheckSourceAnchorsFindings(t *testing.T) {
+	eng, err := New(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	src := "package x\n\nfunc F() {\n\tif true {\n\t}\n}\n"
+	findings, err := eng.CheckSource("a.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := findingByRule(findings, "empty-block")
+	if empty == nil {
+		t.Fatalf("no empty-block finding: %+v", findings)
+	}
+	assertExactAnchor(t, src, empty)
+	if metric := findingByRule(findings, "cyclomatic-complexity"); metric != nil {
+		assertLineOnlyAnchor(t, metric)
+	}
+	for _, f := range findings {
+		if f.Evidence == nil {
+			t.Errorf("finding %s has no anchor", f.RuleID)
+		}
+	}
+}
+
+func findingByRule(findings []model.Finding, ruleID string) *model.Finding {
+	for i := range findings {
+		if findings[i].RuleID == ruleID {
+			return &findings[i]
+		}
+	}
+	return nil
+}
+
+func assertExactAnchor(t *testing.T, src string, f *model.Finding) {
+	t.Helper()
+	if f.Evidence == nil || f.Evidence.Anchor != model.AnchorExact {
+		t.Fatalf("anchor = %+v, want exact", f.Evidence)
+	}
+	span := src[f.Evidence.StartByte:f.Evidence.EndByte]
+	if span != "{\n\t}" && span != "{}" {
+		t.Errorf("anchor span = %q, want the empty block", span)
+	}
+	if !strings.HasPrefix(f.Evidence.SnippetHash, "sha256:") {
+		t.Errorf("snippet hash = %q", f.Evidence.SnippetHash)
+	}
+}
+
+func assertLineOnlyAnchor(t *testing.T, f *model.Finding) {
+	t.Helper()
+	if f.Evidence == nil || f.Evidence.Anchor != model.AnchorLineOnly {
+		t.Errorf("metric anchor = %+v, want line_only", f.Evidence)
+	}
+}
+
+// TestEvidenceHashChangesWhenSpanEdited proves the anchor is revalidation:
+// editing the span changes the hash, so a host agent can detect a stale anchor.
+func TestEvidenceHashChangesWhenSpanEdited(t *testing.T) {
+	first := model.NewEvidence([]byte("if x {\n}\n"), 0, 6)
+	second := model.NewEvidence([]byte("if y {\n}\n"), 0, 6)
+	if first.SnippetHash == second.SnippetHash {
+		t.Errorf("hash did not change when the span changed: %s", first.SnippetHash)
+	}
+	if first.Anchor != model.AnchorExact {
+		t.Errorf("anchor = %q, want exact", first.Anchor)
+	}
+}
+
+// TestNewEvidenceDegradesOutOfRangeSpan keeps the anchor honest: a bad span
+// must not claim an exact location.
+func TestNewEvidenceDegradesOutOfRangeSpan(t *testing.T) {
+	got := model.NewEvidence([]byte("short"), 0, 999)
+	if got.Anchor != model.AnchorLineOnly {
+		t.Errorf("out-of-range anchor = %q, want line_only", got.Anchor)
+	}
+	if got.SnippetHash != "" {
+		t.Errorf("out-of-range span must not carry a hash: %q", got.SnippetHash)
+	}
+}

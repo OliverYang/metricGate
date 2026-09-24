@@ -51,6 +51,10 @@ type sarifResult struct {
 
 type sarifProps struct {
 	Source model.Source `json:"source"`
+	// Evidence carries the deterministic anchor (byte span + snippet hash)
+	// inside result.properties, so it never alters the SARIF locations that
+	// editors and GitHub code scanning rely on.
+	Evidence *model.Evidence `json:"evidence,omitempty"`
 }
 
 type sarifLoc struct {
@@ -115,7 +119,7 @@ func SARIF(s *model.RunSummary, toolVersion string, ruleMetas []rules.Meta) ([]b
 					},
 				},
 			}},
-			Properties: sarifProps{Source: f.Source},
+			Properties: sarifProps{Source: f.Source, Evidence: f.Evidence},
 		})
 	}
 

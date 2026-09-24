@@ -226,7 +226,8 @@ func callRule(b Ban, query string, match func(*MatchCtx) (string, bool)) *Rule {
 	return &Rule{
 		ID: b.RuleID(), Title: b.Title(),
 		DefaultSeverity: model.SevWarning, DefaultEnabled: true,
-		Query: query,
+		Query:         query,
+		AnchorCapture: "call",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
 			if excluded(ctx, b) {
 				return nil
@@ -246,7 +247,8 @@ func importRule(b Ban, query string, path func(*MatchCtx) string) *Rule {
 	return &Rule{
 		ID: b.RuleID(), Title: b.Title(),
 		DefaultSeverity: model.SevWarning, DefaultEnabled: true,
-		Query: query,
+		Query:         query,
+		AnchorCapture: "path",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
 			if excluded(ctx, b) {
 				return nil
