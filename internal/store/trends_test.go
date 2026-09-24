@@ -20,14 +20,7 @@ func TestSeverityTrend(t *testing.T) {
 	}
 	defer st.Close()
 
-	plans := []struct {
-		errs, warns, infos int
-	}{
-		{errs: 1, warns: 2, infos: 0},
-		{errs: 0, warns: 1, infos: 3},
-		{errs: 2, warns: 0, infos: 1},
-	}
-	for _, p := range plans {
+	for _, p := range severityTrendPlans {
 		sum := &model.RunSummary{
 			Files:    1,
 			Duration: time.Millisecond,
@@ -36,34 +29,43 @@ func TestSeverityTrend(t *testing.T) {
 		if _, err := st.SaveRun(sum, "0.1.0", "deadbeef"); err != nil {
 			t.Fatalf("SaveRun: %v", err)
 		}
-		// Sleep is unnecessary: SaveRun is synchronous and modernc/sqlite
-		// stamps started_at from Go's wall clock per call. If two runs end
-		// up with the same RFC3339 string (sub-second ties), the inner id
-		// ordering must still keep them stable.
 	}
 
 	trend, err := st.SeverityTrend(0)
 	if err != nil {
 		t.Fatalf("SeverityTrend: %v", err)
 	}
-	if trend.Runs != len(plans) {
-		t.Fatalf("Runs = %d, want %d", trend.Runs, len(plans))
-	}
-	if len(trend.Series) != len(plans) {
-		t.Fatalf("Series len = %d, want %d", len(trend.Series), len(plans))
-	}
+	assertSeverityTrend(t, trend, severityTrendPlans)
+}
 
-	// Each point should report the same severity counts we wrote in. The
-	// series is oldest first, so plans[0] → series[0], etc.
-	for i, p := range plans {
+// severityTrendPlans is the input fixture for TestSeverityTrend. Each entry
+// is the (E, W, I) severity counts of one stored run, in insertion order.
+var severityTrendPlans = []struct {
+	errs, warns, infos int
+}{
+	{errs: 1, warns: 2, infos: 0},
+	{errs: 0, warns: 1, infos: 3},
+	{errs: 2, warns: 0, infos: 1},
+}
+
+// assertSeverityTrend checks a SeverityTrend against the expected plan: the
+// number of points, the time ordering, and the per-point severity counts.
+// Extracted from TestSeverityTrend so the test body stays short and the
+// dogfood function-length gate stays happy.
+func assertSeverityTrend(t *testing.T, trend SeverityTrend, plan []struct{ errs, warns, infos int }) {
+	t.Helper()
+	if trend.Runs != len(plan) {
+		t.Fatalf("Runs = %d, want %d", trend.Runs, len(plan))
+	}
+	if len(trend.Series) != len(plan) {
+		t.Fatalf("Series len = %d, want %d", len(trend.Series), len(plan))
+	}
+	for i, p := range plan {
 		got := trend.Series[i]
 		if got.Errors != p.errs || got.Warnings != p.warns || got.Infos != p.infos {
-			t.Errorf("Series[%d] = %+v, want E=%d W=%d I=%d",
-				i, got, p.errs, p.warns, p.infos)
+			t.Errorf("Series[%d] = %+v, want E=%d W=%d I=%d", i, got, p.errs, p.warns, p.infos)
 		}
 	}
-
-	// Time ordering: started_at must be non-decreasing.
 	for i := 1; i < len(trend.Series); i++ {
 		if trend.Series[i-1].StartedAt > trend.Series[i].StartedAt {
 			t.Errorf("series not oldest-first at index %d: %q > %q",
@@ -147,6 +149,9 @@ func TestLatestRunsOrdering(t *testing.T) {
 	}
 }
 
+// buildFindings manufactures n findings of the given severity. Kept as a
+// helper (not a table literal) so future per-finding customisation stays
+// in one place.
 func buildFindings(errs, warns, infos int) []model.Finding {
 	out := make([]model.Finding, 0, errs+warns+infos)
 	add := func(n int, sev model.Severity) {
