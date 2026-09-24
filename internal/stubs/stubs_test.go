@@ -1,6 +1,8 @@
 package stubs
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,5 +79,34 @@ class S {
 	}
 	if !byKind[KindEmpty] || !byKind[KindUnsupported] {
 		t.Errorf("kinds = %v, want %q + %q", byKind, KindEmpty, KindUnsupported)
+	}
+}
+
+// TestScanReportsRootRelativePaths guards the egress boundary: the repair
+// worklist is copied into agent prompts, so its file paths must be
+// machine-independent even when the scanned root is absolute.
+func TestScanReportsRootRelativePaths(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "pkg", "s.go")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("package pkg\n\nfunc Todo() {\n\tpanic(\"not implemented\")\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items, err := Scan(root) // absolute root
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) == 0 {
+		t.Fatal("no stubs found")
+	}
+	for _, it := range items {
+		if filepath.IsAbs(it.File) {
+			t.Errorf("stub file is absolute: %q", it.File)
+		}
+		if strings.Contains(it.File, root) {
+			t.Errorf("stub file leaked the root path: %q", it.File)
+		}
 	}
 }

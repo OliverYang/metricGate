@@ -246,6 +246,25 @@ type PackResult struct {
 - `workspace` 由 Git adapter 收集 tracked diff + untracked files；`range` 使用 merge-base；`commit` 使用 parent diff。当前 `internal/git.ChangedLines` 只返回 changed-line ranges，不返回 unified diff/hunks。D3 必须在 `internal/git` adapter 新增 `LoadChanges(ChangeRequest) ([]FileChange,error)` 返回 repo-relative path/status/hunks/added text，再由同一解析结果派生 `ChangedLines`；shell-out 仍只在 git adapter。用真实 Git 临时仓库测试 rename/delete/untracked/staged+unstaged/CRLF/quoted path。
 - 默认每个 file 只传 changed diff + compact facts；完整源代码需显式 `include_source=true`，默认 false。
 - 不发送 API keys/env、系统路径、absolute path。绝不调用外网/LLM。
+
+#### 2.6.1 局部审计 vs 出站工件：信任边界（全局规则）
+
+隐私/权限只与**跨出本机信任边界**这件事有关，与本地度量审计无关。据此定一条全局
+规则，适用范围不限于 bundle：
+
+| 工件 | 信任区 | 路径要求 |
+|---|---|---|
+| `check` / `metrics` / SARIF / store / `rules explain`（本地审计） | 本机 | 可为绝对路径（如实定位；本机数据，非隐私问题） |
+| `context` / `bundle` / 任何 MCP 响应（交给 LLM 或外部 agent） | 出站 | **必须机器无关**：root-relative，绝不含绝对路径 |
+
+实现方式：唯一原语 `selection.SanitizePath(root, path)`（pure core）。出站
+artifact 一律调用它——`facts.Collect/CollectSelected/CollectPaths`（含 clone 指纹
+与符号提示）、`stubs.Scan`、`bundle`。规则是“同一处转换 + 所有出站共享”，不是每个
+命令各自 `strings.Replace`。这样把隐私逻辑放回它该在的地方（出站边界），本地审计
+保持诚实，二者不再漂移。
+反例（已修）：`context`/MCP 与 `bundle` 曾不一致——bundle 归一化，其余直接吐
+walk 出来的绝对路径。修复后，给 `metricgate context /abs/path` 或 MCP
+`get_constraints`/`find_symbols`/`list_stubs` 传绝对 root，输出均为 root-relative。
 - Secret-like paths 的 hard deny 是 open decision：首期**不要未经用户确认就套入 OCR 敏感路径列表**（那会改变 metricgate 检查目标且产生隐式 blind spot）；bundle 若发现潜在 secret path，只返回 `privacyWarning`，支持显式 policy exclude。后续可研究独立 secrets detector ingest。
 - `existingFindings` 默认省略：Bundle 是评审前输入，不默认调用 `Engine.Run`，避免 engine parse 与 facts collect 重复解析。若确认有需要，再显式增加 `include_existing_findings=true`；该模式必须在 budget/metadata 标明额外分析与耗时，并评估是否值得做中立 parse artifact/hook 复用 AST（不得让 engine import facts adapter）。
 若显式开启 `include_existing_findings`，schema 才在 file item 中附 `existingFindings`；不启用时省略字段，而不是输出空数组以免宿主误解为“已检查且无 findings”。

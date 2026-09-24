@@ -1,6 +1,7 @@
 package selection
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -63,5 +64,39 @@ func TestNormalizeSlashAndDot(t *testing.T) {
 	got := Decide(`./pkg\x.go`, false, nil)
 	if got.Path != "pkg/x.go" {
 		t.Errorf("path = %q, want pkg/x.go", got.Path)
+	}
+}
+
+func TestSanitizePathMakesEgressMachineIndependent(t *testing.T) {
+	cases := []struct{ root, path, want string }{
+		// absolute under the walk root -> root-relative
+		{"/home/u/repo", "/home/u/repo/internal/a.go", "internal/a.go"},
+		{"/home/u/repo", "/home/u/repo/a.go", "a.go"},
+		// single-file root: path equals root -> base name, never "."
+		{"/home/u/repo/a.go", "/home/u/repo/a.go", "a.go"},
+		// absolute outside the root -> base name only (no home/mount layout)
+		{"/home/u/repo", "/etc/secret/x.go", "x.go"},
+		{"/home/u/repo", "/home/u/other/y.go", "y.go"},
+		// relative paths are normalized, never rewritten
+		{"", "internal\\a.go", "internal/a.go"},
+		{".", "./pkg/z.go", "pkg/z.go"},
+		// empty stays empty
+		{"", "", ""},
+	}
+	for _, tc := range cases {
+		if got := SanitizePath(tc.root, tc.path); got != tc.want {
+			t.Errorf("SanitizePath(%q,%q) = %q, want %q", tc.root, tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestSanitizePathIsIdempotentAndNeverAbsolute(t *testing.T) {
+	once := SanitizePath("/home/u/repo", "/home/u/repo/pkg/a.go")
+	twice := SanitizePath("/home/u/repo", once)
+	if once != twice {
+		t.Errorf("not idempotent: %q -> %q", once, twice)
+	}
+	if filepath.IsAbs(once) {
+		t.Errorf("sanitized path is still absolute: %q", once)
 	}
 }

@@ -42,3 +42,32 @@ func TestCollectSelectedUsesPolicyExcludesAndCollectStaysCompatible(t *testing.T
 		t.Errorf("legacy Collect changed behavior: files=%d, want 2", len(all))
 	}
 }
+
+// TestCollectPathsAreRootRelative proves the LLM-facing fact sheets never carry
+// an absolute machine path: File is root-relative even when the root is absolute.
+func TestCollectPathsAreRootRelative(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "pkg", "a.go")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("package pkg\nfunc A() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := Collect(root) // absolute root
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("files = %d, want 1", len(files))
+	}
+	if filepath.IsAbs(files[0].File) {
+		t.Errorf("File is absolute: %q", files[0].File)
+	}
+	if files[0].File != "pkg/a.go" {
+		t.Errorf("File = %q, want pkg/a.go", files[0].File)
+	}
+	if strings.Contains(files[0].File, root) {
+		t.Errorf("fact sheet leaked the root path: %q", files[0].File)
+	}
+}

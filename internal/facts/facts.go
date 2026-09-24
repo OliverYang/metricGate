@@ -65,7 +65,7 @@ func Collect(root string) ([]*FileFacts, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseFacts(files)
+	return parseFacts(files, root)
 }
 
 // CollectSelected collects facts using the same directory-name exclusions
@@ -82,7 +82,7 @@ func CollectSelected(root string, cfg *config.Config) ([]*FileFacts, error) {
 	}
 	if !info.IsDir() {
 		if selection.Decide(filepath.Base(root), false, cfg.Exclude).Status == selection.Included {
-			return parseFacts([]string{root})
+			return parseFacts([]string{root}, root)
 		}
 		return nil, nil
 	}
@@ -104,15 +104,16 @@ func CollectSelected(root string, cfg *config.Config) ([]*FileFacts, error) {
 			selected = append(selected, relToOriginal[d.Path])
 		}
 	}
-	return parseFacts(selected)
+	return parseFacts(selected, root)
 }
 
 // CollectPaths parses exactly the supplied files without applying policy.
-// Adapters use it after making a shared selection decision.
-func CollectPaths(paths []string) ([]*FileFacts, error) {
+// Adapters use it after making a shared selection decision. root (the walk
+// root) makes the returned File paths root-relative.
+func CollectPaths(root string, paths []string) ([]*FileFacts, error) {
 	ordered := append([]string(nil), paths...)
 	sort.Strings(ordered)
-	return parseFacts(ordered)
+	return parseFacts(ordered, root)
 }
 
 // RepoRoot is the directory whose fact sheets a CollectWithIndex run
@@ -131,8 +132,10 @@ func CollectWithIndex(root string) ([]*FileFacts, *symbols.Index, error) {
 }
 
 // parseFacts parses every file and extracts its facts, reusing one parser
-// per language and skipping unreadable/unparsable files.
-func parseFacts(files []string) ([]*FileFacts, error) {
+// per language and skipping unreadable/unparsable files. root is used to make
+// each fact sheet's File root-relative, so no absolute machine path enters an
+// LLM-facing artifact.
+func parseFacts(files []string, root string) ([]*FileFacts, error) {
 	parsers := map[parser.LanguageID]*parser.Parser{}
 	defer closeParsers(parsers)
 
@@ -148,6 +151,12 @@ func parseFacts(files []string) ([]*FileFacts, error) {
 		}
 		f, err := parseFile(parsers, lang, path, src)
 		if err == nil {
+			// Rewrite every path that can reach an LLM-facing artifact:
+			// the sheet's File and each clone fingerprint's File.
+			f.File = selection.SanitizePath(root, f.File)
+			for i := range f.CloneFns {
+				f.CloneFns[i].File = selection.SanitizePath(root, f.CloneFns[i].File)
+			}
 			out = append(out, f)
 		}
 	}

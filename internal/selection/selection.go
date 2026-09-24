@@ -131,3 +131,27 @@ func normalize(path string) string {
 	}
 	return path
 }
+
+// SanitizePath makes a path safe to cross the local trust boundary (a prompt,
+// an agent, or CI). A local audit may legitimately report machine-absolute
+// paths, but anything leaving metricgate must be machine-independent: given a
+// walk root, an absolute result under it becomes root-relative, and any other
+// absolute path is reduced to its base name so no home-directory or mount
+// layout leaks. Relative paths are normalized (slash-separated, cleaned) and
+// never rewritten, so behavior is identical whether root is "." or absolute.
+func SanitizePath(root, path string) string {
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		return normalize(path)
+	}
+	if root != "" {
+		if rel, err := filepath.Rel(root, path); err == nil && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, "..") {
+			if r := normalize(rel); r != "" {
+				return r
+			}
+		}
+	}
+	return filepath.Base(filepath.FromSlash(path))
+}

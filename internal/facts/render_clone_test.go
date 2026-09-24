@@ -45,3 +45,32 @@ clones:
 		t.Errorf("reuse hint does not point at the anchor:\n%s", pack)
 	}
 }
+
+// TestCloneHintsDoNotLeakAbsolutePaths covers the egress boundary for clone
+// fingerprints: their File is rewritten root-relative like the sheet's File.
+func TestCloneHintsDoNotLeakAbsolutePaths(t *testing.T) {
+	orig := "package c\n\nfunc Alpha(xs []int) int {\n\tt := 0\n\tfor _, x := range xs {\n\t\tt += x\n\t}\n\tt = t * 2\n\tt = t - 3\n\tt = t * 4\n\tt = t - 5\n\tt = t * 6\n\tt = t - 7\n\treturn t\n}\n"
+	twin := "package c\n\nfunc Beta(ys []int) int {\n\tu := 0\n\tfor _, y := range ys {\n\t\tu += y\n\t}\n\tu = u * 2\n\tu = u - 3\n\tu = u * 4\n\tu = u - 5\n\tu = u * 6\n\tu = u - 7\n\treturn u\n}\n"
+	dir := t.TempDir() // absolute root
+	if err := os.WriteFile(dir+"/a.go", []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/b.go", []byte(twin), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load([]byte("version: 1\nclones:\n  min_tokens: 20\n  min_lines: 5\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Collect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := Render(files, cfg, 20000)
+	if strings.Contains(pack, dir) {
+		t.Errorf("clone hints leaked the absolute root:\n%s", pack)
+	}
+	if !strings.Contains(pack, "reuse it, do not reimplement") {
+		t.Errorf("reuse hint missing:\n%s", pack)
+	}
+}

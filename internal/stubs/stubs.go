@@ -13,6 +13,7 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/parser"
+	"metricgate/internal/selection"
 	"metricgate/internal/sources"
 )
 
@@ -80,7 +81,10 @@ func Scan(root string) ([]Item, error) {
 		if err != nil {
 			continue
 		}
-		out = append(out, Detect(path, src, tree, lang)...)
+		for _, item := range Detect(path, src, tree, lang) {
+			item.File = selection.SanitizePath(root, item.File)
+			out = append(out, item)
+		}
 		tree.Close()
 	}
 	return out, nil

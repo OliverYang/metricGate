@@ -282,27 +282,18 @@ func appendExistingFile(paths []string, root, newPath string) []string {
 	return paths
 }
 
-// normalizeFacts parses the selected files and rewrites their paths to be
-// root-relative so no absolute machine path enters the bundle.
+// normalizeFacts parses the selected files; facts.CollectPaths already returns
+// root-relative File paths, so the bundle never carries absolute machine paths.
 func normalizeFacts(root string, factPaths []string) (map[string]*facts.FileFacts, []*facts.FileFacts, error) {
-	fileFacts, err := facts.CollectPaths(unique(factPaths))
+	fileFacts, err := facts.CollectPaths(root, unique(factPaths))
 	if err != nil {
 		return nil, nil, err
 	}
 	byPath := map[string]*facts.FileFacts{}
-	normalized := make([]*facts.FileFacts, 0, len(fileFacts))
 	for _, f := range fileFacts {
-		rel, relErr := filepath.Rel(root, f.File)
-		if relErr != nil {
-			rel = filepath.Base(f.File)
-		}
-		rel = filepath.ToSlash(rel)
-		cp := *f
-		cp.File = rel
-		byPath[rel] = &cp
-		normalized = append(normalized, &cp)
+		byPath[f.File] = f
 	}
-	return byPath, normalized, nil
+	return byPath, fileFacts, nil
 }
 
 // addFilesAndItems appends required diff/source items and populates b.Files.
