@@ -131,3 +131,166 @@ func (s *Store) Runs() (int, error) {
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&n)
 	return n, err
 }
+
+// --- read APIs (P2 v1) ----------------------------------------------------
+//
+// These queries power `metricgate trends` and any dashboard tool built on
+// top of the local store. They are pure reads; the write side above is the
+// one and only place that mutates the schema. Trends are derived on read
+// rather than precomputed, so an existing database does not need a backfill
+// when a new aggregation is added.
+
+// RunRecord is one stored run, in display-ready units.
+type RunRecord struct {
+	ID            int64
+	StartedAt     string // RFC3339 UTC
+	DurationMs    int64
+	ToolVersion   string
+	GitCommit     string
+	Files         int
+	ErrorCount    int
+	WarningCount  int
+	InfoCount     int
+}
+
+// TrendPoint is one step of a per-run severity series.
+type TrendPoint struct {
+	StartedAt    string // RFC3339 UTC
+	Errors       int
+	Warnings     int
+	Infos        int
+}
+
+// SeverityTrend is the run-to-run severity series (oldest first).
+type SeverityTrend struct {
+	Runs   int
+	Series []TrendPoint
+}
+
+// RuleCount is the aggregated frequency of a single rule over a window of
+// runs. "Count" is the number of findings of that rule, summed across all
+// runs in the window — a high value means the rule is firing often.
+type RuleCount struct {
+	RuleID string
+	Count  int
+}
+
+// LatestRuns returns the most recent runs, newest first. limit <= 0 means
+// "every run" (still capped at the database size; this is for tests and the
+// `metricgate trends` default window of 20).
+func (s *Store) LatestRuns(limit int) ([]RunRecord, error) {
+	q := `SELECT id, started_at, duration_ms, tool_version, COALESCE(git_commit, ''),
+	             files, error_count, warning_count, info_count
+	      FROM runs ORDER BY started_at DESC, id DESC`
+	if limit > 0 {
+		q += ` LIMIT ?`
+	}
+	args := []any{}
+	if limit > 0 {
+		args = append(args, limit)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RunRecord
+	for rows.Next() {
+		var r RunRecord
+		if err := rows.Scan(&r.ID, &r.StartedAt, &r.DurationMs, &r.ToolVersion, &r.GitCommit,
+			&r.Files, &r.ErrorCount, &r.WarningCount, &r.InfoCount); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RunFindings returns every finding recorded under runID, in insertion
+// order (which is the order rules produced them in the original run).
+func (s *Store) RunFindings(runID int64) ([]model.Finding, error) {
+	rows, err := s.db.Query(`SELECT rule_id, severity, source, file, start_line, start_column,
+	                                end_line, end_column, message
+	                         FROM findings WHERE run_id = ? ORDER BY id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Finding
+	for rows.Next() {
+		var f model.Finding
+		var sev, src string
+		if err := rows.Scan(&f.RuleID, &sev, &src, &f.File,
+			&f.StartLine, &f.StartCol, &f.EndLine, &f.EndCol, &f.Message); err != nil {
+			return nil, err
+		}
+		f.Severity = model.Severity(sev)
+		f.Source = model.Source(src)
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// SeverityTrend returns the per-run error/warning/info series covering the
+// most recent limit runs (oldest first, so the output reads as a chart).
+// limit <= 0 means "all runs".
+func (s *Store) SeverityTrend(limit int) (SeverityTrend, error) {
+	innerLimit := ""
+	args := []any{}
+	if limit > 0 {
+		innerLimit = ` LIMIT ?`
+		args = append(args, limit)
+	}
+	q := `SELECT started_at, error_count, warning_count, info_count FROM (
+	          SELECT id, started_at, error_count, warning_count, info_count
+	          FROM runs ORDER BY started_at DESC, id DESC` + innerLimit + `
+	      ) ORDER BY started_at ASC, id ASC`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return SeverityTrend{}, err
+	}
+	defer rows.Close()
+	var t SeverityTrend
+	for rows.Next() {
+		var p TrendPoint
+		if err := rows.Scan(&p.StartedAt, &p.Errors, &p.Warnings, &p.Infos); err != nil {
+			return SeverityTrend{}, err
+		}
+		t.Series = append(t.Series, p)
+	}
+	if err := rows.Err(); err != nil {
+		return SeverityTrend{}, err
+	}
+	t.Runs = len(t.Series)
+	return t, nil
+}
+
+// RuleFrequency aggregates finding occurrences by rule_id across the most
+// recent limit runs. Rules are returned in descending count order, breaking
+// ties alphabetically on rule id for stable output.
+func (s *Store) RuleFrequency(limit int) ([]RuleCount, error) {
+	runArg := ""
+	args := []any{}
+	if limit > 0 {
+		runArg = ` WHERE run_id IN (
+		    SELECT id FROM runs ORDER BY started_at DESC, id DESC LIMIT ?
+		)`
+		args = append(args, limit)
+	}
+	q := `SELECT rule_id, COUNT(*) FROM findings` + runArg + `
+	      GROUP BY rule_id ORDER BY COUNT(*) DESC, rule_id ASC`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RuleCount
+	for rows.Next() {
+		var rc RuleCount
+		if err := rows.Scan(&rc.RuleID, &rc.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, rc)
+	}
+	return out, rows.Err()
+}
