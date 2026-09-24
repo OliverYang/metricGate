@@ -72,10 +72,26 @@ metricgate 的三大赌注——(1) **事实/约束的 grounding 能减少幻觉
 6. **可操作性与误报率实测**（依据：static analysis value 2006）：在评估里加入 FP/信噪比量化，
    为 severity/阈值调优提供数据（而非拍脑袋）。
 
+**P2 中显式不做**
+
+4'. `required-api`（must-call / must-handle-error）— 显式不做
+    - 依据：与 `banned-api` 对偶的"必须经过 logger / 必须处理 error"等价于
+      "代码覆盖式的强制日志/异常处理"静态分析（"log every error path"、
+      "every service method must call metrics.Inc" 之类）。
+    - 没有类型系统与数据流分析时，这类约束只能用形态匹配近似（如
+      `log.Error` 在某祖先函数出现一次），狗粮价值弱（自家仓库违规可控，
+      结论外推性差）。
+    - 决策：按"类型/数据流/全程序分析不自研、走 ingest"纪律，交给
+      `metricgate ingest` 适配 staticcheck / PMD / SpotBugs 等成熟规则，
+      不在 metricgate 内重造。文献证据同 P3 第 1 条（type inference）。
+    - 触发条件：未来若 metricgate 用户报告"必须经 logger / 必须处理 error"
+      这类约束的高频需求，由 ingest 路线引入；本轮 metricgate 自身不加。
+
 **P3（明确不做，引用为证）**
-7. **类型/数据流/全程序分析**：文献（如 deep learning type inference）表明这是独立且深厚的方向 →
+
+1. **类型/数据流/全程序分析**：文献（如 deep learning type inference）表明这是独立且深厚的方向 →
    坚持 `ingest` 集成（staticcheck/PMD/SpotBugs），不进程内重造。
-8. **进程内 LLM 评审**：LLM code review 文献存在，但与“metricgate=确定性事实层、宿主负责推理”的
+2. **进程内 LLM 评审**：LLM code review 文献存在，但与"metricgate=确定性事实层、宿主负责推理"的
    定位冲突 → 不引入，交给宿主 agent。
 
 ## 5. 威胁与边界（诚实声明）
