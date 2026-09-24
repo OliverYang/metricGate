@@ -54,9 +54,9 @@ func main() {
 	case "clonedrift":
 		cmdClonedrift(os.Args[2:])
 	case "hotspots":
+		cmdHotspots(os.Args[2:])
 	case "trends":
 		cmdTrends(os.Args[2:])
-		cmdHotspots(os.Args[2:])
 	case "init":
 		cmdInit(os.Args[2:])
 	case "version":
