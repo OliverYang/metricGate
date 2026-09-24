@@ -158,7 +158,7 @@ type EffectiveValue[T any] struct {
 
 - 保留 `config.Load(data)` 作为现有 API；新增 `LoadWithSource(data, source)` 内部使用，`LoadFile(path)` 设 `SourcePath=path`，`Default()` 标注 builtin。
 - 记录 YAML 实际显式设置的 key，不能把默认 YAML 展开后的值误称用户显式覆盖。首期只解释现有有用项：`languages.<lang>.rules.*`、`metrics.*`、`banned-api`、`architecture`、`clones`、`exclude`。
-- Built-in rule metadata 从 `rules.RulesFor`（需要不含 policy bans 的纯默认集时用 `rules.ForLanguage`） 得到 ID/title/default severity/default enabled；最后应用 config override。对 data-driven banned rule 显示 `source=policy_file` 和 entry `match`，不是伪称内建 rule。
+- Built-in rule metadata 从 `rules.RulesFor`（需要不含 policy bans 的纯默认集时用 `rules.ForLanguage`）得到 ID/title/default severity/default enabled；最后应用 config override。对 data-driven banned rule 显示 `source=policy_file` 和 entry `match`，不是伪称内建 rule。
 - 对每个 path 只报告其语言适用规则和 metrics；architecture/clones 是全局约束单列。输出顺序稳定。
 - 命令建议 `metricgate rules explain <path> [-config policy.yaml] [-format json]`；可同时做 `metricgate explain <path>` alias，但先只保留一个主名以减小 CLI 面。
 
