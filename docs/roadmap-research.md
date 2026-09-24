@@ -374,3 +374,27 @@ recall；token char/estimate delta；耗时；隐私扫描”。
 - **隐私扫描**：绝对 root 下 bundle/context/MCP 出站工件 0 绝对路径泄漏（`SanitizePath`）。
 - **未验证（诚实声明）**：LLM 生成质量/成本的改善仍需真实 agent A/B
   （见 `docs/ab-experiment.md`）；本轮不写未测结论。
+
+---
+
+## 落地记录（研究驱动的 P1 迭代）
+
+依据 `docs/research-notes.md` 的 P1 建议，已落地两项：
+
+**P1① pack 排序契约**（依据 Lost-in-the-Middle, TACL 2024）：
+- `facts.PackItem` 新增 `Order`，并定义 `OrderHeader/Constraints/Diff/Facts/Reuse/Symbols/Source`；
+  packer 现在**显式**按 `(Order,Priority,ID)` 输出，admission 仍按 priority 选取。
+  硬约束与当前 diff 因此稳定落在 prompt 前部。
+- 可证伪测试：`internal/facts` 的文本顺序断言（header<constraints<facts）；
+  `internal/bundle` 的 `TestPackOrderingContract`（included 首位是 header、constraints 先于 diff/facts）。
+
+**P1② clone-drift 检测**（依据 *Consistent/Inconsistent Changes to Code Clones*, WCRE 2007）：
+- 新包 `internal/clonedrift`（纯库）+ `git.Archive`（`git archive` 经 stdlib tar 解包 base 到临时目录，
+  不依赖系统 tar 二进制）。
+- `metricgate clonedrift [path] [-base ref] [-format json]`：对比 base 与工作树的 clone 分组，
+  仅当两侧都还在、恰有一侧落在 diff 内、且 body 已分叉时报 `clone-drift`（warning）。
+  删除一侧=去重、两侧同步修改=仍克隆，都**不**报。
+- 测试：一方被改（报）、未动（不报）、对称修改（不报）、删除（不报）、禁用（不报）；
+  端到端 CLI 冒烟通过。
+
+两项均 `metricgate check .` = 0 error, gate PASSED。

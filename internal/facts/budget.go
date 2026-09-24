@@ -59,14 +59,33 @@ type PackResult struct {
 	BudgetExhausted bool       `json:"budget_exhausted,omitempty"`
 }
 
+// Order is the pack-ordering contract: items with a smaller Order appear
+// earlier in the emitted text. It exists because long-context models attend
+// unevenly (the "Lost in the Middle" effect), so the hard constraints and the
+// current diff must land near the top rather than wherever the tokenizer
+// happens to place them. Priority controls *whether* an optional item is
+// admitted; Order controls *where* an admitted item goes.
 type PackItem struct {
 	ID       string
 	Section  string
+	Order    int
 	Priority int
 	Text     string
 	Required bool
 	Source   string
 }
+
+// Order constants fix the pack layout. Lower sorts first; ties fall back to
+// Priority then ID so the output stays deterministic.
+const (
+	OrderHeader      = 0  // the one-line preamble
+	OrderConstraints = 1  // hard policy constraints — never below the fold
+	OrderDiff        = 2  // the current change set — what the agent is editing
+	OrderFacts       = 10 // per-file signatures/imports (grounding)
+	OrderReuse       = 20 // clone reuse hints
+	OrderSymbols     = 30 // similar-symbol hints
+	OrderSource      = 40 // opt-in full source (lowest value, largest)
+)
 
 // RenderBudgeted builds facts/policy items and packs them under a complete-text budget.
 func RenderBudgeted(files []*FileFacts, cfg *config.Config, opts BudgetOptions) (PackResult, error) {
@@ -87,15 +106,11 @@ func PackItemsBudgeted(items []PackItem, opts BudgetOptions) (PackResult, error)
 		return PackResult{}, fmt.Errorf("a positive budget and explicit counter are required")
 	}
 	items = append([]PackItem(nil), items...)
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Required != items[j].Required {
-			return items[i].Required
-		}
-		if items[i].Priority != items[j].Priority {
-			return items[i].Priority < items[j].Priority
-		}
-		return items[i].ID < items[j].ID
-	})
+
+	// Emitted order is the contract: (Order, Priority, ID). Required items
+	// carry the lowest Orders (header/constraints/diff), so they land at the
+	// top of the pack, ahead of any optional facts.
+	sortByOrder(items)
 	res := PackResult{Budget: opts.Budget, Counter: opts.Counter.ID(), Exact: true}
 	var included, optional []PackItem
 	for _, item := range items {
@@ -105,6 +120,9 @@ func PackItemsBudgeted(items []PackItem, opts BudgetOptions) (PackResult, error)
 			optional = append(optional, item)
 		}
 	}
+	// Admission order is priority-first; placement order stays Order-first.
+	sortByPriority(optional)
+
 	text := joinItems(included)
 	used, exact, err := opts.Counter.Count(text)
 	if err != nil {
@@ -118,6 +136,7 @@ func PackItemsBudgeted(items []PackItem, opts BudgetOptions) (PackResult, error)
 	}
 	for _, item := range optional {
 		candidate := append(append([]PackItem(nil), included...), item)
+		sortByOrder(candidate)
 		candidateText := joinItems(candidate)
 		n, itemExact, countErr := opts.Counter.Count(candidateText)
 		if countErr != nil {
@@ -138,42 +157,84 @@ func PackItemsBudgeted(items []PackItem, opts BudgetOptions) (PackResult, error)
 	return res, nil
 }
 
+// sortByOrder orders items for emission: Order, then Priority, then ID.
+func sortByOrder(items []PackItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Order != items[j].Order {
+			return items[i].Order < items[j].Order
+		}
+		if items[i].Priority != items[j].Priority {
+			return items[i].Priority < items[j].Priority
+		}
+		return items[i].ID < items[j].ID
+	})
+}
+
+// sortByPriority orders optional items for admission: Priority, then Order, then ID.
+func sortByPriority(items []PackItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Priority != items[j].Priority {
+			return items[i].Priority < items[j].Priority
+		}
+		if items[i].Order != items[j].Order {
+			return items[i].Order < items[j].Order
+		}
+		return items[i].ID < items[j].ID
+	})
+}
+
 func buildPackItems(files []*FileFacts, cfg *config.Config, targets []string) []PackItem {
-	items := []PackItem{{ID: "header", Section: "header", Priority: 0, Required: true, Text: "# metricgate context — deterministic facts & constraints\n# Follow the required constraints; only propose changes grounded in these facts.\n\n"}}
+	items := []PackItem{{ID: "header", Section: "header", Order: OrderHeader, Priority: 0, Required: true, Text: "# metricgate context — deterministic facts & constraints\n# Follow the required constraints; only propose changes grounded in these facts.\n\n"}}
 	langs := map[parser.LanguageID]bool{}
 	for _, f := range files {
 		langs[parser.LanguageID(f.Language)] = true
 	}
+	items = appendConstraints(items, cfg, langs)
+	items = appendFactItems(items, files, targets)
+	items = appendReuseAndSymbols(items, files, cfg)
+	return items
+}
+
+func appendConstraints(items []PackItem, cfg *config.Config, langs map[parser.LanguageID]bool) []PackItem {
 	constraintLines := constraints(cfg, langs)
-	if len(constraintLines) > 0 {
-		var b strings.Builder
-		b.WriteString("## constraints (policy)\n")
-		for _, line := range constraintLines {
-			b.WriteString(line)
-			b.WriteByte('\n')
-		}
-		b.WriteByte('\n')
-		items = append(items, PackItem{ID: "constraints", Section: "constraints", Priority: 0, Required: true, Source: "policy", Text: b.String()})
+	if len(constraintLines) == 0 {
+		return items
 	}
+	var b strings.Builder
+	b.WriteString("## constraints (policy)\n")
+	for _, line := range constraintLines {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	return append(items, PackItem{ID: "constraints", Section: "constraints", Order: OrderConstraints, Priority: 0, Required: true, Source: "policy", Text: b.String()})
+}
+
+func appendFactItems(items []PackItem, files []*FileFacts, targets []string) []PackItem {
 	targetSet := map[string]bool{}
 	for _, t := range targets {
 		targetSet[normalizePackPath(t)] = true
 	}
 	compact := renderOpts{includePrivate: false, sigMax: 90, maxImports: 8, typesInline: false}
 	for _, f := range files {
-		items = append(items, PackItem{ID: "file:" + normalizePackPath(f.File), Section: "facts", Priority: 1, Required: targetSet[normalizePackPath(f.File)], Source: normalizePackPath(f.File), Text: renderFactFile(f, compact)})
+		items = append(items, PackItem{ID: "file:" + normalizePackPath(f.File), Section: "facts", Order: OrderFacts, Priority: 1, Required: targetSet[normalizePackPath(f.File)], Source: normalizePackPath(f.File), Text: renderFactFile(f, compact)})
 	}
-	writeItems := func(section string, priority int, lines []string) {
+	return items
+}
+
+func appendReuseAndSymbols(items []PackItem, files []*FileFacts, cfg *config.Config) []PackItem {
+	writeItems := func(section string, order, priority int, lines []string) []PackItem {
 		for i, line := range lines {
-			items = append(items, PackItem{ID: fmt.Sprintf("%s:%04d", section, i), Section: section, Priority: priority, Source: section, Text: "## " + section + "\n- " + line + "\n\n"})
+			items = append(items, PackItem{ID: fmt.Sprintf("%s:%04d", section, i), Section: section, Order: order, Priority: priority, Source: section, Text: "## " + section + "\n- " + line + "\n\n"})
 		}
+		return items
 	}
 	var cloneFns []clones.Func
 	for _, f := range files {
 		cloneFns = append(cloneFns, f.CloneFns...)
 	}
-	writeItems("reuse before you generate", 3, clones.Summary(clones.Find(cloneFns, cfg.ClonePolicy())))
-	writeItems("existing symbols (align, do not reinvent)", 4, SimilarSymbols(files, Index(files), 3))
+	items = writeItems("reuse before you generate", OrderReuse, 3, clones.Summary(clones.Find(cloneFns, cfg.ClonePolicy())))
+	items = writeItems("existing symbols (align, do not reinvent)", OrderSymbols, 4, SimilarSymbols(files, Index(files), 3))
 	return items
 }
 

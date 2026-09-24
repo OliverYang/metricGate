@@ -310,10 +310,10 @@ func addFilesAndItems(b *Bundle, req Request, cfg *config.Config, plan changePla
 			continue
 		}
 		path := changePath(change)
-		items = append(items, facts.PackItem{ID: "diff:" + path, Section: "diff", Priority: 0, Required: true, Source: path, Text: renderDiff(change)})
+		items = append(items, facts.PackItem{ID: "diff:" + path, Section: "diff", Order: facts.OrderDiff, Priority: 0, Required: true, Source: path, Text: renderDiff(change)})
 		entry := fileEntry(req, change, path, langByPath[change.Path], changedRanges)
 		if entry.Source != "" {
-			items = append(items, facts.PackItem{ID: "source:" + path, Section: "source", Priority: 5, Source: path, Text: "## full source " + path + "\n```\n" + entry.Source + "\n```\n"})
+			items = append(items, facts.PackItem{ID: "source:" + path, Section: "source", Order: facts.OrderSource, Priority: 5, Source: path, Text: "## full source " + path + "\n```\n" + entry.Source + "\n```\n"})
 		}
 		b.Files = append(b.Files, entry)
 	}

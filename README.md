@@ -34,6 +34,8 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
 - CI gate: exit code 1 on violations
 - MCP stdio server (`metricgate-mcp`): get_constraints / check_code / check_path / list_stubs / find_symbols / get_review_bundle
 - Stub detection (completeness audit) for Go and Java
+- Clone drift: `metricgate clonedrift` flags a change that edits one copy of a
+  duplicate but not its twin (needs git; see [clone drift](#clone-drift-metricgate-clonedrift))
 
 ## Quick start
 
@@ -195,6 +197,23 @@ Dogfooding note: the first run of this gate on metricgate itself reported four
 real clones, including a test helper copied between two packages. The fix was a
 real extraction (`internal/parsetest`), not a threshold bump — which is the
 point of the check.
+
+### Clone drift (`metricgate clonedrift`)
+
+A related failure mode: a change fixes one copy of a clone but not its twin, so
+the two silently diverge (research on consistent vs inconsistent clone changes).
+`metricgate clonedrift` compares the **base revision** against the working tree
+and reports each pair where one side's body was edited and the twin's was not:
+
+```bash
+metricgate clonedrift .               # vs HEAD
+metricgate clonedrift . -base origin/main -format json
+```
+
+It only fires when both copies still exist, exactly one side intersects the
+diff, and the bodies have diverged — removing a copy (de-duplication) or
+updating both the same way is not drift. Reported as `clone-drift` (warning),
+anchored on the changed side and pointing at the untouched twin.
 
 ## Suppression (inline ignore directives)
 

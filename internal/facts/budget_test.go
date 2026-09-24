@@ -104,3 +104,34 @@ func containsRef(refs []PackRef, id string) bool {
 	}
 	return false
 }
+
+// TestPackOrdersRequiredBeforeOptionalInText proves the ordering contract at
+// the text level: in the emitted pack, the (required) constraints block comes
+// before any optional per-file fact block, so the most important content is
+// near the top of the prompt.
+func TestPackOrdersRequiredBeforeOptionalInText(t *testing.T) {
+	// Inject a required constraints item plus optional fact items directly, so
+	// the assertion is about ordering, not about how items are built.
+	items := []PackItem{
+		{ID: "facts2", Section: "facts", Order: OrderFacts, Priority: 1, Text: "## pkg/b.go (go)\n- func Handle()\n\n"},
+		{ID: "constraints", Section: "constraints", Order: OrderConstraints, Priority: 0, Required: true, Text: "## constraints (policy)\n- banned-api: fmt.Print*\n\n"},
+		{ID: "header", Section: "header", Order: OrderHeader, Priority: 0, Required: true, Text: "# metricgate context\n\n"},
+		{ID: "facts1", Section: "facts", Order: OrderFacts, Priority: 1, Text: "## pkg/a.go (go)\n- func Run()\n\n"},
+	}
+	res, err := PackItemsBudgeted(items, BudgetOptions{Budget: 10000, Counter: CharCounter{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hi := strings.Index(res.Text, "# metricgate context")
+	ci := strings.Index(res.Text, "## constraints")
+	fi := strings.Index(res.Text, "## pkg/a.go")
+	if hi < 0 || ci < 0 || fi < 0 {
+		t.Fatalf("missing block in text:\n%s", res.Text)
+	}
+	if !(hi < ci && ci < fi) {
+		t.Errorf("order header(%d) < constraints(%d) < facts(%d) violated:\n%s", hi, ci, fi, res.Text)
+	}
+	if res.Included[0].Section != "header" || res.Included[1].Section != "constraints" {
+		t.Errorf("included order = %+v, want header then constraints", res.Included)
+	}
+}

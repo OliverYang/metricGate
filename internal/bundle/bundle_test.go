@@ -298,6 +298,46 @@ func TestBuildOmittedFieldSeparatesFromFiles(t *testing.T) {
 	}
 }
 
+// TestPackOrderingContract encodes the P1 invariant derived from the
+// "Lost in the Middle" finding: in the emitted pack, the hard constraints and
+// the current diff appear before any per-file facts (which are optional and
+// admitted by priority). This guards against a refactor silently demoting
+// constraints or the diff below the fold.
+func TestPackOrderingContract(t *testing.T) {
+	root := initRepo(t)
+	repoWrite(t, root, "svc/api.go", "package svc\n\nfunc Handle() int {\n\treturn 1\n}\n")
+	gitDo(t, root, "add", "-A")
+	gitDo(t, root, "commit", "-qm", "base")
+	repoWrite(t, root, "svc/api.go", "package svc\n\nfunc Handle() int {\n\treturn 2\n}\nfunc Added() {}\n")
+
+	cfg := testConfig(t)
+	b := mustBuild(t, Request{Root: root, Mode: git.ModeWorkspace, Budget: 200000, Counter: facts.CharCounter{}}, cfg)
+	if len(b.Pack.Included) < 2 {
+		t.Fatalf("pack too small to test ordering: %+v", b.Pack.Included)
+	}
+	// Required items are emitted first: header, then constraints, then diff.
+	first := b.Pack.Included[0]
+	if first.Section != "header" {
+		t.Errorf("first item section = %q, want header", first.Section)
+	}
+	idx := map[string]int{}
+	for i, ref := range b.Pack.Included {
+		idx[ref.Section] = i
+	}
+	c, okC := idx["constraints"]
+	d, okD := idx["diff"]
+	f, okF := idx["facts"]
+	if !okC || !okD {
+		t.Fatalf("constraints/diff missing from included: %+v", b.Pack.Included)
+	}
+	if c > d {
+		t.Errorf("constraints (pos %d) must precede diff (pos %d)", c, d)
+	}
+	if okF && (c > f || d > f) {
+		t.Errorf("constraints(%d)/diff(%d) must precede facts(%d)", c, d, f)
+	}
+}
+
 // TestBundleDiffRangesFeedFilterAndEnforceHardConstraints encodes the bundle
 // design's falsifiable claims:
 //

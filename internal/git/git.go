@@ -7,9 +7,13 @@
 package git
 
 import (
+	"archive/tar"
 	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -99,4 +103,61 @@ func countLines(path string) int {
 		n++
 	}
 	return n
+}
+
+// Archive exports the tree at ref into a fresh temp directory (repo-relative
+// layout preserved) so an adapter can parse the base revision. The caller owns
+// the returned cleanup. Extraction uses the stdlib tar reader, so it does not
+// depend on a system `tar` binary.
+func Archive(dir, ref string) (string, func(), error) {
+	data, err := gitBytes(dir, "archive", "--format=tar", ref)
+	if err != nil {
+		return "", nil, fmt.Errorf("git archive %s: %w", ref, err)
+	}
+	tmp, err := os.MkdirTemp("", "metricgate-base-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { os.RemoveAll(tmp) }
+	if err := extractTar(data, tmp); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return tmp, cleanup, nil
+}
+
+func extractTar(data []byte, dest string) error {
+	tr := tar.NewReader(bytes.NewReader(data))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read archive: %w", err)
+		}
+		// Skip links/odd entries; only materialise regular files and dirs.
+		target := filepath.Join(dest, filepath.FromSlash(hdr.Name))
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			f, err := os.Create(target)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+		}
+	}
 }

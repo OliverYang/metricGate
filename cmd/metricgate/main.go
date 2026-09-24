@@ -51,6 +51,8 @@ func main() {
 		cmdAPI(os.Args[2:])
 	case "nearclones":
 		cmdNearClones(os.Args[2:])
+	case "clonedrift":
+		cmdClonedrift(os.Args[2:])
 	case "hotspots":
 		cmdHotspots(os.Args[2:])
 	case "init":
@@ -84,6 +86,8 @@ usage:
   metricgate nearclones [path]        functions sharing >=80%% of their normalised
                                       tokens (copy+rename+small edit)
   metricgate hotspots [path]          churn × maintainability-debt hotspots
+  metricgate clonedrift [path]         flag a change that edits one copy of a clone
+                                      but not its twin (needs -base, default HEAD)
   metricgate version                  print the version
 `, toolVersion)
 }
