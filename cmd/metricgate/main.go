@@ -54,6 +54,8 @@ func main() {
 	case "clonedrift":
 		cmdClonedrift(os.Args[2:])
 	case "hotspots":
+	case "trends":
+		cmdTrends(os.Args[2:])
 		cmdHotspots(os.Args[2:])
 	case "init":
 		cmdInit(os.Args[2:])
@@ -88,6 +90,8 @@ usage:
   metricgate hotspots [path]          churn × maintainability-debt hotspots
   metricgate clonedrift [path]         flag a change that edits one copy of a clone
                                       but not its twin (needs -base, default HEAD)
+  metricgate trends [flags]           severity trend + top rules from the local
+                                      history.db (P2 v1; needs store.enabled)
   metricgate version                  print the version
 `, toolVersion)
 }
