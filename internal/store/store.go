@@ -142,23 +142,23 @@ func (s *Store) Runs() (int, error) {
 
 // RunRecord is one stored run, in display-ready units.
 type RunRecord struct {
-	ID            int64
-	StartedAt     string // RFC3339 UTC
-	DurationMs    int64
-	ToolVersion   string
-	GitCommit     string
-	Files         int
-	ErrorCount    int
-	WarningCount  int
-	InfoCount     int
+	ID           int64
+	StartedAt    string // RFC3339 UTC
+	DurationMs   int64
+	ToolVersion  string
+	GitCommit    string
+	Files        int
+	ErrorCount   int
+	WarningCount int
+	InfoCount    int
 }
 
 // TrendPoint is one step of a per-run severity series.
 type TrendPoint struct {
-	StartedAt    string // RFC3339 UTC
-	Errors       int
-	Warnings     int
-	Infos        int
+	StartedAt string // RFC3339 UTC
+	Errors    int
+	Warnings  int
+	Infos     int
 }
 
 // SeverityTrend is the run-to-run severity series (oldest first).
