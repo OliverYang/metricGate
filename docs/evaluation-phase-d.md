@@ -14,7 +14,7 @@ evidence anchors）的落地与**可证伪验收**，对应设计文档
 | D1 | `3c819ef` 含 | config provenance + `Engine.ExplainPath`（effective rule/metric/global 约束 + 来源） | effective 值与真实引擎行为一致（测试） |
 | D2 | `3c819ef` 含 | `TokenCounter`/`PackItem` + `RenderBudgeted`（完整文本计数、原子项、required 不丢） | 1k/2k/6k 预算、required 无损、stable、UTF-8 完整、超限结构化失败（测试） |
 | D3 | `3c819ef` | `internal/bundle` builder + CLI `bundle` + MCP `get_review_bundle`（同一 builder） | schema roundtrip / stable bytes / privacy / 变更集一致（测试） |
-| D4 | `7686857` | `model.Evidence` 锚点（byte span + SHA-256 + anchorStatus），进 SARIF `properties` 与 check JSON | 规则命中=exact 且 hash 命中原始字节；度量=line_only；越界降级（测试） |
+| D4 | `7686857` | `model.Evidence` 锚点（byte span + SHA-256 + anchorStatus），进 SARIF `properties` 与 check JSON | 规则命中=exact 且 hash 命中原始字节；度量=line_only；越界降级；CRLF/非 ASCII 字节偏移仍一致（测试） |
 | — | `afb71d2` | 出站信任边界：`selection.SanitizePath` 统一所有 LLM 面向工件的路径 | 绝对 root 下 bundle/context/MCP 均 0 绝对路径泄漏（测试） |
 
 ## 2. 可证伪验收（设计文档 §5 评审 5 的五条硬指标）

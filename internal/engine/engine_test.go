@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -204,5 +206,38 @@ func TestNewEvidenceDegradesOutOfRangeSpan(t *testing.T) {
 	}
 	if got.SnippetHash != "" {
 		t.Errorf("out-of-range span must not carry a hash: %q", got.SnippetHash)
+	}
+}
+
+// TestEvidenceByteOffsetsSurviveCRLFAndNonASCII closes the D4 acceptance line
+// "Go/Java CRLF/non-ASCII anchor revalidation": tree-sitter byte offsets are
+// byte-based, so the reported span must slice the same raw bytes — and the
+// hash must match — even with CRLF line endings or multibyte content before
+// the block that shifts every offset.
+func TestEvidenceByteOffsetsSurviveCRLFAndNonASCII(t *testing.T) {
+	cases := map[string]string{
+		"crlf.go": "package x\r\n\r\nfunc F() {\r\n\tif true {\r\n\t}\r\n}\r\n",
+		"uni.go":  "package x\n\n// \u4e2d\u6587\u6ce8\u91ca \u00e9\u00e8\u00ea\nfunc F() {\n\tif true {\n\t}\n}\n",
+	}
+	eng, err := New(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	for name, src := range cases {
+		findings, err := eng.CheckSource(name, []byte(src))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		f := findingByRule(findings, "empty-block")
+		if f == nil || f.Evidence == nil || f.Evidence.Anchor != model.AnchorExact {
+			t.Fatalf("%s: no exact empty-block anchor: %+v", name, f)
+		}
+		raw := []byte(src)
+		span := raw[f.Evidence.StartByte:f.Evidence.EndByte]
+		sum := sha256.Sum256(span)
+		if got := "sha256:" + hex.EncodeToString(sum[:]); got != f.Evidence.SnippetHash {
+			t.Errorf("%s: hash mismatch: span=%q got=%s want=%s", name, span, got, f.Evidence.SnippetHash)
+		}
 	}
 }
