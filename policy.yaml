@@ -13,7 +13,7 @@ languages:
       banned-fmt-Print*:
         # The CLI is the one place where direct printing is the job.
         options:
-          allowed_files: ["cmd/metricgate/main.go"]
+          allowed_files: ["cmd/metricgate/"]
       todo-comment:
         enabled: false
         severity: info

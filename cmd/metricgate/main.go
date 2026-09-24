@@ -13,13 +13,11 @@ import (
 	"sort"
 	"strings"
 
-	"metricgate/internal/apisurface"
 	"metricgate/internal/clones"
 	"metricgate/internal/config"
 	"metricgate/internal/engine"
 	"metricgate/internal/facts"
 	"metricgate/internal/git"
-	"metricgate/internal/hotspots"
 	"metricgate/internal/metrics"
 	"metricgate/internal/model"
 	"metricgate/internal/report"
@@ -462,112 +460,6 @@ func oneLineSig(sig string) string {
 	return s
 }
 
-// cmdAPI snapshots or diffs the exported API surface (design doc B-3):
-// `api snapshot -out api.json` writes the current surface; `api diff -base
-// api.json` reports added (safe) and removed/changed (breaking) symbols,
-// exiting 1 when anything broke — a SemVer gate in CI.
-func cmdAPI(args []string) {
-	if len(args) == 0 {
-		fail(fmt.Errorf("api needs a subcommand: snapshot|diff"))
-	}
-	switch args[0] {
-	case "snapshot":
-		cmdAPISnapshot(args[1:])
-	case "diff":
-		cmdAPIDiff(args[1:])
-	default:
-		fail(fmt.Errorf("unknown api subcommand %q (want snapshot|diff)", args[0]))
-	}
-}
-
-func cmdAPISnapshot(args []string) {
-	set := flag.NewFlagSet("api snapshot", flag.ExitOnError)
-	out := set.String("out", "api.json", "snapshot file to write")
-	parseArgs(set, args)
-	root := "."
-	if set.NArg() > 0 {
-		root = set.Arg(0)
-	}
-	files, err := facts.Collect(root)
-	if err != nil {
-		fail(err)
-	}
-	snap := apisurface.Current(files)
-	data, err := json.MarshalIndent(snap, "", "  ")
-	if err != nil {
-		fail(err)
-	}
-	if err := os.WriteFile(*out, data, 0o644); err != nil {
-		fail(err)
-	}
-	n := 0
-	for _, entries := range snap.Packages {
-		n += len(entries)
-	}
-	fmt.Printf("wrote %s: %d exported symbols across %d packages\n", *out, n, len(snap.Packages))
-}
-
-func cmdAPIDiff(args []string) {
-	set := flag.NewFlagSet("api diff", flag.ExitOnError)
-	base := set.String("base", "api.json", "snapshot to diff against")
-	format := set.String("format", "text", "output format: text|json")
-	parseArgs(set, args)
-	root := "."
-	if set.NArg() > 0 {
-		root = set.Arg(0)
-	}
-	data, err := os.ReadFile(*base)
-	if err != nil {
-		fail(fmt.Errorf("read snapshot: %w", err))
-	}
-	var oldSnap apisurface.Snapshot
-	if err := json.Unmarshal(data, &oldSnap); err != nil {
-		fail(fmt.Errorf("parse snapshot: %w", err))
-	}
-	files, err := facts.Collect(root)
-	if err != nil {
-		fail(err)
-	}
-	d := apisurface.Compare(&oldSnap, apisurface.Current(files))
-	switch *format {
-	case "json":
-		out, err := json.MarshalIndent(d, "", "  ")
-		if err != nil {
-			fail(err)
-		}
-		os.Stdout.Write(append(out, '\n'))
-	default:
-		for _, c := range d.Breaking {
-			fmt.Printf("BREAKING  %s %s.%s  %s\n", c.Kind, c.Package, c.Name, changeDetail(c))
-		}
-		for _, c := range d.Added {
-			fmt.Printf("added     %s.%s at %s:%d\n", c.Package, c.Name, c.File, c.Line)
-		}
-		for _, c := range d.Moved {
-			fmt.Printf("moved     %s.%s %s -> %s\n", c.Package, c.Name, c.Old, c.New)
-		}
-		if !d.Changed() {
-			fmt.Println("no API changes")
-		}
-	}
-	if len(d.Breaking) > 0 {
-		fmt.Fprintf(os.Stderr, "api: %d breaking change(s)\n", len(d.Breaking))
-		os.Exit(1)
-	}
-}
-
-// changeDetail renders old/new for a breaking change.
-func changeDetail(c apisurface.Change) string {
-	switch c.Kind {
-	case "signature-changed":
-		return oneLineSig(c.Old) + " -> " + oneLineSig(c.New)
-	case "removed":
-		return "was " + oneLineSig(c.Old)
-	default:
-		return ""
-	}
-}
-
 // cmdNearClones reports near-clone pairs (design doc B-4): functions that
 // share most of their normalised token set without being exact Type-2
 // clones — the "copy, rename, small edit" pattern.
@@ -595,56 +487,6 @@ func cmdNearClones(args []string) {
 			m.Anchor.File, m.Anchor.StartLine, m.Anchor.Name,
 			m.Similarity*100,
 			m.Other.File, m.Other.StartLine, m.Other.Name)
-	}
-}
-
-// cmdHotspots ranks churn × maintainability-debt hotspots from git history
-// and the current engine MI snapshot (design doc B-5).
-func cmdHotspots(args []string) {
-	set := flag.NewFlagSet("hotspots", flag.ExitOnError)
-	since := set.String("since", "3.months ago", "git history window (e.g. 90.days ago)")
-	maxN := set.Int("max", 10, "top N files")
-	format := set.String("format", "text", "text|json")
-	configPath := set.String("config", "policy.yaml", "policy file for MI computation")
-	parseArgs(set, args)
-	root := "."
-	if set.NArg() > 0 {
-		root = set.Arg(0)
-	}
-	_, eng, summary := runEngine(*configPath, root)
-	defer eng.Close()
-	mis := map[string]float64{}
-	for _, m := range summary.Metrics {
-		if m.Metric == metrics.MetricMaintainability {
-			mi := 100 - float64(m.Value) // snapshots store debt (100-MI)
-			if prev, ok := mis[m.File]; !ok || mi < prev {
-				mis[m.File] = mi // worst function in the file
-			}
-		}
-	}
-	h, err := hotspots.Compute(hotspots.Options{Since: *since, Root: root, MIs: mis, Max: *maxN})
-	if err != nil {
-		fail(err)
-	}
-	if *format == "json" {
-		data, err := json.MarshalIndent(h, "", "  ")
-		if err != nil {
-			fail(err)
-		}
-		os.Stdout.Write(append(data, '\n'))
-		return
-	}
-	if len(h) == 0 {
-		fmt.Println("no changed files in the selected history window")
-		return
-	}
-	fmt.Printf("%-48s %10s %7s %8s\n", "FILE", "CHURN", "MI", "SCORE")
-	for _, f := range h {
-		mi := "-"
-		if f.MI > 0 {
-			mi = fmt.Sprintf("%.0f", f.MI)
-		}
-		fmt.Printf("%-48s %10d %7s %8.1f\n", f.File, f.Churn, mi, f.Score)
 	}
 }
 

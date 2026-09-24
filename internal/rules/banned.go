@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"metricgate/internal/config"
@@ -282,8 +283,17 @@ func nameMatch(got, want string, prefix bool) bool {
 // excluded reports whether this file is outside the ban's reach, through the
 // ban's own except_files or through a per-rule allowed_files override.
 func excluded(ctx *MatchCtx, b Ban) bool {
-	for _, suffix := range append(append([]string{}, b.Except...), ctx.OptStrings("allowed_files")...) {
-		if suffix != "" && strings.HasSuffix(ctx.File, suffix) {
+	for _, pat := range append(append([]string{}, b.Except...), ctx.OptStrings("allowed_files")...) {
+		if pat == "" {
+			continue
+		}
+		if strings.HasSuffix(ctx.File, pat) || strings.HasPrefix(ctx.File, pat) {
+			return true
+		}
+		if m, _ := filepath.Match(pat, filepath.Base(ctx.File)); m {
+			return true
+		}
+		if m, _ := filepath.Match(pat, ctx.File); m {
 			return true
 		}
 	}
