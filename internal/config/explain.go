@@ -56,22 +56,33 @@ func (r ExclusionReason) String() string {
 // It does not parse the file or run rules; it only evaluates filters and config.
 func (c *Config) ExplainPath(relPath string) *ExplainDecision {
 	decision := &ExplainDecision{
-		Path:          relPath,
+		Path:            relPath,
 		EffectivePolicy: make(map[string]string),
-		RuleIDs:       []string{},
+		RuleIDs:         []string{},
 	}
 
-	// Check exclude patterns first
+	// Check exclude patterns - try multiple matching strategies
 	for _, pattern := range c.Exclude {
-		matched, err := filepath.Match(pattern, filepath.Base(relPath))
-		if err == nil && matched {
+		// Strategy 1: Match basename (e.g., "*.go" matches "main.go")
+		if matched, err := filepath.Match(pattern, filepath.Base(relPath)); err == nil && matched {
 			decision.Status = "excluded"
 			decision.Reason = ReasonExcludedPattern.String()
 			decision.MatchedPattern = pattern
 			return decision
 		}
-		// Also check if any path component matches
-		if strings.Contains(relPath, "/"+pattern+"/") || strings.HasPrefix(relPath, pattern+"/") {
+
+		// Strategy 2: Match full path prefix for non-wildcard patterns (e.g., "testdata" matches "testdata/foo.go")
+		if !strings.ContainsRune(pattern, '*') && !strings.ContainsRune(pattern, '?') {
+			if relPath == pattern || strings.HasPrefix(relPath, pattern+"/") {
+				decision.Status = "excluded"
+				decision.Reason = ReasonExcludedPattern.String()
+				decision.MatchedPattern = pattern
+				return decision
+			}
+		}
+
+		// Strategy 3: Match against full path for wildcard patterns (e.g., "vendor/*" matches "vendor/bar.go")
+		if matched, err := filepath.Match(pattern, relPath); err == nil && matched {
 			decision.Status = "excluded"
 			decision.Reason = ReasonExcludedPattern.String()
 			decision.MatchedPattern = pattern
@@ -149,10 +160,10 @@ func (c *Config) ExplainRule(lang, ruleID string) RuleExplain {
 	sec, ok := c.Languages[lang]
 	if !ok {
 		return RuleExplain{
-			Enabled:     false,
-			Reason:      "language_not_configured",
-			Severity:    "",
-			Thresholds:  MetricThresholds{},
+			Enabled:      false,
+			Reason:       "language_not_configured",
+			Severity:     "",
+			Thresholds:   MetricThresholds{},
 			PolicySource: "builtin",
 		}
 	}
@@ -218,7 +229,7 @@ type RuleExplain struct {
 
 // MetricThresholds holds the warn/error thresholds for a metric.
 type MetricThresholds struct {
-	Warn int
+	Warn  int
 	Error int
 }
 
