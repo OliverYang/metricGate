@@ -2,7 +2,6 @@ package engine
 
 import (
 	"path/filepath"
-	"strings"
 
 	"metricgate/internal/diff"
 	"metricgate/internal/metrics"
@@ -57,17 +56,12 @@ func FilterSummary(s *model.RunSummary, changed map[string][]diff.Range) (*model
 	return &out, hidden
 }
 
-// rangesFor looks up changed ranges for an engine-reported file path,
-// tolerating runs started from a subdirectory (suffix match on the
-// repo-rooted git path).
+// rangesFor looks up changed ranges for an engine-reported file path.
+// It only returns non-nil if the file is explicitly in the changed map,
+// with no suffix matching to avoid false positives from similar paths.
 func rangesFor(changed map[string][]diff.Range, file string) []diff.Range {
 	if r, ok := changed[file]; ok {
 		return r
-	}
-	for path, r := range changed {
-		if strings.HasSuffix(path, "/"+file) {
-			return r
-		}
 	}
 	return nil
 }

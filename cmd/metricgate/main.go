@@ -45,6 +45,8 @@ func main() {
 		cmdSymbols(os.Args[2:])
 	case "rules":
 		cmdRules(os.Args[2:])
+	case "explain":
+		cmdExplain(os.Args[2:])
 	case "api":
 		cmdAPI(os.Args[2:])
 	case "nearclones":
@@ -80,6 +82,7 @@ usage:
                                       definition index (near-miss suggestions
                                       when the exact name is unknown)
   metricgate rules explain [path]     explain selection + effective policy
+  metricgate explain [path]           preview what would be scanned (no rule execution)
   metricgate api snapshot -out F      capture the exported API surface
   metricgate api diff -base F [path]  breaking-change gate against a snapshot
                                       (removed/changed signatures exit 1)
@@ -534,69 +537,63 @@ func cmdRules(args []string) {
 	configPath := set.String("config", "policy.yaml", "policy file")
 	format := set.String("format", "text", "text|json")
 	parseArgs(set, args[1:])
-	path := ""
-	if set.NArg() > 0 {
-		path = set.Arg(0)
-	}
-	if path == "" {
-		fail(fmt.Errorf("rules explain needs a source path"))
-	}
-	cfg, err := loadPolicy(*configPath)
+	cmdRulesExplain(set, args[1:], *configPath, *format)
+}
+
+func cmdRulesExplain(set *flag.FlagSet, args []string, configPath, format string) {
+	cfg, err := loadPolicy(configPath)
 	if err != nil {
 		fail(err)
 	}
-	eng, err := engine.New(cfg)
-	if err != nil {
-		fail(err)
+
+	if len(args) == 0 || args[0] == "list" {
+		cmdRulesList(cfg, format)
+		return
 	}
-	defer eng.Close()
-	explanation := eng.ExplainPath(path)
-	if *format == "json" {
-		data, err := json.MarshalIndent(explanation, "", "  ")
-		if err != nil {
-			fail(err)
+
+	if args[0] == "explain" {
+		if len(args) < 2 {
+			fail(fmt.Errorf("rules explain requires rule ID"))
 		}
+		ruleID := args[1]
+		explainRule(cfg, "go", ruleID, format)
+		return
+	}
+
+	fail(fmt.Errorf("unknown subcommand: %s", args[0]))
+}
+
+func cmdRulesList(cfg *config.Config, format string) {
+	if format == "json" {
+		data, _ := json.MarshalIndent(cfg.Languages, "", "  ")
 		os.Stdout.Write(append(data, '\n'))
 		return
 	}
-	writeExplainText(os.Stdout, explanation)
-}
 
-// writeExplainText renders a PathExplanation as aligned human-readable lines.
-func writeExplainText(w io.Writer, explanation engine.PathExplanation) {
-	fmt.Fprintf(w, "%s: %s", explanation.Path, explanation.Selection.Status)
-	if explanation.Language != "" {
-		fmt.Fprintf(w, " (%s)", explanation.Language)
-	}
-	fmt.Fprintf(w, " — %s", explanation.Selection.Reason)
-	if explanation.Selection.MatchedExclude != "" {
-		fmt.Fprintf(w, " [%s]", explanation.Selection.MatchedExclude)
-	}
-	fmt.Fprintln(w)
-	for _, item := range explanation.Items {
-		fmt.Fprintf(w, "  %-12s %-28s %-8s", item.Kind, item.ID, stateLabel(item.Enabled))
-		printExplainItem(w, item)
+	for lang, sec := range cfg.Languages {
+		fmt.Printf("[%s]\n", lang)
+		for ruleID := range sec.Rules {
+			fmt.Printf("  - %s\n", ruleID)
+		}
+		for metricID := range sec.Metrics {
+			fmt.Printf("  - metric:%s\n", metricID)
+		}
 	}
 }
 
-func stateLabel(enabled bool) string {
-	if enabled {
-		return "enabled"
-	}
-	return "disabled"
-}
+func explainRule(cfg *config.Config, lang, ruleID, format string) {
+	explain := cfg.ExplainRule(lang, ruleID)
 
-// printExplainItem appends the optional per-item fields and the trailing newline.
-func printExplainItem(w io.Writer, item engine.ExplainItem) {
-	if item.Severity != "" {
-		fmt.Fprintf(w, " severity=%s", item.Severity)
+	if format == "json" {
+		data, _ := json.MarshalIndent(explain, "", "  ")
+		os.Stdout.Write(append(data, '\n'))
+		return
 	}
-	if item.Kind == "metric" {
-		fmt.Fprintf(w, " warn>%d error>%d", item.Warn, item.Error)
-	}
-	fmt.Fprintf(w, " source=%s", item.Source)
-	if item.SourcePath != "" {
-		fmt.Fprintf(w, " (%s)", item.SourcePath)
-	}
-	fmt.Fprintln(w)
+
+	fmt.Printf("Rule: %s (language: %s)\n", ruleID, lang)
+	fmt.Printf("  Enabled:     %v\n", explain.Enabled)
+	fmt.Printf("  Reason:      %s\n", explain.Reason)
+	fmt.Printf("  Severity:    %s\n", explain.Severity)
+	fmt.Printf("  Source:      %s\n", explain.PolicySource)
+	fmt.Printf("  Thresholds:  warn=%d, error=%d\n", explain.Thresholds.Warn, explain.Thresholds.Error)
 }

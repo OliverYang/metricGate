@@ -55,20 +55,3 @@ func TestFilterSummary(t *testing.T) {
 	}
 }
 
-func TestFilterSubdirRun(t *testing.T) {
-	// Engine run started inside a subdirectory: its paths are shorter than
-	// the repo-rooted git paths, so the suffix match must find them.
-	changed := map[string][]diff.Range{
-		"internal/engine/testdata/java/Sample.java": {{Start: 11, End: 11}},
-	}
-	s := &model.RunSummary{
-		Findings: []model.Finding{
-			{RuleID: "r", File: "testdata/java/Sample.java", StartLine: 11, EndLine: 11},
-			{RuleID: "r", File: "testdata/java/Sample.java", StartLine: 20, EndLine: 20},
-		},
-	}
-	out, hidden := FilterSummary(s, changed)
-	if hidden != 1 || len(out.Findings) != 1 {
-		t.Errorf("hidden = %d, kept = %d; want 1 and 1", hidden, len(out.Findings))
-	}
-}

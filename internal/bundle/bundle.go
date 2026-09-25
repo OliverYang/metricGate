@@ -390,17 +390,46 @@ func buildConstraints(eng *engine.Engine, decisions []selection.Decision) []Cons
 		if d.Language == "" {
 			continue
 		}
-		x := eng.ExplainPath(d.Path)
-		for _, item := range x.Items {
-			key := d.Language + "|" + item.Kind + "|" + item.ID
+		// Collect constraints for this language
+		for _, ruleID := range []string{
+			"empty-block", "todo-comment", "print-stack-trace",
+		} {
+			key := d.Language + "|rule|" + ruleID
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
+			
+			explain := eng.ExplainRule(d.Language, ruleID)
 			out = append(out, Constraint{
-				ID: item.ID, Kind: item.Kind, Language: d.Language, Title: item.Title,
-				Enabled: item.Enabled, Severity: string(item.Severity), Warn: item.Warn, Error: item.Error,
-				Source: item.Source, SourcePath: item.SourcePath, Explicit: item.Explicit,
+				ID: ruleID, 
+				Kind: "rule", 
+				Language: d.Language,
+				Enabled: explain.Enabled, 
+				Severity: explain.Severity,
+				Source: explain.PolicySource,
+			})
+		}
+		// Add metrics
+		for _, metricID := range []string{
+			"cyclomatic-complexity", "cognitive-complexity", "function-length",
+			"file-length", "nesting-depth", "params-count",
+		} {
+			key := d.Language + "|metric|" + metricID
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			
+			explain := eng.ExplainRule(d.Language, metricID)
+			out = append(out, Constraint{
+				ID: "metric:" + metricID, 
+				Kind: "metric", 
+				Language: d.Language,
+				Enabled: explain.Enabled,
+				Warn: explain.Thresholds.Warn, 
+				Error: explain.Thresholds.Error,
+				Source: explain.PolicySource,
 			})
 		}
 	}
