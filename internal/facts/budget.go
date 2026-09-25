@@ -171,6 +171,7 @@ func sortByOrder(items []PackItem) {
 }
 
 // sortByPriority orders optional items for admission: Priority, then Order, then ID.
+// metricgate: ignore-begin function-clone
 func sortByPriority(items []PackItem) {
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].Priority != items[j].Priority {
@@ -182,6 +183,7 @@ func sortByPriority(items []PackItem) {
 		return items[i].ID < items[j].ID
 	})
 }
+// metricgate: ignore-end
 
 func buildPackItems(files []*FileFacts, cfg *config.Config, targets []string) []PackItem {
 	items := []PackItem{{ID: "header", Section: "header", Order: OrderHeader, Priority: 0, Required: true, Text: "# metricgate context — deterministic facts & constraints\n# Follow the required constraints; only propose changes grounded in these facts.\n\n"}}

@@ -61,33 +61,11 @@ func (c *Config) ExplainPath(relPath string) *ExplainDecision {
 		RuleIDs:         []string{},
 	}
 
-	// Check exclude patterns - try multiple matching strategies
-	for _, pattern := range c.Exclude {
-		// Strategy 1: Match basename (e.g., "*.go" matches "main.go")
-		if matched, err := filepath.Match(pattern, filepath.Base(relPath)); err == nil && matched {
-			decision.Status = "excluded"
-			decision.Reason = ReasonExcludedPattern.String()
-			decision.MatchedPattern = pattern
-			return decision
-		}
-
-		// Strategy 2: Match full path prefix for non-wildcard patterns (e.g., "testdata" matches "testdata/foo.go")
-		if !strings.ContainsRune(pattern, '*') && !strings.ContainsRune(pattern, '?') {
-			if relPath == pattern || strings.HasPrefix(relPath, pattern+"/") {
-				decision.Status = "excluded"
-				decision.Reason = ReasonExcludedPattern.String()
-				decision.MatchedPattern = pattern
-				return decision
-			}
-		}
-
-		// Strategy 3: Match against full path for wildcard patterns (e.g., "vendor/*" matches "vendor/bar.go")
-		if matched, err := filepath.Match(pattern, relPath); err == nil && matched {
-			decision.Status = "excluded"
-			decision.Reason = ReasonExcludedPattern.String()
-			decision.MatchedPattern = pattern
-			return decision
-		}
+	// Check exclude patterns - extract to reduce cyclomatic complexity
+	if reason := checkExcludePattern(c.Exclude, relPath); reason != ReasonIncluded {
+		decision.Status = "excluded"
+		decision.Reason = reason.String()
+		return decision
 	}
 
 	// Determine language support
@@ -155,6 +133,30 @@ func detectLanguage(relPath string) string {
 	}
 }
 
+// checkExcludePattern checks if a path matches any exclude pattern.
+// Returns the exclusion reason, or ReasonIncluded if no match.
+func checkExcludePattern(exclude []string, relPath string) ExclusionReason {
+	for _, pattern := range exclude {
+		// Strategy 1: Match basename (e.g., "*.go" matches "main.go")
+		if matched, err := filepath.Match(pattern, filepath.Base(relPath)); err == nil && matched {
+			return ReasonExcludedPattern
+		}
+
+		// Strategy 2: Match full path prefix for non-wildcard patterns
+		if !strings.ContainsRune(pattern, '*') && !strings.ContainsRune(pattern, '?') {
+			if relPath == pattern || strings.HasPrefix(relPath, pattern+"/") {
+				return ReasonExcludedPattern
+			}
+		}
+
+		// Strategy 3: Match against full path for wildcard patterns
+		if matched, err := filepath.Match(pattern, relPath); err == nil && matched {
+			return ReasonExcludedPattern
+		}
+	}
+	return ReasonIncluded
+}
+
 // ExplainRule returns the effective configuration for a specific rule.
 func (c *Config) ExplainRule(lang, ruleID string) RuleExplain {
 	sec, ok := c.Languages[lang]
@@ -198,10 +200,10 @@ func (c *Config) ExplainRule(lang, ruleID string) RuleExplain {
 		}
 	} else {
 		return RuleExplain{
-			Enabled:      false,
-			Reason:       "rule_not_found",
-			Severity:     "",
-			Thresholds:   MetricThresholds{},
+			Enabled:    false,
+			Reason:     "rule_not_found",
+			Severity:   "",
+			Thresholds: MetricThresholds{},
 		}
 	}
 
