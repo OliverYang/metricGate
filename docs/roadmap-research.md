@@ -7,12 +7,12 @@
 
 | 约束族 | 回答的问题 | 现状 |
 |---|---|---|
-| A 模式约束 | 这个 API/import/写法被允许吗？ | 部分（8 条硬编码规则）|
-| B 架构约束 | 这个依赖方向/分层合法吗？ | **缺失** |
-| C 度量约束 | 这个函数/类/包复杂度超标吗？ | 部分（6 指标，缺类级/包级）|
-| D 重复约束 | 这段代码该复用既有的吗？ | **缺失** |
-| E 深度缺陷 | 空指针/资源泄漏/类型错误？ | **缺失**（类型系统领地）|
-| F 事实与完整性 | 该对齐什么签名？还剩多少桩？ | 已有（facts/stubs）|
+| **A 模式约束** | 这个 API/import/写法被允许吗？ | ✅ **完成**（8 条硬编码规则 → YAML `banned-api:` 数据化）|
+| **B 架构约束** | 这个依赖方向/分层合法吗？ | ✅ **完成**（`internal/arch` + policy 分层 + Tarjan SCC）|
+| **C 度量约束** | 这个函数/类/包复杂度超标吗？ | ✅ **完成**（6 指标 + Java CK 家族 WMC/NOM/LCOM/CBO/DIT + NodeKindSet 抽象 v1）|
+| **D 重复约束** | 这段代码该复用既有的吗？ | ✅ **完成**（Type-2 function clone + diff-aware 闸门 + clone-drift）|
+| **E 深度缺陷** | 空指针/资源泄漏/类型错误？ | ⚠️ **待集成**（需类型系统，计划 golangci-lint/PMD 适配器）|
+| **F 事实与完整性** | 该对齐什么签名？还剩多少桩？ | ✅ **完成**（facts/stubs/symbols/index v1）|
 
 ## 2. 自研 vs 集成：决策框架
 
@@ -63,18 +63,14 @@ SonarQube（服务端重）；进程内嵌入 semgrep 引擎（许可与复杂�
 **Phase A — 约束核心自研冲刺（~1.5 周）**
 1. ~~policy banned-api 数据化（0.5d）~~ ✅ 已完成 → 组织约束从"改源码"变"改配置"
 2. ~~依赖图 + 分层规则 + 循环依赖（2-3d）~~ ✅ 已完成 → 约束族 B 落地，组织级约束的最强载体
-3. 重复检测 + diff-aware 新增重复闸门（3-4d）→ 约束族 D，"先复用再生成"
-4. Java CK 类度量（2d）→ 约束族 C 补全
-5. 符号索引 v1（2d）→ context 质量跃升（相似符号/工单定位）
-
-产出：4 个约束族 × 双语言，"约束足够丰富"的门槛达成。
+3. ~~重复检测 + diff-aware 新增重复闸门（3-4d）~~ ✅ 已完成 → 约束族 D，"先复用再生成"
+4. ~~Java CK 类度量（2d）~~ ✅ 已完成 → 约束族 C 补全
+5. ~~符号索引 v1（2d）~~ ✅ 已完成 → context 质量跃升（相似符号/工单定位）
 
 **Phase B — 集成适配（~1 周）**
 6. `metricgate ingest` 框架 + golangci-lint 适配（Go 深度规则一次全量接入）
 7. PMD（SARIF）/SpotBugs 适配（Java）
 8. gitleaks 适配（可选）
-
-产出：规则覆盖从两位数跳到数百条，且不用自建类型分析。
 
 **Phase C — 规模化与开放性（按需）**
 9. Python/TS 语言包；10. 自定义规则 DSL；11. 解析缓存/流式存储
@@ -173,7 +169,7 @@ SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
   - `Extract`：从 tree-sitter 树提取顶层函数/方法/构造器的 body 指纹（FNV-1a）。
   - 归一化：所有具名叶子（identifier/type/literal）折叠为同一占位 token；运算符与
     标点保留精确文本（`a+b` ≠ `a-b`）；注释（tree-sitter extra 节点）与布局不参与。
-  - `Find`：按 `(语言, 指纹)` 分组，`min_lines`/`min_tokens` 双门槛过滤小块
+  - `Find`：按 `(语言，指纹)` 分组，`min_lines`/`min_tokens` 双门槛过滤小块
     （默认 10 行 / 60 token），跨文件同语言成类，组内按文件/行/名排序，anchor 即首个。
   - `Summary`：每类一行 context 提示（"clone of X:N (name) also at … — reuse it,
     do not reimplement"）。
@@ -210,9 +206,9 @@ SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
 - 新文件 `internal/metrics/classes.go`（core 层，纯测量，policy-free）：
   - `ClassStats{Name,Kind,StartLine,EndLine,WMC,NOM,NOF,LCOM,CBO,DIT}`，挂在
     `FileStats.Classes` 上，`AnalyzeFile` 一次解析顺带产出（Go 为空）。
-  - **WMC**：类/接口全部方法+构造器圈复杂度求和；无 body（abstract/interface
+  - **WMC**：类/接口全部方法 + 构造器圈复杂度求和；无 body（abstract/interface
     方法）记最小值 1——承诺的分发也要计入。
-  - **NOM**：直接声明的方法+构造器数；嵌套类型归属自身。
+  - **NOM**：直接声明的方法 + 构造器数；嵌套类型归属自身。
   - **LCOM**：原始 CK 定义 max(0, P−Q)，字段使用按名字匹配；局部变量遮蔽
     只会抬高共享度 → LCOM 偏低（保守方向）。
   - **CBO**：类引用的非自身、非基本类型的不同类型名数量（JDK 类型计入——
@@ -295,7 +291,7 @@ SCC、分层/禁止/优先级、Summary）+ 引擎端到端 5 个用例
   原子项先按 required→priority→id 装箱（constraints 与当前 diff 为 required，
   绝不静默丢失）；可选 facts 按确定性顺序移除直到 fit，否则返回结构化
   `budget_exhausted`。`pack.Included/Omitted` 记录选取结果；facts 只有在
-  packer 收纳时才挂到 `files[].facts`，避免“报告已包含”却实际丢失。
+  packer 收纳时才挂到 `files[].facts`，避免"报告已包含"却实际丢失。
 - **隐私/路径**：默认只发 diff + 选中 facts；完整源码需 `-include-source`
   显式开启；`run.root` 归一化为相对路径，绝对机器路径不进入 bundle；
   `-out` 以 `0600` 写入并提示可能含源码 diff；不联网、不调 LLM。
@@ -325,7 +321,7 @@ addFilesAndItems/fitEnvelope`；`cmdBundle` 抽独立文件并按
 ## 落地记录（Phase D4：Evidence Anchor）
 
 **已落地**：`model.Finding` 新增可选 `evidence`（`startByte/endByte/snippetHash/anchorStatus`），
-把“确定性锚点”做成可机器校验的证据，而不是只有行列号。
+把"确定性锚点"做成可机器校验的证据，而不是只有行列号。
 
 - `model.Evidence` + `model.NewEvidence(src,start,end)`：对**原始字节区间**
   直接 SHA-256（不 trim / 不 normalize）。编辑使 span 位移或改写 → hash 变 →
@@ -339,14 +335,14 @@ addFilesAndItems/fitEnvelope`；`cmdBundle` 抽独立文件并按
   规则回调只管匹配决策，不各自算 hash。
 - `Engine.Run` 与 `Engine.CheckSource` 末尾统一 `ensureEvidence`：所有 finding
   都有 `anchorStatus`（有 span 的保持 exact，其余标 line_only），宿主无需从
-  “字段缺失”去猜。
+  "字段缺失"去猜。
 - 出口：SARIF `result.properties.evidence`（locations 仍是权威编辑器位置，
   不改 schema）；check JSON 的 finding 内联 `evidence`。
 - 测试：`CheckSource` 锚点（empty-block=exact 且 span 命中 `{ }`、
   metric=line_only、所有 finding 都有锚点）；hash 随 span 变化；
   越界降级；SARIF properties 携带 evidence 且 location 不变。
 - 实测：`check . -format json` 与 `-sarif` 中 `empty-block` 的
-  `snippetHash` 与 `python3 hashlib.sha256(src[42:46])` 完全一致（span 为 `{\n\t}`）。
+  `snippetHash` 与 `python3 hashlib.sha256(src[42:46])` 完全一致（span 为 `{\\n\\t}`）。
 
 D3+D4 至此完成：bundle（CLI+MCP 共用 builder）+ evidence anchors 都落地；
 自家闸门 `metricgate check .` = 0 errors, PASSED。
@@ -356,8 +352,8 @@ D3+D4 至此完成：bundle（CLI+MCP 共用 builder）+ evidence anchors 都落
 ## 落地记录（Phase E：狗粮 / 可证伪验收 / 量化报告）
 
 **已落地** `docs/evaluation-phase-d.md`（D0–D4 的落地清单 + 可证伪验收 + 量化），
-对应设计文档 §5 的 E 阶段“3 repo fixture；selection parity；hard constraint
-recall；token char/estimate delta；耗时；隐私扫描”。
+对应设计文档 §5 的 E 阶段"3 repo fixture；selection parity；hard constraint
+recall；token char/estimate delta；耗时；隐私扫描"。
 
 - **可证伪验收固化为测试**（不是只写在文档里）：
   - preview/Run included set 逐路径相等（既有 D0 测试）；
@@ -367,7 +363,7 @@ recall；token char/estimate delta；耗时；隐私扫描”。
   - hard constraint 100% 覆盖（同测试：每个选中语言的 rule 都出现在 bundle constraints）。
 - **量化（本机实测，语料=本仓库自身 112 文件）**：
   - 整仓源码 425,276 字符 vs bundle compact JSON **6,832 字符 = 1.6%（降 98.4%）**；
-    诚实标注这是“整仓全量发送”基线的对照，单文件全文基线约 8.2k，优势收窄。
+    诚实标注这是"整仓全量发送"基线的对照，单文件全文基线约 8.2k，优势收窄。
   - `bundle -max-chars 6000` 0.06s（3 次稳定）；预算 6000→used 4611 装入，
     2000/600→结构化 `budget_exhausted`（required 不被静默截断）。
   - evidence hash 与 `sha256(src[42:46])` 独立复算一致。
