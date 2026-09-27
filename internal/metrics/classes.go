@@ -36,7 +36,7 @@ var javaPrimitives = map[string]bool{
 // classMeasurer holds the per-file state of the class pass.
 type classMeasurer struct {
 	src      []byte
-	prof     langProfile
+	prof     *LangProfile
 	declared map[string]*sitter.Node // every type name declared in the file
 	ditMemo  map[string]int
 	ditBusy  map[string]bool // inheritance-cycle guard
@@ -44,7 +44,7 @@ type classMeasurer struct {
 
 // measureClasses fills fs.Classes for one parsed Java file. Other languages
 // contribute nothing: the class family is Java-only by design for now.
-func measureClasses(lang parser.LanguageID, src []byte, root *sitter.Node, fs *FileStats, prof langProfile) {
+func measureClasses(lang parser.LanguageID, src []byte, root *sitter.Node, fs *FileStats, prof *LangProfile) {
 	if lang != parser.LangJava {
 		return
 	}

@@ -88,53 +88,6 @@ var DefaultThresholds = map[string]struct {
 	MetricMaintainability: {0, 0},
 }
 
-// langProfile declares the grammar-specific node kinds the metric walks
-// care about. This is the single place where node names live.
-type langProfile struct {
-	funcKinds   map[string]bool // function-like units
-	branchKinds map[string]bool // cyclomatic +1; cognitive +1+nesting; nesting++
-	switchKinds map[string]bool // cognitive +1+nesting (cyclomatic counts cases instead)
-	caseKinds   map[string]bool // cyclomatic +1 (Java: `default` labels excluded)
-	flatCog     map[string]bool // cognitive +1 flat (Java catch)
-	lambdaKinds map[string]bool // nesting++ only (Go func literals, Java lambdas)
-	ternaryKind string          // cyclomatic +1, or "" when the language has none
-}
-
-func kindSet(kindList ...string) map[string]bool {
-	m := make(map[string]bool, len(kindList))
-	for _, k := range kindList {
-		m[k] = true
-	}
-	return m
-}
-
-var profiles = map[parser.LanguageID]langProfile{
-	parser.LangGo: {
-		funcKinds:   kindSet("function_declaration", "method_declaration"),
-		branchKinds: kindSet("if_statement", "for_statement"),
-		switchKinds: kindSet("expression_switch_statement", "type_switch_statement", "select_statement"),
-		caseKinds:   kindSet("expression_case", "type_case", "communication_case"),
-		flatCog:     kindSet(),
-		lambdaKinds: kindSet("func_literal"),
-	},
-	parser.LangJava: {
-		funcKinds:   kindSet("method_declaration", "constructor_declaration"),
-		branchKinds: kindSet("if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement"),
-		switchKinds: kindSet("switch_expression"),
-		caseKinds:   kindSet("switch_label"),
-		flatCog:     kindSet("catch_clause"),
-		ternaryKind: "ternary_expression",
-		lambdaKinds: kindSet("lambda_expression"),
-	},
-}
-
-func profileFor(lang parser.LanguageID) langProfile {
-	if p, ok := profiles[lang]; ok {
-		return p
-	}
-	return profiles[parser.LangGo]
-}
-
 // text returns the source slice covered by a node.
 func text(src []byte, n *sitter.Node) string {
 	if n == nil {
@@ -176,7 +129,7 @@ func hasToken(src []byte, n *sitter.Node, tok string) bool {
 
 // AnalyzeFile measures one parsed file of the given language.
 func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID) *FileStats {
-	prof := profileFor(lang)
+	prof := ProfileFor(lang)
 	fs := &FileStats{File: file, Lines: bytes.Count(src, []byte{'\n'}) + 1}
 
 	measureClasses(lang, src, tree.RootNode(), fs, prof)
@@ -186,7 +139,7 @@ func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.Languag
 		if n == nil {
 			return
 		}
-		if prof.funcKinds[n.Kind()] {
+		if prof.FuncKinds.Has(n) {
 			fs.Functions = append(fs.Functions, measureFunc(lang, prof, src, n))
 		}
 		for i := uint(0); i < n.ChildCount(); i++ {
@@ -224,7 +177,7 @@ func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.Languag
 }
 
 // measureFunc computes all function-level metrics for one declaration.
-func measureFunc(lang parser.LanguageID, prof langProfile, src []byte, fn *sitter.Node) FuncStats {
+func measureFunc(lang parser.LanguageID, prof *LangProfile, src []byte, fn *sitter.Node) FuncStats {
 	st := FuncStats{
 		Name:      funcName(src, fn),
 		StartLine: int(fn.StartPosition().Row) + 1,
@@ -302,20 +255,19 @@ func countParams(lang parser.LanguageID, list *sitter.Node) int {
 // cyclomatic: 1 + decision points. Per language the decision points are the
 // branch kinds, the case entries (Java `default` opens no new path), the
 // ternary operator (Java) and the && / || operators. See docs/metrics.md.
-func cyclomatic(prof langProfile, body *sitter.Node, src []byte) int {
+func cyclomatic(prof *LangProfile, body *sitter.Node, src []byte) int {
 	cc := 1
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {
 		if n == nil {
 			return
 		}
-		kind := n.Kind()
 		switch {
-		case prof.caseKinds[kind] && hasToken(src, n, "default"):
+		case prof.CaseKinds.Has(n) && hasToken(src, n, "default"):
 			// `default:` opens no new path.
-		case prof.branchKinds[kind], prof.caseKinds[kind], prof.ternaryKind == kind:
+		case prof.BranchKinds.Has(n), prof.CaseKinds.Has(n), prof.TernaryKind == n.Kind():
 			cc++
-		case kind == "binary_expression":
+		case n.Kind() == "binary_expression":
 			if logicOp(src, n) != "" {
 				cc++
 			}
@@ -330,25 +282,24 @@ func cyclomatic(prof langProfile, body *sitter.Node, src []byte) int {
 
 // cognitive computes cognitive complexity and the deepest nesting reached,
 // in one walk. nesting is 0 at the function body top level.
-func cognitive(prof langProfile, body *sitter.Node, src []byte) (cog, maxNest int) {
+func cognitive(prof *LangProfile, body *sitter.Node, src []byte) (cog, maxNest int) {
 	var walk func(n *sitter.Node, nesting int)
 	walk = func(n *sitter.Node, nesting int) {
 		if n == nil {
 			return
 		}
 		inner := nesting
-		kind := n.Kind()
 		switch {
-		case prof.branchKinds[kind], prof.switchKinds[kind]:
+		case prof.BranchKinds.Has(n), prof.SwitchKinds.Has(n):
 			cog += 1 + nesting
 			inner = nesting + 1
-		case prof.flatCog[kind]:
+		case prof.FlatCog.Has(n):
 			// catch: +1 flat, no nesting change.
 			cog++
-		case prof.lambdaKinds[kind]:
+		case prof.LambdaKinds.Has(n):
 			// Nested functions add a nesting level but no flat bonus.
 			inner = nesting + 1
-		case kind == "binary_expression":
+		case n.Kind() == "binary_expression":
 			if op := logicOp(src, n); op != "" {
 				parent := n.Parent()
 				if parent == nil || parent.Kind() != "binary_expression" || logicOp(src, parent) != op {

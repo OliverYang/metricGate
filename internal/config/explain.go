@@ -62,9 +62,10 @@ func (c *Config) ExplainPath(relPath string) *ExplainDecision {
 	}
 
 	// Check exclude patterns - extract to reduce cyclomatic complexity
-	if reason := checkExcludePattern(c.Exclude, relPath); reason != ReasonIncluded {
+	if reason, pattern := checkExcludePattern(c.Exclude, relPath); reason != ReasonIncluded {
 		decision.Status = "excluded"
 		decision.Reason = reason.String()
+		decision.MatchedPattern = pattern
 		return decision
 	}
 
@@ -134,27 +135,27 @@ func detectLanguage(relPath string) string {
 }
 
 // checkExcludePattern checks if a path matches any exclude pattern.
-// Returns the exclusion reason, or ReasonIncluded if no match.
-func checkExcludePattern(exclude []string, relPath string) ExclusionReason {
+// Returns the exclusion reason and the matching pattern (if excluded).
+func checkExcludePattern(exclude []string, relPath string) (ExclusionReason, string) {
 	for _, pattern := range exclude {
 		// Strategy 1: Match basename (e.g., "*.go" matches "main.go")
 		if matched, err := filepath.Match(pattern, filepath.Base(relPath)); err == nil && matched {
-			return ReasonExcludedPattern
+			return ReasonExcludedPattern, pattern
 		}
 
 		// Strategy 2: Match full path prefix for non-wildcard patterns
 		if !strings.ContainsRune(pattern, '*') && !strings.ContainsRune(pattern, '?') {
 			if relPath == pattern || strings.HasPrefix(relPath, pattern+"/") {
-				return ReasonExcludedPattern
+				return ReasonExcludedPattern, pattern
 			}
 		}
 
 		// Strategy 3: Match against full path for wildcard patterns
 		if matched, err := filepath.Match(pattern, relPath); err == nil && matched {
-			return ReasonExcludedPattern
+			return ReasonExcludedPattern, pattern
 		}
 	}
-	return ReasonIncluded
+	return ReasonIncluded, ""
 }
 
 // ExplainRule returns the effective configuration for a specific rule.

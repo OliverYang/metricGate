@@ -82,3 +82,16 @@ func LanguageForFile(name string) (LanguageID, bool) {
 		return "", false
 	}
 }
+
+// Language exports for metrics package.
+var (
+	// TsGo is the tree-sitter-go language instance, exported for metrics profile use.
+	TsGo *sitter.Language
+	// TsJava is the tree-sitter-java language instance, exported for metrics profile use.
+	TsJava *sitter.Language
+)
+
+func init() {
+	TsGo = sitter.NewLanguage(tree_sitter_go.Language())
+	TsJava = sitter.NewLanguage(tree_sitter_java.Language())
+}
