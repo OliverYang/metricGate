@@ -84,6 +84,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [llm-constraint-paradigm.md](research/llm-constraint-paradigm.md) | **约束新范式设计**：把 9 方向收拢为五支点闭环（接地→rails→验收→修复→演进），附真实命令与 scorecard JSON 契约 |
 | [research-harness-and-constraints-2026.md](research/research-harness-and-constraints-2026.md) | 大模型产出约束工具 × harness 工程：业界全景（2026-Q3） |
 | [roadmap-research.md](research/roadmap-research.md) | 确定性约束能力补全调研与行动方案（2025-09） |
+| [digest-open-questions-research.md](research/digest-open-questions-research.md) | **digest 待解问题定向文献调研**：任务条件化注入先例（AutoGuide）+ 1.74× 成本归因实验设计（30× 方差警告 → k≥5 中位数 + 三桶模型）+ B 类惯用法提示文献支撑与空白 |
 
 ## [design/](design/) — 设计契约与方案
 
