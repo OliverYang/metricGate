@@ -1,0 +1,804 @@
+{
+  "version": 1,
+  "packages": [
+    "cmd/metricgate",
+    "cmd/metricgate-mcp",
+    "internal/apisurface",
+    "internal/arch",
+    "internal/bundle",
+    "internal/calllog",
+    "internal/clonedrift",
+    "internal/clones",
+    "internal/config",
+    "internal/deps",
+    "internal/diff",
+    "internal/digest",
+    "internal/dist",
+    "internal/engine",
+    "internal/extract",
+    "internal/facts",
+    "internal/feed",
+    "internal/gatecheck",
+    "internal/git",
+    "internal/gittest",
+    "internal/hotspots",
+    "internal/impact",
+    "internal/metrics",
+    "internal/model",
+    "internal/parser",
+    "internal/parsetest",
+    "internal/policygap",
+    "internal/refs",
+    "internal/regress",
+    "internal/repomap",
+    "internal/report",
+    "internal/risk",
+    "internal/rulegen",
+    "internal/rules",
+    "internal/scorecard",
+    "internal/selection",
+    "internal/sources",
+    "internal/status",
+    "internal/store",
+    "internal/stubs",
+    "internal/symbols",
+    "scripts/osv2policy"
+  ],
+  "edges": [
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/apisurface",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/arch",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/bundle",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/calllog",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/clonedrift",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/clones",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/config",
+      "count": 5
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/diff",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/digest",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/dist",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/engine",
+      "count": 7
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/extract",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/facts",
+      "count": 7
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/gatecheck",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/git",
+      "count": 4
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/hotspots",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/impact",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/metrics",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/model",
+      "count": 3
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/policygap",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/refs",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/regress",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/repomap",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/report",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/rulegen",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/rules",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/scorecard",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/selection",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/status",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/store",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/symbols",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/bundle",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/calllog",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/config",
+      "count": 3
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/dist",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/engine",
+      "count": 3
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/facts",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/git",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/hotspots",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/impact",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/model",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/store",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/stubs",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/symbols",
+      "count": 1
+    },
+    {
+      "from": "internal/apisurface",
+      "to": "internal/facts",
+      "count": 1
+    },
+    {
+      "from": "internal/arch",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/bundle",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/bundle",
+      "to": "internal/diff",
+      "count": 1
+    },
+    {
+      "from": "internal/bundle",
+      "to": "internal/engine",
+      "count": 1
+    },
+    {
+      "from": "internal/bundle",
+      "to": "internal/facts",
+      "count": 1
+    },
+    {
+      "from": "internal/bundle",
+      "to": "internal/git",
+      "count": 1
+    },
+    {
+      "from": "internal/bundle",
+      "to": "internal/selection",
+      "count": 1
+    },
+    {
+      "from": "internal/clonedrift",
+      "to": "internal/clones",
+      "count": 1
+    },
+    {
+      "from": "internal/clonedrift",
+      "to": "internal/diff",
+      "count": 1
+    },
+    {
+      "from": "internal/clonedrift",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/clonedrift",
+      "to": "internal/sources",
+      "count": 1
+    },
+    {
+      "from": "internal/clones",
+      "to": "internal/parser",
+      "count": 2
+    },
+    {
+      "from": "internal/clones",
+      "to": "internal/sources",
+      "count": 1
+    },
+    {
+      "from": "internal/config",
+      "to": "internal/arch",
+      "count": 1
+    },
+    {
+      "from": "internal/config",
+      "to": "internal/clones",
+      "count": 1
+    },
+    {
+      "from": "internal/config",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/deps",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/digest",
+      "to": "internal/arch",
+      "count": 1
+    },
+    {
+      "from": "internal/digest",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/digest",
+      "to": "internal/engine",
+      "count": 1
+    },
+    {
+      "from": "internal/digest",
+      "to": "internal/symbols",
+      "count": 1
+    },
+    {
+      "from": "internal/dist",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/arch",
+      "count": 3
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/clones",
+      "count": 3
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/config",
+      "count": 5
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/deps",
+      "count": 2
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/diff",
+      "count": 1
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/metrics",
+      "count": 2
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/model",
+      "count": 6
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/parser",
+      "count": 5
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/regress",
+      "count": 1
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/rules",
+      "count": 4
+    },
+    {
+      "from": "internal/engine",
+      "to": "internal/selection",
+      "count": 1
+    },
+    {
+      "from": "internal/extract",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/arch",
+      "count": 1
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/clones",
+      "count": 3
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/config",
+      "count": 4
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/metrics",
+      "count": 1
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/model",
+      "count": 2
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/parser",
+      "count": 3
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/refs",
+      "count": 2
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/repomap",
+      "count": 2
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/risk",
+      "count": 1
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/rules",
+      "count": 1
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/selection",
+      "count": 2
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/sources",
+      "count": 1
+    },
+    {
+      "from": "internal/facts",
+      "to": "internal/symbols",
+      "count": 2
+    },
+    {
+      "from": "internal/gatecheck",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/gatecheck",
+      "to": "internal/diff",
+      "count": 1
+    },
+    {
+      "from": "internal/gatecheck",
+      "to": "internal/impact",
+      "count": 1
+    },
+    {
+      "from": "internal/gatecheck",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/gatecheck",
+      "to": "internal/refs",
+      "count": 1
+    },
+    {
+      "from": "internal/gatecheck",
+      "to": "internal/symbols",
+      "count": 1
+    },
+    {
+      "from": "internal/git",
+      "to": "internal/diff",
+      "count": 2
+    },
+    {
+      "from": "internal/hotspots",
+      "to": "internal/metrics",
+      "count": 1
+    },
+    {
+      "from": "internal/hotspots",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/hotspots",
+      "to": "internal/risk",
+      "count": 1
+    },
+    {
+      "from": "internal/impact",
+      "to": "internal/refs",
+      "count": 1
+    },
+    {
+      "from": "internal/impact",
+      "to": "internal/symbols",
+      "count": 1
+    },
+    {
+      "from": "internal/metrics",
+      "to": "internal/parser",
+      "count": 3
+    },
+    {
+      "from": "internal/parsetest",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/arch",
+      "count": 2
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/clones",
+      "count": 1
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/config",
+      "count": 3
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/deps",
+      "count": 1
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/engine",
+      "count": 1
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/metrics",
+      "count": 1
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/model",
+      "count": 2
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/rules",
+      "count": 3
+    },
+    {
+      "from": "internal/refs",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/refs",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/regress",
+      "to": "internal/diff",
+      "count": 1
+    },
+    {
+      "from": "internal/regress",
+      "to": "internal/metrics",
+      "count": 1
+    },
+    {
+      "from": "internal/regress",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/regress",
+      "to": "internal/rules",
+      "count": 1
+    },
+    {
+      "from": "internal/repomap",
+      "to": "internal/refs",
+      "count": 1
+    },
+    {
+      "from": "internal/repomap",
+      "to": "internal/symbols",
+      "count": 1
+    },
+    {
+      "from": "internal/report",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/report",
+      "to": "internal/model",
+      "count": 2
+    },
+    {
+      "from": "internal/report",
+      "to": "internal/rules",
+      "count": 1
+    },
+    {
+      "from": "internal/risk",
+      "to": "internal/metrics",
+      "count": 1
+    },
+    {
+      "from": "internal/risk",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/risk",
+      "to": "internal/selection",
+      "count": 1
+    },
+    {
+      "from": "internal/rulegen",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/rulegen",
+      "to": "internal/engine",
+      "count": 1
+    },
+    {
+      "from": "internal/rulegen",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/rules",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/rules",
+      "to": "internal/model",
+      "count": 5
+    },
+    {
+      "from": "internal/rules",
+      "to": "internal/parser",
+      "count": 2
+    },
+    {
+      "from": "internal/scorecard",
+      "to": "internal/diff",
+      "count": 1
+    },
+    {
+      "from": "internal/scorecard",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/scorecard",
+      "to": "internal/regress",
+      "count": 1
+    },
+    {
+      "from": "internal/scorecard",
+      "to": "internal/selection",
+      "count": 1
+    },
+    {
+      "from": "internal/scorecard",
+      "to": "internal/stubs",
+      "count": 1
+    },
+    {
+      "from": "internal/selection",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/sources",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/status",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/status",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/status",
+      "to": "internal/rules",
+      "count": 1
+    },
+    {
+      "from": "internal/store",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/stubs",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/stubs",
+      "to": "internal/selection",
+      "count": 1
+    },
+    {
+      "from": "internal/stubs",
+      "to": "internal/sources",
+      "count": 1
+    },
+    {
+      "from": "scripts/osv2policy",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "scripts/osv2policy",
+      "to": "internal/feed",
+      "count": 1
+    }
+  ]
+}
