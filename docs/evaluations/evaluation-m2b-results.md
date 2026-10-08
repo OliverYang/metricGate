@@ -152,6 +152,9 @@ L2 与 L1 相当（三行阈值行未放大成本）。产物行数无系统性�
 5. **包内先例是最便宜的约束注入**：分层合规可以被包内既有 import 先例"教活"
    （V1/V2 走 refs/symbols）。对产品链路的含义：digest 的复用清单节应包含
    "本包已 import 的合法依赖"——数据源现成（facts.Imports），比新增阈值行便宜且有效。
+   **【已落地 2026-10-09】**digest 新增「包内依赖先例」节（digest.Options.Imports +
+   precedentSection，Go 取 internal/ 导入、Java 取 dependencies.self 前缀内导入，
+   commits 同日）；dogfood：impact 644→735 tok、engine 969→1201 tok，预算可控。
 
 ## 8. 复现
 
