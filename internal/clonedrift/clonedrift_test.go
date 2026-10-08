@@ -86,10 +86,27 @@ func writeTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// files lists the tree's own written files in sorted order, replacing the
+// sources.Files call the production code moved to the composition root: a
+// core-layer test must not depend on the adapter layer either.
+func files(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		panic(err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".go" {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+	return out
+}
+
 func TestDetectFlagsDriftWhenOneSideEdited(t *testing.T) {
 	base := writeTree(t, map[string]string{"a.go": bodyA, "b.go": bodyB})
 	work := writeTree(t, map[string]string{"a.go": bodyA, "b.go": editedB})
-	got, err := Detect(work, base, map[string][]diff.Range{"b.go": {{Start: 1, End: 40}}}, clones.Default)
+	got, err := Detect(work, base, files(base), files(work), map[string][]diff.Range{"b.go": {{Start: 1, End: 40}}}, clones.Default)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +122,7 @@ func TestDetectFlagsDriftWhenOneSideEdited(t *testing.T) {
 func TestDetectIgnoresUntouchedPairs(t *testing.T) {
 	base := writeTree(t, map[string]string{"a.go": bodyA, "b.go": bodyB})
 	work := writeTree(t, map[string]string{"a.go": bodyA, "b.go": bodyB})
-	got, err := Detect(work, base, map[string][]diff.Range{"b.go": {{Start: 5, End: 6}}}, clones.Default)
+	got, err := Detect(work, base, files(base), files(work), map[string][]diff.Range{"b.go": {{Start: 5, End: 6}}}, clones.Default)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +135,7 @@ func TestDetectIgnoresSymmetricEdit(t *testing.T) {
 	base := writeTree(t, map[string]string{"a.go": bodyA, "b.go": bodyB})
 	work := writeTree(t, map[string]string{"a.go": bodyA + "\nvar keepA = 1\n", "b.go": bodyB + "\nvar keepB = 1\n"})
 	changed := map[string][]diff.Range{"a.go": {{Start: 1, End: 40}}, "b.go": {{Start: 1, End: 40}}}
-	got, err := Detect(work, base, changed, clones.Default)
+	got, err := Detect(work, base, files(base), files(work), changed, clones.Default)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +147,7 @@ func TestDetectIgnoresSymmetricEdit(t *testing.T) {
 func TestDetectIgnoresDeletion(t *testing.T) {
 	base := writeTree(t, map[string]string{"a.go": bodyA, "b.go": bodyB})
 	work := writeTree(t, map[string]string{"a.go": bodyA})
-	got, err := Detect(work, base, map[string][]diff.Range{"b.go": {{Start: 1, End: 20}}}, clones.Default)
+	got, err := Detect(work, base, files(base), files(work), map[string][]diff.Range{"b.go": {{Start: 1, End: 20}}}, clones.Default)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +160,7 @@ func TestDetectDisabledConfig(t *testing.T) {
 	base := writeTree(t, map[string]string{"a.go": bodyA, "b.go": bodyB})
 	work := writeTree(t, map[string]string{"a.go": bodyA, "b.go": editedB})
 	// Enabled() is MinLines>0 && MinTokens>0; zeroing them disables the pass.
-	got, err := Detect(work, base, map[string][]diff.Range{"b.go": {{Start: 1, End: 40}}}, clones.Config{})
+	got, err := Detect(work, base, files(base), files(work), map[string][]diff.Range{"b.go": {{Start: 1, End: 40}}}, clones.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

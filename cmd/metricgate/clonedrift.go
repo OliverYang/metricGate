@@ -9,6 +9,7 @@ import (
 
 	"metricgate/internal/clonedrift"
 	"metricgate/internal/git"
+	"metricgate/internal/sources"
 )
 
 // cmdClonedrift reports clone drift: a working-tree change that edits one copy
@@ -40,7 +41,16 @@ func cmdClonedrift(args []string) {
 	}
 	defer cleanup()
 
-	findings, err := clonedrift.Detect(root, baseDir, changed, cfg.ClonePolicy())
+	// The composition root lists the files; the analysis package stays pure.
+	workFiles, err := sources.Files(root)
+	if err != nil {
+		fail(err)
+	}
+	baseFiles, err := sources.Files(baseDir)
+	if err != nil {
+		fail(err)
+	}
+	findings, err := clonedrift.Detect(root, baseDir, baseFiles, workFiles, changed, cfg.ClonePolicy())
 	if err != nil {
 		fail(err)
 	}

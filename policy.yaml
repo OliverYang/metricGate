@@ -118,6 +118,17 @@ architecture:
         - internal/risk
         - internal/dist
         - internal/deps
+        - internal/clones
+        - internal/clonedrift
+        - internal/digest
+        - internal/extract
+        - internal/feed
+        - internal/gatecheck
+        - internal/parsetest
+        - internal/policygap
+        - internal/rulegen
+        - internal/status
+        - internal/symbols
       may_depend_on: [core]
     - name: adapter
       packages:
@@ -127,6 +138,14 @@ architecture:
         - internal/facts
         - internal/stubs
         - internal/sources
+        - internal/apisurface
+        - internal/bundle
+        - internal/calllog
+        - internal/hotspots
+        - internal/scorecard
+      may_depend_on: [core, adapter]
+    - name: tools
+      packages: ["scripts/**"]
       may_depend_on: [core, adapter]
   forbid:
     - from: internal/**

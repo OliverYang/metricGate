@@ -192,6 +192,11 @@
     },
     {
       "from": "cmd/metricgate",
+      "to": "internal/sources",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate",
       "to": "internal/status",
       "count": 1
     },
@@ -326,19 +331,9 @@
       "count": 1
     },
     {
-      "from": "internal/clonedrift",
-      "to": "internal/sources",
-      "count": 1
-    },
-    {
       "from": "internal/clones",
       "to": "internal/parser",
       "count": 2
-    },
-    {
-      "from": "internal/clones",
-      "to": "internal/sources",
-      "count": 1
     },
     {
       "from": "internal/config",

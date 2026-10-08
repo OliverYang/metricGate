@@ -19,7 +19,6 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/parser"
-	"metricgate/internal/sources"
 )
 
 // NearConfig tunes the near-clone pass.
@@ -231,16 +230,12 @@ func itoa2(n int) string {
 	return string(buf[i:])
 }
 
-// ScanNear walks root, parses every supported file and reports near-clone
-// pairs across the whole tree. It is a standalone pass (its own parse
-// sweep) because retaining shingle sets for the whole run in the engine's
-// per-file pipeline would hold every parse tree open; near-clones are
-// report-only (design doc round 4), so a separate command is enough.
-func ScanNear(root string, cfg NearConfig) ([]NearMatch, error) {
-	files, err := sources.Files(root)
-	if err != nil {
-		return nil, err
-	}
+// ScanNear reports near-clone pairs across the given source files (as
+// returned by sources.Files). The file listing lives at the composition
+// root (cmd), not here: this package is pure analysis and must not reach
+// out to the filesystem on its own — the same port-adapter shape the
+// layer-violation fix instruction prescribes.
+func ScanNear(files []string, cfg NearConfig) ([]NearMatch, error) {
 	parsers := map[parser.LanguageID]*parser.Parser{}
 	defer closeParsers(parsers)
 	cands, err := collectShingles(files, parsers, cfg)

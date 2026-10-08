@@ -3,10 +3,10 @@
 // diverge. The research on consistent vs inconsistent clone changes shows this
 // is a real maintenance hazard — a bug fixed on one copy but not its twin.
 //
-// It is an adapter: it walks two trees (the base revision and the working
-// tree), reuses internal/clones for fingerprinting/grouping, and emits plain
-// report records. Nothing here shells out; the base tree is handed in already
-// extracted by internal/git.
+// It is pure analysis over file lists handed in by the composition root:
+// it reuses internal/clones for fingerprinting/grouping, and emits plain
+// report records. Nothing here shells out or walks the filesystem; the base
+// tree is handed in already extracted by internal/git.
 package clonedrift
 
 import (
@@ -18,7 +18,6 @@ import (
 	"metricgate/internal/clones"
 	"metricgate/internal/diff"
 	"metricgate/internal/parser"
-	"metricgate/internal/sources"
 )
 
 // RuleID is the stable identifier for a drift finding.
@@ -44,15 +43,15 @@ type Finding struct {
 // least one was touched by the diff, and their bodies are no longer identical
 // — i.e. the change was not mirrored. Removing one copy is de-duplication, not
 // drift, so it is not reported.
-func Detect(root, baseDir string, changed map[string][]diff.Range, cc clones.Config) ([]Finding, error) {
+func Detect(root, baseDir string, baseFiles, workFiles []string, changed map[string][]diff.Range, cc clones.Config) ([]Finding, error) {
 	if !cc.Enabled() {
 		return nil, nil
 	}
-	baseFuncs, err := scan(baseDir, cc)
+	baseFuncs, err := scan(baseDir, baseFiles, cc)
 	if err != nil {
 		return nil, err
 	}
-	curFuncs, err := scan(root, cc)
+	curFuncs, err := scan(root, workFiles, cc)
 	if err != nil {
 		return nil, err
 	}
@@ -139,13 +138,10 @@ func rangesFor(changed map[string][]diff.Range, file string) []diff.Range {
 	return nil
 }
 
-// scan walks a tree and extracts clone fingerprints, returning paths relative
-// to root so both revisions share one coordinate system.
-func scan(root string, cfg clones.Config) ([]clones.Func, error) {
-	files, err := sources.Files(root)
-	if err != nil {
-		return nil, err
-	}
+// scan extracts clone fingerprints from the given files (already listed by
+// the composition root, not walked here), returning paths relative to root
+// so both revisions share one coordinate system.
+func scan(root string, files []string, cfg clones.Config) ([]clones.Func, error) {
 	parsers := map[parser.LanguageID]*parser.Parser{}
 	defer func() {
 		for _, p := range parsers {

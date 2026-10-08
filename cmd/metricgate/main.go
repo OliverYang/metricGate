@@ -25,6 +25,7 @@ import (
 	"metricgate/internal/repomap"
 	"metricgate/internal/report"
 	"metricgate/internal/scorecard"
+	"metricgate/internal/sources"
 	"metricgate/internal/store"
 	"metricgate/internal/symbols"
 )
@@ -682,7 +683,11 @@ func cmdNearClones(args []string) {
 	}
 	cfg := clones.DefaultNear
 	cfg.Threshold = *threshold
-	matches, err := clones.ScanNear(root, cfg)
+	files, err := sources.Files(root)
+	if err != nil {
+		fail(err)
+	}
+	matches, err := clones.ScanNear(files, cfg)
 	if err != nil {
 		fail(err)
 	}
