@@ -17,8 +17,16 @@ set -u
 
 bin=${METRICGATE:-metricgate}
 if ! command -v "$bin" >/dev/null 2>&1; then
-    echo "pre-commit: $bin not found; skipping the gate. Set METRICGATE to its path." >&2
-    exit 0
+    # Fall back to the repo-root binary this repository dogfoods with, so a
+    # fresh clone with core.hooksPath=hooks is gated without any PATH setup.
+    # Fall-forward keeps the explicit override: a binary that exists but is
+    # not executable must still be an error, not a silent skip.
+    if [ -x "$PWD/metricgate" ]; then
+        bin=$PWD/metricgate
+    else
+        echo "pre-commit: $bin not found; skipping the gate. Set METRICGATE to its path." >&2
+        exit 0
+    fi
 fi
 
 # A repository with no commits yet has no base to diff against. metricgate says
