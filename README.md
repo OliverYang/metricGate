@@ -14,28 +14,49 @@ LLM 生成代码 → tree-sitter 解析（容错解析）
             → 违规 JSON 反馈给 LLM → 自修复 → 复检全绿
 ```
 
-## Status: v0.1.0 (MVP)
+## Capabilities
 
-- Go + Java language support (tree-sitter grammars, incremental-friendly)
-- 6 metrics: cyclomatic complexity, cognitive complexity, function length,
-  file length, nesting depth, parameter count
-- Built-in structural rules (tree-sitter query + Go filter): `empty-block`,
-  `todo-comment`, and Java `print-stack-trace`
+The full inventory — every CLI subcommand, every MCP tool, every rule and
+metric, the whole policy schema, and an honest list of what it does *not* do —
+lives in **[docs/capabilities.md](docs/capabilities.md)**. The highlights:
+
+- **Languages**: Go + Java (tree-sitter). Parsing is fault-tolerant: a syntax
+  error degrades to an info finding instead of failing the run, so
+  half-written generated code still gets a verdict.
+- **Rules**: `empty-block`, `todo-comment`, `print-stack-trace`,
+  `unknown-dependency`; policy-compiled `banned-*`; whole-graph
+  `layer-violation` / `forbidden-edge` / `import-cycle` / `sdp-violation`;
+  cross-file `function-clone` / `clone-drift` / `metric-regression`.
+- **Metrics**: 6 language-level + 5 CK class metrics (Java) + a function-level
+  maintainability index + 5 package metrics
+  ([definitions](docs/metrics.md)).
 - **Data-driven bans**: `banned-api:` entries in `policy.yaml` compile into the
   same deterministic pipeline — an organisation adds a constraint by editing
-  YAML, not Go (see [Banned API as policy data](#banned-api-as-policy-data))
-- **Architecture constraints**: the package dependency graph — layer boundaries,
-  forbidden edges and import cycles (Go + Java), anchored at the import line and
-  reported through the same gate ([details](#architecture-constraints))
-- Policy file (`policy.yaml`) = the project's constraint model
-- SARIF 2.1.0 output (GitHub code scanning compatible)
-- Local SQLite trend store (write-only in v0)
-- `metricgate context <path>`: token-budgeted constraint pack (signatures + active policy) for LLM prompts
-- CI gate: exit code 1 on violations
-- MCP stdio server (`metricgate-mcp`): get_constraints / check_code / check_path / list_stubs / find_symbols / get_review_bundle
-- Stub detection (completeness audit) for Go and Java
-- Clone drift: `metricgate clonedrift` flags a change that edits one copy of a
-  duplicate but not its twin (needs git; see [clone drift](#clone-drift-metricgate-clonedrift))
+  YAML, not Go ([details](#banned-api-as-policy-data)).
+- **Architecture constraints**: layer boundaries, forbidden edges, import
+  cycles and stable-dependency violations, anchored at the import line
+  ([details](#architecture-constraints)).
+- **Duplicate code**: Type-2 clone gate, near-clone scan, and clone-drift
+  detection ([details](#duplicate-code-gate-clone-detection)).
+- **Completeness audit**: `list_stubs` / `metricgate`'s stub scan finds empty
+  bodies, `panic("not implemented")` and `UnsupportedOperationException` with
+  their exact definition sites — a repair worklist for generated code.
+- **Navigation at 0 tokens**: `symbols` / `impact` / `map` (PageRank importance)
+  / `hotspots` (churn × debt) / `stats` (min/p50/p90/p95/max + top-N). `map` and
+  `hotspots` also carry a 0–100 static risk score.
+- **Incremental adoption**: `check -diff` gates only new code; `-regress` also
+  reports measurements that got worse than `-base`; `api snapshot` / `api diff`
+  gates the exported API surface; `arch snapshot` / `arch diff` gates the
+  package dependency shape.
+- **One policy, with provenance**: `policy.yaml` is the constraint model;
+  `rules explain` reports where every value came from
+  (`builtin | policy_file | preset:NAME`), the `agentic` preset retunes the gate
+  for model-written code, and `metricgate: ignore` suppresses in place.
+- **Outputs**: text, JSON, SARIF 2.1.0 (GitHub code scanning), local SQLite
+  trend store.
+- **Integration**: 18 CLI subcommands and an MCP stdio server exposing 11 tools
+  ([details](#mcp-server-call-it-from-your-coding-agent)).
+- **CI gate**: exit 1 on violations.
 
 ## Quick start
 
@@ -58,17 +79,40 @@ go build -o metricgate ./cmd/metricgate
 # 5. deterministic, budgeted review bundle for a host agent — no LLM call
 ./metricgate bundle . -max-chars 6000
 ./metricgate bundle . -base origin/main -out review.json
+
+# 6. where to read first, at 0 tokens
+./metricgate map .                          # files ranked by PageRank importance (+ risk)
+./metricgate hotspots . -since "90.days ago"  # churn × maintainability debt
+./metricgate stats . -top 5                 # per-metric distribution + worst scopes
+./metricgate impact . -q ClonePolicy        # every call site of a symbol
 ```
 
 ## MCP server (call it from your coding agent)
 
 metricgate ships an MCP (Model Context Protocol) stdio server so agents can
-ground themselves in real constraints instead of hallucinating APIs:
+read this repository's own constraints before generating, and check what they
+actually produced afterwards — the facts and the verdicts come from the same
+deterministic engine either way. What that is worth in an agent loop is
+[measured, not asserted](docs/evaluations/evaluation-hint-and-cost.md): the honest scorecard
+is in [docs/claims.md](docs/claims.md).
 
 ```bash
 go build -o metricgate-mcp ./cmd/metricgate-mcp
 claude mcp add metricgate -- /path/to/metricgate-mcp -config /path/to/policy.yaml
 ```
+
+To also find out whether the gate is *actually called* in a loop, turn on the
+local call log (off by default, local file only, never records the code
+argument) and read it back:
+
+```bash
+metricgate-mcp -config policy.yaml -calllog .metricgate/mcp-calls.jsonl
+metricgate calls          # call counts by phase, intercept rate, converge rate
+```
+
+Wiring instructions — a paste-ready agent-instruction template, a pre-commit
+hook, a CI job, and what the instrumentation can and cannot tell you — are in
+**[docs/workflow.md](docs/workflow.md)**.
 
 Tools exposed:
 
@@ -79,7 +123,18 @@ Tools exposed:
 | `check_path` | check files on disk (optionally diff-only) |
 | `list_stubs` | repair worklist: empty bodies, `panic("not implemented")`, `UnsupportedOperationException` — each with its exact definition site |
 | `find_symbols` | deterministic cross-file symbol index: exact lookups + near-miss suggestions (typos, case twins), 0 tokens |
+| `get_impact` | what uses this symbol: every call site and type reference, plus the files affected if it changes — call before a rename |
+| `get_repo_map` | every file ranked by how much the code leans on it (reference graph + PageRank) — call first to decide what to read |
+| `get_hotspots` | files ranked by churn × maintainability debt over a git window, each annotated with its risk score |
+| `get_metric_stats` | distribution of every metric (count/min/p50/p90/p95/max/mean) + worst scopes, e.g. the most complex functions |
+| `get_trends` | the local trend database: per-run severity series, time range, and the rules that fired most — read-only |
 | `get_review_bundle` | deterministic, budgeted review input (diff + selection + constraints + facts) for a host agent; metricgate never calls an LLM |
+
+Each tool shares its implementation with the matching CLI verb
+(`get_repo_map`↔`map`, `get_hotspots`↔`hotspots`, `get_metric_stats`↔`stats`,
+`get_trends`↔`trends`, `get_review_bundle`↔`bundle`), so the two surfaces
+cannot drift. Full argument lists and result schemas are in
+[docs/capabilities.md §10.2](docs/capabilities.md).
 
 ## Banned API as policy data
 
@@ -119,7 +174,7 @@ Both grammars are covered: Go matches `pkg.Name(...)` and unqualified
 `name(...)`; Java matches `receiver.method(...)`, `Object.field.method(...)`
 and unqualified `method(...)`. Deeper Java receivers need type resolution and
 are deliberately out of scope — that is adapter territory
-([docs/roadmap-research.md](docs/roadmap-research.md)), not AST territory.
+([docs/research/roadmap-research.md](docs/research/roadmap-research.md)), not AST territory.
 
 ## Architecture constraints
 
@@ -320,7 +375,7 @@ policy.yaml（约束模型）
   └── thresholds → findings（source: rule | metric）
      │
      ▼
-  CLI (check/metrics/init) · SARIF · SQLite trends · (v2: HTTP/SDK, LLM loop)
+  CLI (check/metrics/context/bundle/map/stats/hotspots/…) · MCP stdio · SARIF · SQLite trends
 ```
 
 Design invariants:
@@ -343,8 +398,9 @@ published specs where possible; deviations are documented inline.
 
 | Ver | Scope |
 |-----|-------|
-| v0  | Checker core + CLI + SARIF + gate + SQLite schema (this release) |
-| v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · duplicate-code gate ✅ · CK class metrics (Java) ✅ · next: symbol index, Python/TS packs |
+| v0  | Checker core + CLI + SARIF + gate + SQLite schema ✅ |
+| v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · duplicate-code gate ✅ · CK class metrics (Java) ✅ |
+| v1+ | symbol index ✅ · impact ✅ · repo map (PageRank) ✅ · hotspots ✅ · metric distribution ✅ · static risk score ✅ · **next: Python/TS packs** |
 | v2  | HTTP/gRPC service (SDK), LLM adapter interface + context generator |
 | v3  | Skeleton generator (IR + render backends), end-to-end LLM repair loop demo |
 
@@ -360,7 +416,7 @@ The cross-file symbol index is also a CLI verb — "does this helper already
 exist?" answered deterministically:
 
 ```bash
-metricgate symbols . -q ClonePolicy      # exact: internal/config/config.go:306
+metricgate symbols . -q ClonePolicy      # exact: internal/config/config.go:312
 metricgate symbols . -q ClonePolcy       # near-miss suggestion (typo)
 ```
 

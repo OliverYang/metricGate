@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"sync"
 
 	"metricgate/internal/arch"
@@ -94,7 +95,10 @@ func foldResults(summary *model.RunSummary, results <-chan fileResult, archFiles
 	for res := range results {
 		summary.Findings = append(summary.Findings, res.findings...)
 		summary.Metrics = append(summary.Metrics, res.metrics...)
-		summary.Ignored += res.ignored
+		countSuppressed(summary, res.ignored, res.ignoredByRule)
+		if res.parseError != "" {
+			summary.ParseErrors = append(summary.ParseErrors, res.path)
+		}
 		if res.archFile.Pkg != "" {
 			*archFiles = append(*archFiles, res.archFile)
 			k := typeKinds[res.archFile.Pkg]
@@ -107,6 +111,9 @@ func foldResults(summary *model.RunSummary, results <-chan fileResult, archFiles
 		}
 		*cloneFns = append(*cloneFns, res.cloneFns...)
 	}
+	// Workers report in completion order, which varies between runs; the
+	// parse-error list is part of the report, so it must not.
+	sort.Strings(summary.ParseErrors)
 	return supsByFile
 }
 

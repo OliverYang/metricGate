@@ -9,6 +9,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -18,12 +19,16 @@ import (
 )
 
 // BanConfig is one organisation-level banned API or import. Match is a call
-// pattern ("fmt.Print", "System.out.print", "panic") or an import path. A
-// trailing "*" on a call name is a prefix match. Kind defaults to "call".
+// pattern ("fmt.Print", "System.out.print", "panic"), an import path, or a
+// Java class name for kind "constructor" (matches new X()). A
+// trailing "*" on a call/constructor name is a prefix match. Kind defaults
+// to "call".
 type BanConfig struct {
 	Kind        string   `yaml:"kind,omitempty"`
 	Match       string   `yaml:"match"`
 	Reason      string   `yaml:"reason,omitempty"`
+	Use         string   `yaml:"use,omitempty"`          // compliant alternative; rendered in findings and digests
+	ArgsBan     []string `yaml:"args_ban,omitempty"`     // parameter-aware: fire only when a string-literal argument equals one of these
 	ExceptFiles []string `yaml:"except_files,omitempty"` // file-name suffixes
 }
 
@@ -56,6 +61,10 @@ type LanguageConfig struct {
 	Rules   map[string]RuleConfig   `yaml:"rules,omitempty"`
 	Metrics map[string]MetricConfig `yaml:"metrics,omitempty"`
 	Banned  []BanConfig             `yaml:"banned-api,omitempty"`
+	// BannedSeverity is the severity every banned-api rule of this language
+	// falls back to when the rule has no severity of its own. Empty means
+	// "use each ban rule's built-in default".
+	BannedSeverity string `yaml:"banned-api-severity,omitempty"`
 }
 
 // CloneConfig tunes the duplicate-code pass (function-level Type-2 clone
@@ -69,11 +78,32 @@ type CloneConfig struct {
 // ArchConfig is the architecture section: layer boundaries and forbidden
 // dependency directions, enforced over the package graph built by internal/arch.
 type ArchConfig struct {
-	Edges  string        `yaml:"edges,omitempty"`  // severity of layer/edge violations
-	Cycles string        `yaml:"cycles,omitempty"` // severity of import cycles
-	SDP    string        `yaml:"sdp,omitempty"`    // severity of stable-dependency violations (default warning)
-	Layers []arch.Layer  `yaml:"layers,omitempty"`
-	Forbid []arch.Forbid `yaml:"forbid,omitempty"`
+	Edges  string `yaml:"edges,omitempty"`  // severity of layer/edge violations
+	Cycles string `yaml:"cycles,omitempty"` // severity of import cycles
+	// SDP is the severity of stable-dependencies violations, or "off" to keep
+	// recording the package metrics without emitting a finding. It defaults to
+	// warning, and it should stay at or below gate.fail_on: reusing an existing
+	// implementation adds a dependency edge, and a new edge can make a stable
+	// package depend on a less stable one — failing on that would punish the
+	// very behaviour the reuse guidance asks for.
+	SDP string `yaml:"sdp,omitempty"`
+	// SDPTolerance is the minimum instability gap that counts as a
+	// stable-dependencies violation: an edge is reported only when the target
+	// is more unstable by more than this. The zero value keeps Martin's strict
+	// reading. Instability is a ratio over integer coupling counts, so its
+	// resolution is about 1/(Ca+Ce); a tolerance near that value filters the
+	// rounding noise without hiding a real dependency inversion.
+	SDPTolerance float64       `yaml:"sdp_tolerance,omitempty"`
+	Layers       []arch.Layer  `yaml:"layers,omitempty"`
+	Forbid       []arch.Forbid `yaml:"forbid,omitempty"`
+}
+
+// DepsConfig declares the dependencies a repository has already accepted, so
+// an import that is none of them can be flagged before it is merged. Entries
+// are matched as prefixes on a path separator ("/" for Go, "." for Java).
+type DepsConfig struct {
+	Allow []string `yaml:"allow,omitempty"` // extra permitted import prefixes
+	Self  []string `yaml:"self,omitempty"`  // this repository's own module/package prefixes
 }
 
 // GateConfig controls when the check command exits non-zero.
@@ -91,112 +121,20 @@ type StoreConfig struct {
 type Config struct {
 	Clones       CloneConfig               `yaml:"clones,omitempty"`
 	Version      int                       `yaml:"version"`
+	Preset       string                    `yaml:"preset,omitempty"`
 	Gate         GateConfig                `yaml:"gate"`
 	Exclude      []string                  `yaml:"exclude,omitempty"`
 	Languages    map[string]LanguageConfig `yaml:"languages,omitempty"`
+	Dependencies DepsConfig                `yaml:"dependencies,omitempty"`
 	Architecture ArchConfig                `yaml:"architecture,omitempty"`
 	Store        StoreConfig               `yaml:"store"`
 	SourcePath   string                    `yaml:"-"`
 	SourceKind   string                    `yaml:"-"`
 	ExplicitKeys map[string]bool           `yaml:"-"`
+	// presetKeys are the dotted keys the active preset supplied. They are the
+	// preset's half of provenance: ValueSource reports them as "preset:<name>".
+	presetKeys map[string]bool
 }
-
-// DefaultYAML is the policy emitted by `metricgate init` and used when no
-// policy file is present.
-const DefaultYAML = `# metricgate policy — the constraint model for this repository.
-# All values below are the defaults; delete lines you do not need to override.
-version: 1
-
-gate:
-  # Exit code 1 when any finding at or above this severity is present.
-  fail_on: error
-
-# Directory names to skip while walking the tree.
-exclude: [".git", "vendor", "node_modules", "testdata"]
-
-languages:
-  go:
-    rules:
-      empty-block:
-        severity: warning
-      todo-comment:
-        enabled: false
-        severity: info
-    metrics:
-      cyclomatic-complexity: { warn: 10, error: 15 }
-      cognitive-complexity:  { warn: 15, error: 25 }
-      function-length:       { warn: 50, error: 100 }
-      file-length:           { warn: 400, error: 800 }
-      nesting-depth:         { warn: 4,  error: 6 }
-      params-count:          { warn: 5,  error: 8 }
-    # Organisation bans, evaluated by the same deterministic engine. A trailing
-    # "*" is a name prefix; except_files lists file-name suffixes to skip;
-    # kind: import bans a package import instead of a call. Override severity
-    # or add allowed_files under rules.<id>, where <id> is "banned-" plus the
-    # match with dots replaced by dashes (e.g. banned-fmt-Print*).
-    banned-api:
-      - match: fmt.Print*
-        reason: direct fmt.Print* writes to stdout; use the project logger
-      - match: panic
-        reason: direct panic(); return an error so callers can decide
-        except_files: ["_test.go"]
-
-  java:
-    rules:
-      print-stack-trace:
-        severity: warning
-      empty-block:
-        severity: warning
-      todo-comment:
-        enabled: false
-        severity: info
-    metrics:
-      cyclomatic-complexity: { warn: 10, error: 15 }
-      cognitive-complexity:  { warn: 15, error: 25 }
-      function-length:       { warn: 50, error: 100 }
-      file-length:           { warn: 400, error: 800 }
-      nesting-depth:         { warn: 4,  error: 6 }
-      params-count:          { warn: 5,  error: 8 }
-      # CK class metrics (per class/interface):
-      wmc:                   { warn: 40, error: 60 }
-      nom:                   { warn: 20, error: 30 }
-      lcom:                  { warn: 20, error: 40 }
-      cbo:                   { warn: 15, error: 25 }
-      dit:                   { warn: 5,  error: 8 }
-    banned-api:
-      - match: System.out.print*
-        reason: direct System.out.print* writes to the console; use the project logger
-      - match: System.err.print*
-        reason: direct System.err.print* writes to the console; use the project logger
-
-
-# Architecture: the dependency directions this repository must keep.
-# Patterns match package names on their trailing segments, so "internal/rules"
-# also matches "yourmodule/internal/rules":
-#   internal/rules   that package only
-#   internal/*       direct children of internal
-#   internal/**      internal and everything below it
-# A package in no layer, and any dependency on code outside every layer, is
-# unconstrained: describe only the part you care about.
-# architecture:
-#   edges: error     # severity of layer / forbidden-edge violations (default warning)
-#   cycles: error    # severity of import cycles (default warning)
-#   layers:
-#     - name: handler
-#       packages: ["internal/handler/**"]
-#       may_depend_on: [service]
-#     - name: service
-#       packages: ["internal/service/**"]
-#       may_depend_on: [storage]
-#   forbid:
-#     - from: internal/storage/**
-#       to: internal/handler/**
-#       reason: storage must not know about HTTP
-
-store:
-  enabled: true
-  path: ".metricgate/history.db"
-`
 
 // Default returns the built-in policy. It always parses; the error return
 // exists for symmetry with Load.
@@ -240,6 +178,11 @@ func LoadWithSource(data []byte, source, sourcePath string) (*Config, error) {
 	if len(doc.Content) > 0 {
 		collectYAMLKeys(doc.Content[0], "", c.ExplicitKeys)
 	}
+	// The preset is overlaid after the explicit keys are known, so it can tell
+	// "the repository wrote this" from "nobody wrote this yet".
+	if err := c.applyPresetByName(); err != nil {
+		return nil, err
+	}
 	return &c, nil
 }
 
@@ -268,12 +211,20 @@ func collectYAMLKeys(n *yaml.Node, prefix string, keys map[string]bool) {
 func (c *Config) Explicit(key string) bool { return c != nil && c.ExplicitKeys[key] }
 
 // ValueSource returns the configured source if the key was explicitly
-// present, otherwise the supplied built-in source label.
+// present, otherwise the supplied built-in source label. A key supplied by the
+// active preset reports "preset:<name>", so a preset can never masquerade as a
+// built-in default.
 func (c *Config) ValueSource(key, builtin string) (source, path string, explicit bool) {
-	if c == nil || c.SourceKind == "builtin" || !c.Explicit(key) {
+	if c == nil {
 		return builtin, "", false
 	}
-	return c.SourceKind, c.SourcePath, true
+	if c.SourceKind != "builtin" && c.Explicit(key) {
+		return c.SourceKind, c.SourcePath, true
+	}
+	if c.presetKeys[key] {
+		return "preset:" + c.Preset, "", true
+	}
+	return builtin, "", false
 }
 
 // LoadFile reads and parses a policy file from disk, preserving its path for
@@ -292,16 +243,30 @@ func langSection(c *Config, lang string) (LanguageConfig, bool) {
 }
 
 // RuleSeverity returns the configured severity for a rule, or "" if unset.
+// A banned-api rule with no severity of its own falls back to the language's
+// banned-api-severity, which is how a preset can tighten a whole ban family
+// whose rule IDs it cannot know in advance.
 func (c *Config) RuleSeverity(lang, ruleID string) string {
 	sec, ok := langSection(c, lang)
 	if !ok {
 		return ""
 	}
-	rc, ok := sec.Rules[ruleID]
+	if rc, ok := sec.Rules[ruleID]; ok && rc.Severity != "" {
+		return rc.Severity
+	}
+	if strings.HasPrefix(ruleID, "banned-") {
+		return sec.BannedSeverity
+	}
+	return ""
+}
+
+// BanSeverity returns the language's banned-api fallback severity, or "".
+func (c *Config) BanSeverity(lang string) string {
+	sec, ok := langSection(c, lang)
 	if !ok {
 		return ""
 	}
-	return rc.Severity
+	return sec.BannedSeverity
 }
 
 // RuleEnabled returns the configured enabled flag for a rule, or nil if unset.
@@ -378,6 +343,10 @@ func (c *Config) ClonePolicy() clones.Config {
 // layer and forbidden-edge findings, "cycles" for import cycles; both default
 // to warning so that switching architecture checking on never breaks a build
 // by surprise.
+//
+// "sdp" additionally accepts "off", which is not a severity: the caller must
+// skip emitting those findings rather than look them up here (see
+// Engine.appendSdpFindings).
 func (c *Config) ArchSeverity(kind string) model.Severity {
 	value := c.Architecture.Edges
 	if kind == "cycles" {

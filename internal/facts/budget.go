@@ -9,6 +9,7 @@ import (
 	"metricgate/internal/clones"
 	"metricgate/internal/config"
 	"metricgate/internal/parser"
+	"metricgate/internal/repomap"
 )
 
 var ErrBudgetExhausted = errors.New("budget_exhausted")
@@ -34,6 +35,11 @@ type BudgetOptions struct {
 	Budget      int
 	Counter     TokenCounter
 	TargetFiles []string // optional: preserve these file fact blocks as required
+	// MapScores, when non-nil, is the repo importance ranking to embed. A
+	// caller that scoped the fact set to one directory supplies a whole-repo
+	// ranking, so the pack still tells the agent where the target sits; nil
+	// means "rank the files you were given".
+	MapScores []repomap.FileScore
 }
 
 type PackRef struct {
@@ -81,15 +87,45 @@ const (
 	OrderHeader      = 0  // the one-line preamble
 	OrderConstraints = 1  // hard policy constraints — never below the fold
 	OrderDiff        = 2  // the current change set — what the agent is editing
+	OrderMap         = 5  // repo importance map — where the target files sit
 	OrderFacts       = 10 // per-file signatures/imports (grounding)
 	OrderReuse       = 20 // clone reuse hints
 	OrderSymbols     = 30 // similar-symbol hints
 	OrderSource      = 40 // opt-in full source (lowest value, largest)
 )
 
+// mapFiles caps how many files the context pack's repo map lists: enough to
+// orient, few enough to leave budget for the facts that ground the answer.
+const mapFiles = 12
+
 // RenderBudgeted builds facts/policy items and packs them under a complete-text budget.
 func RenderBudgeted(files []*FileFacts, cfg *config.Config, opts BudgetOptions) (PackResult, error) {
-	return PackItemsBudgeted(BuildPackItems(files, cfg, opts.TargetFiles), opts)
+	items := BuildPackItems(files, cfg, opts.TargetFiles)
+	items = appendMapItem(items, files, opts.MapScores)
+	return PackItemsBudgeted(items, opts)
+}
+
+// appendMapItem adds the whole-repo importance map: a deterministic "read
+// these first" orientation, so the agent knows where the target files sit in
+// the reference graph before it reads their signatures. It is optional, so a
+// tight budget drops it rather than the hard constraints.
+func appendMapItem(items []PackItem, files []*FileFacts, scores []repomap.FileScore) []PackItem {
+	if scores == nil {
+		scores = repomap.Build(AllDefs(files), AllRefs(files), repomap.DefaultOptions())
+	}
+	if len(scores) == 0 {
+		return items
+	}
+	return append(items, PackItem{
+		ID: "map", Section: "repo map", Order: OrderMap, Priority: 1,
+		Source: "repo-map", Text: repomap.Brief(scores, mapFiles) + "\n",
+	})
+}
+
+// RepoMap ranks the given fact sheets by reference importance, so a caller can
+// compute a whole-repo ranking once and hand it to RenderBudgeted.
+func RepoMap(files []*FileFacts) []repomap.FileScore {
+	return repomap.Build(AllDefs(files), AllRefs(files), repomap.DefaultOptions())
 }
 
 // BuildPackItems exposes deterministic facts/policy items so adapters can add
@@ -183,6 +219,7 @@ func sortByPriority(items []PackItem) {
 		return items[i].ID < items[j].ID
 	})
 }
+
 // metricgate: ignore-end
 
 func buildPackItems(files []*FileFacts, cfg *config.Config, targets []string) []PackItem {

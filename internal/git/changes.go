@@ -56,7 +56,7 @@ func LoadChanges(dir string, req ChangeRequest) ([]FileChange, error) {
 	}
 	out, err := gitBytes(dir, nameStatusArgs(normalized)...)
 	if err != nil {
-		return nil, fmt.Errorf("git changed paths: %w (requires a git repository)", err)
+		return nil, changedPathsError(dir, normalized, err)
 	}
 	changes, err := parseNameStatusZ(out)
 	if err != nil {
@@ -110,6 +110,47 @@ func resolveRequest(dir string, req ChangeRequest) (ChangeRequest, error) {
 		return req, fmt.Errorf("unsupported change mode %q", req.Mode)
 	}
 	return req, nil
+}
+
+// changedPathsError explains a failed change-set query. "requires a git
+// repository" is right for a missing or unreadable repository, but it is
+// actively misleading for the two states that actually show up while wiring a
+// pre-commit hook or CI: a repository whose HEAD has no commits yet, and a base
+// ref this clone has never fetched. Both send the reader looking for a git
+// installation that is already there, so both get their own wording.
+func changedPathsError(dir string, req ChangeRequest, err error) error {
+	if hint := baseRefHint(dir, req); hint != "" {
+		return fmt.Errorf("git changed paths: %w — %s", err, hint)
+	}
+	return fmt.Errorf("git changed paths: %w (requires a git repository)", err)
+}
+
+// baseRefHint names the most likely reason `git diff <base>` failed, or "" when
+// the repository itself is the problem. Each probe runs only on the error path,
+// so a successful check pays nothing for the diagnosis.
+func baseRefHint(dir string, req ChangeRequest) string {
+	if req.Mode != ModeWorkspace {
+		return ""
+	}
+	if !gitSucceeds(dir, "rev-parse", "--git-dir") {
+		return "" // not a repository at all: the generic message is the right one
+	}
+	if !gitSucceeds(dir, "rev-parse", "--verify", "--quiet", "HEAD") {
+		return "HEAD has no commits yet, so there is nothing to diff against; make an initial commit, or run without -diff"
+	}
+	base := req.Base
+	if base == "" {
+		base = "HEAD"
+	}
+	if !gitSucceeds(dir, "rev-parse", "--verify", "--quiet", base+"^{commit}") {
+		return fmt.Sprintf("%q is not a commit this repository knows about; run `git fetch` (CI needs fetch-depth 0), or pass -base explicitly", base)
+	}
+	return ""
+}
+
+func gitSucceeds(dir string, args ...string) bool {
+	_, err := gitBytes(dir, args...)
+	return err == nil
 }
 
 func nameStatusArgs(req ChangeRequest) []string {

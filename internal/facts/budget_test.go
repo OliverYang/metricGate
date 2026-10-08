@@ -65,10 +65,11 @@ func TestRenderBudgetedReportsRequiredOverflow(t *testing.T) {
 
 func TestRenderBudgetedOptionalOmissionIsAtomic(t *testing.T) {
 	files, cfg := budgetFixture(t)
-	// Required header+constraints fit; required target fact will not. It must
-	// fail rather than being sliced. Without a target, optional facts may be
-	// omitted as whole items while all policy lines remain intact.
-	res, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: 800, Counter: CharCounter{}})
+	// Required header+constraints fit; optional facts (and the repo map) are
+	// omitted as whole items while all policy lines remain intact. The budget
+	// tracks the required set's size — currently ~870 chars with the full
+	// default rule catalog — plus headroom for one optional item to be admitted.
+	res, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: 1000, Counter: CharCounter{}})
 	if err != nil {
 		t.Fatal(err)
 	}

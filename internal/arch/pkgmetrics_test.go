@@ -26,7 +26,7 @@ func approx(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 func TestMartinMetricsChain(t *testing.T) {
 	// handler -> service -> store: store is the stable core.
 	g := graph([2]string{"handler", "service"}, [2]string{"service", "store"})
-	ms := ComputePkgMetrics(g, nil)
+	ms := ComputePkgMetrics(g, nil, PkgOptions{})
 	byPkg := map[string]PkgMetrics{}
 	for _, m := range ms {
 		byPkg[m.Pkg] = m
@@ -45,7 +45,7 @@ func TestMartinMetricsChain(t *testing.T) {
 		"store":   {Abstract: 0, Total: 4},
 		"service": {Abstract: 1, Total: 2},
 	}
-	ms = ComputePkgMetrics(g, kinds)
+	ms = ComputePkgMetrics(g, kinds, PkgOptions{})
 	for _, m := range ms {
 		if m.Pkg == "service" && !approx(m.A, 0.5) {
 			t.Errorf("service A = %v, want 0.5", m.A)
@@ -59,7 +59,7 @@ func TestMartinMetricsChain(t *testing.T) {
 func TestMartinIsolatedPackage(t *testing.T) {
 	// A package with no edges at all: I=0 by definition (most stable).
 	g := Build([]File{{Name: "solo/x.go", Pkg: "solo"}})
-	ms := ComputePkgMetrics(g, nil)
+	ms := ComputePkgMetrics(g, nil, PkgOptions{})
 	if len(ms) != 1 || ms[0].Pkg != "solo" || ms[0].I != 0 || ms[0].D != 1 {
 		t.Errorf("isolated = %+v, want I=0 D=1", ms)
 	}
@@ -74,7 +74,7 @@ func TestSdpViolationDirection(t *testing.T) {
 		[2]string{"u", "v"},
 		[2]string{"v", "v1"}, [2]string{"v", "v2"},
 	)
-	ms := ComputePkgMetrics(g, nil)
+	ms := ComputePkgMetrics(g, nil, PkgOptions{})
 	var u PkgMetrics
 	for _, m := range ms {
 		if m.Pkg == "u" {
@@ -99,10 +99,77 @@ func TestSdpViolationDirection(t *testing.T) {
 func TestSdpNoViolationDownhill(t *testing.T) {
 	// handler (I=1) depending on core (I=0) is the legal direction.
 	g := graph([2]string{"handler", "core"})
-	ms := ComputePkgMetrics(g, nil)
+	ms := ComputePkgMetrics(g, nil, PkgOptions{})
 	vs := SdpViolations(g, ms)
 	if len(vs) != 0 {
 		t.Errorf("downhill dependency flagged: %v", vs)
+	}
+}
+
+func TestSdpToleranceFiltersRoundingNoise(t *testing.T) {
+	// from (I=0.1) depends on to (I=0.2): a real but tiny gap. Instability is
+	// a ratio over integer coupling counts, so its resolution is about
+	// 1/(Ca+Ce) and a gap this small is within the metric's own noise. The
+	// tolerance is what decides whether such an edge is reported.
+	edges := [][2]string{{"from", "to"}, {"to", "leaf"}}
+	for _, u := range []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9"} {
+		edges = append(edges, [2]string{u, "from"})
+	}
+	for _, u := range []string{"b1", "b2", "b3"} {
+		edges = append(edges, [2]string{u, "to"})
+	}
+	g := graph(edges...)
+
+	strict := ComputePkgMetrics(g, nil, PkgOptions{})
+	byPkg := map[string]PkgMetrics{}
+	for _, m := range strict {
+		byPkg[m.Pkg] = m
+	}
+	if !approx(byPkg["from"].I, 0.1) || !approx(byPkg["to"].I, 0.2) {
+		t.Fatalf("I(from)=%v I(to)=%v, want 0.1 and 0.2", byPkg["from"].I, byPkg["to"].I)
+	}
+	if vs := SdpViolations(g, strict); len(vs) != 1 {
+		t.Fatalf("strict: violations = %d, want 1", len(vs))
+	}
+
+	// A tolerance above the gap drops the finding entirely.
+	relaxed := ComputePkgMetrics(g, nil, PkgOptions{SDPTolerance: 0.15})
+	if vs := SdpViolations(g, relaxed); len(vs) != 0 {
+		t.Errorf("tolerance 0.15: violations = %v, want none", vs)
+	}
+
+	// A tolerance below the gap keeps it.
+	half := ComputePkgMetrics(g, nil, PkgOptions{SDPTolerance: 0.05})
+	if vs := SdpViolations(g, half); len(vs) != 1 {
+		t.Errorf("tolerance 0.05: violations = %d, want 1", len(vs))
+	}
+}
+
+// When a package has two equally unstable dependencies, the reported target
+// must not depend on Go's randomized map iteration: the tie is broken by
+// package name, so two runs over the same tree report the same edge.
+func TestSdpTieBreakIsDeterministic(t *testing.T) {
+	// from (I=0.5) depends on two equally unstable neighbours (I=0.75 each);
+	// the alphabetically first one is the reported target.
+	edges := [][2]string{
+		{"from", "zulu"}, {"from", "alpha"},
+		{"zulu", "z1"}, {"zulu", "z2"}, {"zulu", "z3"},
+		{"alpha", "a1"}, {"alpha", "a2"}, {"alpha", "a3"},
+		{"user", "from"},
+	}
+	g := graph(edges...)
+	for i := 0; i < 50; i++ {
+		ms := ComputePkgMetrics(g, nil, PkgOptions{})
+		byPkg := map[string]PkgMetrics{}
+		for _, m := range ms {
+			byPkg[m.Pkg] = m
+		}
+		if !approx(byPkg["alpha"].I, byPkg["zulu"].I) {
+			t.Fatalf("fixture is not tied: alpha=%v zulu=%v", byPkg["alpha"].I, byPkg["zulu"].I)
+		}
+		if got := byPkg["from"].SdpTo; got != "alpha" {
+			t.Fatalf("run %d: SdpTo = %q, want the name-ordered tie winner \"alpha\"", i, got)
+		}
 	}
 }
 
@@ -113,7 +180,7 @@ func TestSummaryPkgOrdersByD(t *testing.T) {
 		"service": {Abstract: 0, Total: 3},
 		"store":   {Abstract: 0, Total: 3},
 	}
-	lines := SummaryPkg(ComputePkgMetrics(g, kinds), 3)
+	lines := SummaryPkg(ComputePkgMetrics(g, kinds, PkgOptions{}), 3)
 	if len(lines) != 3 {
 		t.Fatalf("lines = %d, want 3", len(lines))
 	}

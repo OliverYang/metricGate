@@ -140,9 +140,35 @@ func nextNonBlankLine(lines []string, line int) int {
 	return 0
 }
 
+// countSuppressed records suppressed findings on the summary.
+//
+// It exists so the four places that apply directives (per-file analysis,
+// architecture, SDP and clone checks) do not each re-implement the merge — and
+// so a future whole-graph stage cannot silently forget to carry the split.
+func countSuppressed(summary *model.RunSummary, n int, byRule map[string]int) {
+	if n == 0 {
+		return
+	}
+	summary.Ignored += n
+	if len(byRule) == 0 {
+		return
+	}
+	if summary.IgnoredByRule == nil {
+		summary.IgnoredByRule = map[string]int{}
+	}
+	for id, k := range byRule {
+		summary.IgnoredByRule[id] += k
+	}
+}
+
 // suppress filters findings through the suppression regions, returning the
-// kept findings and how many were suppressed.
-func suppress(findings []model.Finding, sups []suppression) (kept []model.Finding, ignored int) {
+// kept findings, how many were suppressed, and the same total split by rule.
+//
+// The split exists for the policy audit: a rule that is silenced over and over
+// is a rule the team has voted against, and that signal is invisible in the
+// total — one number cannot distinguish "20 stale TODOs" from "20 ignored
+// architecture violations".
+func suppress(findings []model.Finding, sups []suppression) (kept []model.Finding, ignored int, byRule map[string]int) {
 	for _, f := range findings {
 		dropped := false
 		for _, s := range sups {
@@ -165,11 +191,15 @@ func suppress(findings []model.Finding, sups []suppression) (kept []model.Findin
 		}
 		if dropped {
 			ignored++
+			if byRule == nil {
+				byRule = map[string]int{}
+			}
+			byRule[f.RuleID]++
 			continue
 		}
 		kept = append(kept, f)
 	}
-	return kept, ignored
+	return kept, ignored, byRule
 }
 
 // lineSuppression builds the line-scope suppression for a directive comment:

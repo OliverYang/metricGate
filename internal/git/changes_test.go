@@ -3,6 +3,7 @@ package git
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"metricgate/internal/gittest"
@@ -18,6 +19,57 @@ func byPath(changes []FileChange) map[string]FileChange {
 		m[c.Path] = c
 	}
 	return m
+}
+
+// TestLoadChangesOnRepoWithoutCommitsNamesTheRealProblem covers the state a
+// pre-commit hook hits on a repository's very first commit: the repository
+// exists, but HEAD has nothing to diff against. The generic "requires a git
+// repository" wording is wrong there and sends the reader looking for a git
+// installation that is already present.
+func TestLoadChangesOnRepoWithoutCommitsNamesTheRealProblem(t *testing.T) {
+	root := initGitRepo(t)
+	writeRepoFile(t, root, "a.go", "package a\n")
+
+	_, err := LoadChanges(root, ChangeRequest{Mode: ModeWorkspace})
+	if err == nil {
+		t.Fatal("LoadChanges on an unborn HEAD succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "no commits yet") {
+		t.Errorf("error = %v, want it to name the unborn HEAD", err)
+	}
+	if strings.Contains(err.Error(), "requires a git repository") {
+		t.Errorf("error = %v, want the misleading generic wording replaced", err)
+	}
+}
+
+// TestLoadChangesOutsideRepoKeepsTheGenericMessage: the specific wording must
+// not swallow the case it was not written for.
+func TestLoadChangesOutsideRepoKeepsTheGenericMessage(t *testing.T) {
+	_, err := LoadChanges(t.TempDir(), ChangeRequest{Mode: ModeWorkspace})
+	if err == nil || !strings.Contains(err.Error(), "requires a git repository") {
+		t.Fatalf("error = %v, want the generic repository message", err)
+	}
+}
+
+// TestLoadChangesUnknownBaseRefNamesTheRef: a CI job that forgot to fetch the
+// target branch must be told which ref is missing, not that there is no
+// repository.
+func TestLoadChangesUnknownBaseRefNamesTheRef(t *testing.T) {
+	root := initGitRepo(t)
+	writeRepoFile(t, root, "a.go", "package a\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-qm", "base")
+
+	_, err := LoadChanges(root, ChangeRequest{Mode: ModeWorkspace, Base: "origin/nope"})
+	if err == nil {
+		t.Fatal("LoadChanges with an unknown base succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "origin/nope") {
+		t.Errorf("error = %v, want it to name the ref that could not be resolved", err)
+	}
+	if strings.Contains(err.Error(), "requires a git repository") {
+		t.Errorf("error = %v, want the misleading generic wording replaced", err)
+	}
 }
 
 func TestLoadChangesWorkspaceIncludesStagedUnstagedUntrackedRenameDeleteAndLiteralPaths(t *testing.T) {

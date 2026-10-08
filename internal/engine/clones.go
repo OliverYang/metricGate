@@ -29,9 +29,9 @@ func (e *Engine) checkClones(summary *model.RunSummary, funcs []clones.Func, sup
 		anchor := g.Funcs[0]
 		for _, m := range g.Funcs[1:] {
 			f := e.cloneFinding(anchor, m)
-			kept, n := suppress([]model.Finding{f}, supsByFile[f.File])
+			kept, n, byRule := suppress([]model.Finding{f}, supsByFile[f.File])
 			if n > 0 {
-				summary.Ignored += n
+				countSuppressed(summary, n, byRule)
 				continue
 			}
 			summary.Findings = append(summary.Findings, kept...)

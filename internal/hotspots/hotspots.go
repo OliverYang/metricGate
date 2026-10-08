@@ -27,6 +27,7 @@ type FileHotspot struct {
 	File  string  `json:"file"`
 	Churn int     `json:"churn"` // added+deleted lines since --since
 	MI    float64 `json:"mi"`    // worst-function maintainability (0 = not measured)
+	Risk  float64 `json:"risk"`  // static risk score 0..100 (0 = not supplied)
 	Score float64 `json:"score"` // churnNorm * (100-MI)
 }
 
@@ -35,7 +36,11 @@ type Options struct {
 	Since string // git --since expression ("3.months ago"); empty = all history
 	Root  string // working directory for git ("" = cwd)
 	MIs   map[string]float64
-	Max   int // report top N (0 = 10)
+	// Risk is the optional static risk score per repo-relative path (see
+	// internal/risk). It annotates a hotspot with how much is already wrong
+	// with the file; it does not change the churn-based ordering.
+	Risk map[string]float64
+	Max  int // report top N (0 = 10)
 }
 
 // gitLog runs `git log --numstat --since` and returns its output.
@@ -91,8 +96,12 @@ func Compute(opts Options) ([]FileHotspot, error) {
 	if err != nil {
 		return nil, err
 	}
-	churn := parseNumstat(out)
+	return scoreFiles(parseNumstat(out), opts.MIs, opts.Risk, opts.Max), nil
+}
 
+// scoreFiles is the pure scoring half of Compute, factored so the exact
+// formula can be checked without a git subprocess.
+func scoreFiles(churn map[string]int, mis, risk map[string]float64, max int) []FileHotspot {
 	maxChurn := 0
 	for _, c := range churn {
 		if c > maxChurn {
@@ -100,19 +109,19 @@ func Compute(opts Options) ([]FileHotspot, error) {
 		}
 	}
 	if maxChurn == 0 {
-		return nil, nil
+		return nil
 	}
 
 	hotspots := make([]FileHotspot, 0, len(churn))
 	for file, c := range churn {
 		debt := 100.0
-		if mi, ok := opts.MIs[file]; ok && mi > 0 {
+		if mi, ok := mis[file]; ok && mi > 0 {
 			debt = 100 - mi
 		}
 		score := float64(c) / float64(maxChurn) * debt
-		hotspots = append(hotspots, FileHotspot{File: file, Churn: c, MI: opts.MIs[file], Score: score})
+		hotspots = append(hotspots, FileHotspot{File: file, Churn: c, MI: mis[file], Risk: risk[file], Score: score})
 	}
-	return sortAndLimit(hotspots, opts.Max), nil
+	return sortAndLimit(hotspots, max)
 }
 
 // SinceDays is a helper: "now minus n days" as a git --since expression.

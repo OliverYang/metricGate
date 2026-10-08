@@ -1,0 +1,203 @@
+# 试点门禁 policy —— scan-portal-business（Java）
+#
+# 本文件是 MVP 流程验证的落地规则集：由 4 篇业务研发文档（docs/biz-spec-01~04，
+# 输入物料）经 docs/conversion-map.md 转化而来，目标是真实项目
+# /Users/mac/Downloads/main/gitee-scan-2.0-portal（只读，不修改）。
+#
+# 用法: ./metricgate check -config demo/policy-pilot-java.yaml <目标项目路径>
+#
+# 分级约定（与 biz-spec 文档的"强制/推荐/参考"对应）:
+#   强制 → severity: error（gate.fail_on: error 即阻塞）
+#   推荐/参考 → 仅 warn 阈值（不阻塞，报告可见）
+#   近似语义的强制条款（如 SimpleDateFormat）→ 观察期先 warning，跑完看误报再升级
+
+version: 1
+
+gate:
+  fail_on: error
+
+# 目标项目的构建产物与输出目录，不参与解析（目标项目保持只读）
+exclude: [".git", "target", "graphify-out"]
+
+# 试点运行不写趋势库，避免在只读项目里产生文件
+store:
+  enabled: false
+
+# DEP-01 强制: 禁止引入未声明依赖。
+# allow 清单来自对 scan-portal-business 全部 import 面的提取（与 pom.xml 对照），
+# self 是项目自身包前缀。此后任何新 import 不在清单内即报 unknown-dependency。
+dependencies:
+  self: ["org.osc.scan.portal", "org.osc.base.soa"]
+  allow:
+    - org.springframework
+    - org.apache
+    - org.elasticsearch
+    - org.eclipse
+    - org.tmatesoft
+    - com.fasterxml
+    - jakarta
+    - cn.hutool
+    - com.baomidou
+    - org.yaml
+    - org.quartz
+    - com.alibaba
+    - io.minio
+    - com.amazonaws
+    - org.dom4j
+    - org.aspectj
+    - io.swagger
+    - com.github
+    - ch.ethz
+    - org.mapstruct
+    - com.google
+    - org.slf4j
+    - org.mybatis
+    - org.jetbrains
+    - org.hibernate
+    - redis.clients
+    - org.springdoc
+    - org.joda
+    - lombok
+    - org.junit      # pom.xml test scope（试点首轮 45 条误报后补）
+    - org.mockito    # 同上
+    - org.w3c   # JDK 自带（org.w3c.dom），javaJDKImport 未覆盖，显式放行
+    - org.xml   # JDK 自带（org.xml.sax），同上
+
+languages:
+  java:
+    rules:
+      print-stack-trace: { severity: error }    # LOG-02 强制
+      empty-block: { severity: error }          # EXC-01 强制（catch/分支空块）
+      unknown-dependency: { severity: error }   # DEP-01 强制
+      # COMMENT-03 要求 TODO 带归属人/时间，内置 todo-comment 只查有无 → 不满足语义，试点关闭（见转化对照表）
+      todo-comment: { enabled: false }
+      # 逐条覆写编译规则严重级。规则 ID = "banned-" + match（"."和"/"都替换为"-"，
+      # 见 internal/rules/banned.go RuleID；RuleSeverity 先查 rules.<ruleID>.severity）
+      banned-Executors-new*: { severity: error }            # CONC-01 强制
+      banned-java-util-concurrent-Executors: { severity: error }  # CONC-01 强制（import 兼底）
+      banned-System-out-print*: { severity: error }         # LOG-01 强制
+      banned-System-err-print*: { severity: error }         # LOG-01 强制
+      banned-Math-random: { severity: warning }             # CONC-03 推荐
+      banned-java-text-SimpleDateFormat: { severity: warning }  # CONC-02 近似，观察期
+      banned-SimpleDateFormat: { severity: warning }        # CONC-02 构造器禁令（T2 原语#2），观察期
+      banned-org-apache-logging-log4j: { severity: error }  # LOG-03 强制
+      banned-ch-qos-logback: { severity: error }            # LOG-03 强制
+      banned-org-apache-log4j: { severity: error }          # LOG-03 强制
+      banned-java-util-logging: { severity: error }         # LOG-03 强制
+      banned-parallelStream: { severity: error }            # CONC-07 强制（事故来源，见 incident-to-constraint-playbook 试点 INC-2026-001）
+      banned-MessageDigest-getInstance: { severity: error } # SEC-01 强制（args_ban 仅命中 MD5/MD2 字面量）
+    metrics:
+      # PERF-01 参考: 方法 ≤ 80 行（仅 warn，不阻塞）
+      function-length: { warn: 80 }
+      # PERF-02 参考: 入参 ≤ 5
+      params-count: { warn: 5 }
+      # PERF-03 参考: 嵌套 ≤ 3；error 6 为硬红线
+      nesting-depth: { warn: 3, error: 6 }
+      # PERF-04 参考: 圈复杂度 ≤ 15
+      cyclomatic-complexity: { warn: 15 }
+      # 工程补充: 认知复杂度基线
+      cognitive-complexity: { warn: 20 }
+      # P1: Java 类普遍偏长，基线放宽到 1000
+      file-length: { warn: 1000 }
+    banned-api:
+      # ---- CONC-01 强制: 线程池禁用 Executors 工厂（黄山版原文点名四个方法）----
+      # call ban 只匹配 1-2 段 receiver（Executors.new*），全限定名调用逃逸 → 补 import ban 兜底
+      - match: Executors.new*
+        reason: CONC-01 线程池必须 new ThreadPoolExecutor(...) 手动创建（Executors 工厂队列/线程数无界，OOM 风险）
+      - kind: import
+        match: java.util.concurrent.Executors
+        reason: CONC-01 线程池必须 new ThreadPoolExecutor(...) 手动创建（Executors 工厂队列/线程数无界，OOM 风险）
+      # ---- CONC-07 强制(事故来源): 禁 parallelStream，批量并发用自建隔离线程池 ----
+      # 来源：INC-2026-001 事故复盘（自由文本第4例，见 incident-to-constraint-playbook.md）；
+      # 0 段 receiver 裸方法名 ban 可匹配任意变量的 .parallelStream() 调用；真实项目 2 处命中 0 误报
+      - match: parallelStream
+        reason: CONC-07 禁用 parallelStream()/parallel()：共享公共 ForkJoinPool 相互阻塞
+        use: 批量并发用自建隔离线程池（new ThreadPoolExecutor 显式指定队列上限与线程数）
+      # ---- LOG-01 强制: 禁止 System.out/err 直出 ----
+      - match: System.out.print*
+        reason: LOG-01 禁止 System.out 直出日志，统一走 SLF4J 门面
+      - match: System.err.print*
+        reason: LOG-01 禁止 System.err 直出日志，统一走 SLF4J 门面
+      # ---- CONC-03 推荐: 多线程禁 Math.random，用 ThreadLocalRandom ----
+      - match: Math.random
+        reason: CONC-03 多线程用 ThreadLocalRandom.current()，单例 Random 有 CAS 竞争
+      # ---- SEC-01 强制: 禁 MD5/MD2 做摘要（T2 原语#1 参数感知禁令首个落地）----
+      # args_ban：仅当字符串字面量参数命中禁值才触发——getInstance("SHA-256") 合法用法不误伤；
+      # 变量参数（运行时选算法）不触发，属评审问题而非确定性判定
+      - match: MessageDigest.getInstance
+        args_ban: ["MD5", "MD2"]
+        reason: SEC-01 MD5/MD2 已有已知碰撞，禁止用于摘要/签名
+        use: 改用 SHA-256：MessageDigest.getInstance("SHA-256")
+      # ---- CONC-02 强制(近似): SimpleDateFormat 线程不安全 ----
+      # 精确语义是"禁止 static 共享实例"；MVP 粒度整体禁用引导迁移 DateTimeFormatter，
+      # 观察期 severity=warning，误报数据见试点报告。
+      # T2 原语#2（构造器禁令）落地后：new SimpleDateFormat(...) 实例化点单独可检——
+      # 与 import ban 双通道，均在观察期（warning），精确 field-storage 语义仍待字段原语
+      - kind: import
+        match: java.text.SimpleDateFormat
+        reason: CONC-02 SimpleDateFormat 线程不安全，用 DateTimeFormatter（试点近似：整体禁用）
+      - kind: constructor
+        match: SimpleDateFormat
+        reason: CONC-02 禁止实例化 SimpleDateFormat（线程不安全），用 DateTimeFormatter（试点近似：实例化点全禁）
+        use: DateTimeFormatter（JDK8+，线程安全）
+      # ---- LOG-03 强制: 日志必须走 SLF4J 门面 ----
+      - kind: import
+        match: org.apache.logging.log4j
+        reason: LOG-03 禁止直接使用 Log4j API，统一 SLF4J 门面
+      - kind: import
+        match: ch.qos.logback
+        reason: LOG-03 禁止直接使用 Logback API，统一 SLF4J 门面
+      - kind: import
+        match: org.apache.log4j
+        reason: LOG-03 禁止直接使用 Log4j 1.x API，统一 SLF4J 门面
+      - kind: import
+        match: java.util.logging
+        reason: LOG-03 禁止直接使用 JUL API，统一 SLF4J 门面
+
+# ARCH-01 强制: 分层单向 controller → server(business/service) → dao，pojo 与 common 沉底
+# ARCH-02 强制: 禁止包循环；ARCH-03: common 不依赖业务层；ARCH-04 参考: SDP 只报告
+architecture:
+  edges: error
+  cycles: error
+  sdp: warning
+  sdp_tolerance: 0.10
+  layers:
+    - name: web
+      packages: ["org/osc/scan/portal/controller/**", "org/osc/scan/portal/interceptor/**"]
+      may_depend_on: [web, service, pojo, common]
+    - name: service
+      packages:
+        - org/osc/scan/portal/server/**
+        - org/osc/scan/portal/business/**
+        - org/osc/scan/portal/consumer/**
+        - org/osc/scan/portal/job/**
+        - org/osc/scan/portal/quartz/**
+        - org/osc/scan/portal/task/**
+        - org/osc/scan/portal/handler/**
+        - org/osc/scan/portal/factory/**
+      may_depend_on: [service, dao, pojo, common]
+    - name: dao
+      packages: ["org/osc/scan/portal/dao/**"]
+      may_depend_on: [dao, pojo, common]
+    - name: pojo
+      packages: ["org/osc/scan/portal/pojo/**"]
+      may_depend_on: [pojo, common]
+    - name: common
+      packages:
+        - org/osc/base/**
+        - org/osc/scan/portal/config/**
+        - org/osc/scan/portal/constant/**
+        - org/osc/scan/portal/enums/**
+        - org/osc/scan/portal/exception/**
+        - org/osc/scan/portal/util/**
+        - org/osc/scan/portal/annotation/**
+        - org/osc/scan/portal/converter/**
+        - org/osc/scan/portal/metadata/**
+        - org/osc/scan/portal/init/**
+      # ARCH-03 只要求 common 不依赖业务层（web/service/dao）；pojo 是数据载体，
+      # exception/converter 引用 bean 属正常依赖（首轮 59 条误报后对齐文档语义）
+      may_depend_on: [common, pojo]
+
+# DEP-03 强制: 克隆函数收敛（默认即启用，此处显式声明留档）
+clones:
+  enabled: true

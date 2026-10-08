@@ -49,59 +49,26 @@ func NewKindSet(lang *sitter.Language, kinds ...string) *NodeKindSet {
 // -----------------------------------------------------------------------------
 
 var (
-	// Function-like units per language
+	// Function-like units per language. These are the only node kinds this
+	// file names: which constructs are *decision* points belongs to the IR
+	// adapters (go_adapter.go, java_adapter.go), so a language's grammar
+	// knowledge lives in exactly one place.
 	goFuncKinds   = NewKindSet(parser.TsGo, "function_declaration", "method_declaration")
 	javaFuncKinds = NewKindSet(parser.TsJava, "method_declaration", "constructor_declaration")
-
-	// Branch points (cyclomatic +1, cognitive +1+nesting)
-	goBranchKinds   = NewKindSet(parser.TsGo, "if_statement", "for_statement")
-	javaBranchKinds = NewKindSet(parser.TsJava, "if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement")
-
-	// Switch statements (cyclomatic counts cases, cognitive +1+nesting)
-	goSwitchKinds   = NewKindSet(parser.TsGo, "expression_switch_statement", "type_switch_statement", "select_statement")
-	javaSwitchKinds = NewKindSet(parser.TsJava, "switch_expression")
-
-	// Case labels (cyclomatic +1; Java `default` excluded via token check)
-	goCaseKinds   = NewKindSet(parser.TsGo, "expression_case", "type_case", "communication_case")
-	javaCaseKinds = NewKindSet(parser.TsJava, "switch_label")
-
-	// Flat cognitive complexity (no nesting increase)
-	goFlatCog     = NewKindSet(parser.TsGo) // empty for Go
-	javaFlatCog   = NewKindSet(parser.TsJava, "catch_clause")
-	goLambdaKinds = NewKindSet(parser.TsGo, "func_literal")
-	javaLambdaKinds = NewKindSet(parser.TsJava, "lambda_expression")
 )
 
-// LangProfile holds all node kind sets for a language.
+// LangProfile holds the node kinds a language measures functions on.
 type LangProfile struct {
-	FuncKinds   *NodeKindSet
-	BranchKinds *NodeKindSet
-	SwitchKinds *NodeKindSet
-	CaseKinds   *NodeKindSet
-	FlatCog     *NodeKindSet
-	LambdaKinds *NodeKindSet
-	TernaryKind string // "" when language has no ternary
+	FuncKinds *NodeKindSet
 }
 
 var (
 	goProfile = &LangProfile{
-		FuncKinds:   goFuncKinds,
-		BranchKinds: goBranchKinds,
-		SwitchKinds: goSwitchKinds,
-		CaseKinds:   goCaseKinds,
-		FlatCog:     goFlatCog,
-		LambdaKinds: goLambdaKinds,
-		TernaryKind: "", // Go has no ternary
+		FuncKinds: goFuncKinds,
 	}
 
 	javaProfile = &LangProfile{
-		FuncKinds:   javaFuncKinds,
-		BranchKinds: javaBranchKinds,
-		SwitchKinds: javaSwitchKinds,
-		CaseKinds:   javaCaseKinds,
-		FlatCog:     javaFlatCog,
-		LambdaKinds: javaLambdaKinds,
-		TernaryKind: "ternary_expression",
+		FuncKinds: javaFuncKinds,
 	}
 )
 

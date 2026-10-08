@@ -79,6 +79,17 @@ func (ix *Index) Len() int {
 	return len(ix.all)
 }
 
+// All returns every indexed definition in file order (the index's own
+// deterministic order). Callers that need to iterate the whole index —
+// package-scoped listings, the constraint digest — use this instead of
+// duplicating the index build.
+func (ix *Index) All() []Def {
+	if ix == nil {
+		return nil
+	}
+	return ix.all
+}
+
 // lessDef orders definitions by file, then line, then receiver.
 func lessDef(a, b Def) bool {
 	if a.File != b.File {

@@ -15,77 +15,107 @@ import (
 
 	"metricgate/internal/clones"
 	"metricgate/internal/config"
+	"metricgate/internal/diff"
 	"metricgate/internal/engine"
 	"metricgate/internal/facts"
+	"metricgate/internal/gatecheck"
 	"metricgate/internal/git"
 	"metricgate/internal/metrics"
 	"metricgate/internal/model"
+	"metricgate/internal/repomap"
 	"metricgate/internal/report"
+	"metricgate/internal/scorecard"
 	"metricgate/internal/store"
 	"metricgate/internal/symbols"
 )
 
 const toolVersion = "0.1.0"
 
+// commands maps each subcommand to its entry point. A table keeps main a
+// three-branch dispatcher no matter how many subcommands accumulate, instead
+// of a switch that grows one path per command.
+var commands = map[string]func([]string){
+	"check":       cmdCheck,
+	"metrics":     cmdMetrics,
+	"stats":       cmdStats,
+	"context":     cmdContext,
+	"bundle":      cmdBundle,
+	"symbols":     cmdSymbols,
+	"impact":      cmdImpact,
+	"map":         cmdMap,
+	"rules":       cmdRules,
+	"constraints": cmdConstraints,
+	"rules-gaps":  cmdRulesGaps,
+	"explain":     cmdExplain,
+	"api":         cmdAPI,
+	"arch":        cmdArch,
+	"nearclones":  cmdNearClones,
+	"clonedrift":  cmdClonedrift,
+	"hotspots":    cmdHotspots,
+	"trends":      cmdTrends,
+	"calls":       cmdCalls,
+	"init":        cmdInit,
+	"version":     cmdVersion,
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
 	}
-	switch os.Args[1] {
-	case "check":
-		cmdCheck(os.Args[2:])
-	case "metrics":
-		cmdMetrics(os.Args[2:])
-	case "context":
-		cmdContext(os.Args[2:])
-	case "bundle":
-		cmdBundle(os.Args[2:])
-	case "symbols":
-		cmdSymbols(os.Args[2:])
-	case "rules":
-		cmdRules(os.Args[2:])
-	case "explain":
-		cmdExplain(os.Args[2:])
-	case "api":
-		cmdAPI(os.Args[2:])
-	case "nearclones":
-		cmdNearClones(os.Args[2:])
-	case "clonedrift":
-		cmdClonedrift(os.Args[2:])
-	case "hotspots":
-		cmdHotspots(os.Args[2:])
-	case "trends":
-		cmdTrends(os.Args[2:])
-	case "init":
-		cmdInit(os.Args[2:])
-	case "version":
-		fmt.Println("metricgate", toolVersion)
-	default:
+	run, ok := commands[os.Args[1]]
+	if !ok {
 		usage()
 		os.Exit(2)
 	}
+	run(os.Args[2:])
+}
+
+// cmdVersion prints the tool version.
+func cmdVersion([]string) {
+	fmt.Println("metricgate", toolVersion)
 }
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `metricgate %s — deterministic code metrics and constraint gates
 
 usage:
-  metricgate init [file]              write a starter policy (default policy.yaml)
+  metricgate init [file] [flags]      write a starter policy (default policy.yaml)
+                                      -preset NAME starts from a built-in gate
+                                      tuning (e.g. agentic)
   metricgate bundle [path] [flags]     deterministic, budgeted review input for a
                                       host agent (diff + constraints + facts)
   metricgate check [path] [flags]     run rules + metrics, enforce the gate
   metricgate check -diff [-base ref]  only fail on violations in changed lines
+  metricgate check -diff -regress     also report measurements that got worse
+                                      than -base without crossing a threshold
   metricgate context [path] [flags]   dense constraint pack for LLM prompts
+  metricgate constraints digest [-pkg P]  task-scoped constraint digest (-format json = provenance)
   metricgate metrics [path] [flags]   print the metric table only
+  metricgate stats [path] [flags]     metric distributions (min/p50/p90/p95/max)
+                                      plus the worst scopes per metric
   metricgate symbols [path] -q NAME   look a symbol up in the cross-file
                                       definition index (near-miss suggestions
                                       when the exact name is unknown)
-  metricgate rules explain [path]     explain selection + effective policy
+  metricgate impact [path] -q NAME    what uses this symbol: every call and type
+                                      reference, and the files it would affect
+  metricgate map [path] [flags]       rank files by reference importance: the
+                                      whole-repo "read these first" list
+  metricgate rules explain list       every rule/metric and where its value came
+                                      from (builtin | policy_file | preset:NAME)
+  metricgate rules explain <ruleID>   the effective config of one rule or metric
+  metricgate rules presets            the built-in gate presets and every value
+                                      each one changes
+  metricgate rules gaps [path]        audit policy completeness: which rules can
+                                      fire, which are silent, and which packages
+                                      no declared layer covers
   metricgate explain [path]           preview what would be scanned (no rule execution)
   metricgate api snapshot -out F      capture the exported API surface
   metricgate api diff -base F [path]  breaking-change gate against a snapshot
                                       (removed/changed signatures exit 1)
+  metricgate arch snapshot -out F     capture the package dependency shape
+  metricgate arch diff -base F [path] shape-drift gate against a snapshot
+                                      (any added/removed edge exits 1)
   metricgate nearclones [path]        functions sharing >=80%% of their normalised
                                       tokens (copy+rename+small edit)
   metricgate hotspots [path]          churn × maintainability-debt hotspots
@@ -93,6 +123,9 @@ usage:
                                       but not its twin (needs -base, default HEAD)
   metricgate trends [flags]           severity trend + top rules from the local
                                       history.db (P2 v1; needs store.enabled)
+  metricgate calls [flags]            reduce the local MCP call log to call
+                                      counts, intercept rate and fix rate — the
+                                      evidence the gate is used in an agent loop
   metricgate version                  print the version
 `, toolVersion)
 }
@@ -100,6 +133,20 @@ usage:
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "metricgate:", err)
 	os.Exit(2)
+}
+
+// dispatch runs the subcommand handler named by args[0]. It is the one shape
+// every multi-subcommand command shares, so the usage/unknown-subcommand
+// handling lives in a single place instead of being copied per command.
+func dispatch(name, usage string, args []string, subs map[string]func([]string)) {
+	if len(args) == 0 {
+		fail(fmt.Errorf("%s needs a subcommand: %s", name, usage))
+	}
+	run, ok := subs[args[0]]
+	if !ok {
+		fail(fmt.Errorf("unknown %s subcommand %q (want %s)", name, args[0], usage))
+	}
+	run(args[1:])
 }
 
 // loadPolicy loads policy.yaml, falling back to the built-in default policy
@@ -188,8 +235,14 @@ func cmdCheck(args []string) {
 	sarifOut := set.String("sarif", "", "write a SARIF 2.1.0 report to this file")
 	diffMode := set.Bool("diff", false, "only report findings on lines changed vs -base (git)")
 	base := set.String("base", "HEAD", "git ref to diff against (with -diff)")
+	regressMode := set.Bool("regress", false, "with -diff, also report measurements that got worse than -base (warning)")
+	scorecardMode := set.Bool("scorecard", false, "with -diff, print a deterministic change scorecard for the diff (report-only)")
+	impactMode := set.Bool("impact-scope", false, "with -diff, gate the blast radius of changed symbols against the policy cap (LC-403, error)")
+	testsMode := set.Bool("tests-touched", false, "with -diff, flag logic changes that touch no test file (LC-404, warning)")
 	format := set.String("format", "text", "console output format: text|json")
 	preview := set.Bool("preview", false, "show path selection decisions without parsing or running checks")
+	maxCognitive := set.Int("max-cognitive", 0, "override the cognitive-complexity error threshold for every language")
+	maxCyclomatic := set.Int("max-cyclomatic", 0, "override the cyclomatic-complexity error threshold for every language")
 	parseArgs(set, args)
 	// Human-readable lines go to stderr in json mode so stdout stays
 	// machine-parseable.
@@ -206,19 +259,136 @@ func cmdCheck(args []string) {
 		cmdCheckPreview(*configPath, root, *format, human)
 		return
 	}
-	cfg, eng, summary := runEngine(*configPath, root)
+	cfg, err := loadPolicy(*configPath)
+	if err != nil {
+		fail(err)
+	}
+	if *maxCognitive > 0 || *maxCyclomatic > 0 {
+		applyThresholdOverrides(cfg, *maxCognitive, *maxCyclomatic)
+	}
+	eng, err := engine.New(cfg)
+	if err != nil {
+		fail(err)
+	}
 	defer eng.Close()
+	summary, err := eng.Run(root)
+	if err != nil {
+		fail(err)
+	}
 	if *diffMode {
-		changed, err := git.ChangedLines("", git.ResolveBase("", *base))
-		if err != nil {
-			fail(err)
-		}
-		var hidden int
-		summary, hidden = engine.FilterSummary(summary, changed)
-		fmt.Fprintf(human, "diff-only: base=%s, %d new findings, %d pre-existing hidden\n\n", *base, len(summary.Findings), hidden)
+		summary = runDiffMode(cfg, root, *base, diffExtrasOpts{base: *base, wantRegress: *regressMode, wantScorecard: *scorecardMode, wantImpact: *impactMode, wantTests: *testsMode, jsonMode: *format == "json"}, summary, human)
+	} else if *regressMode || *scorecardMode || *impactMode || *testsMode {
+		fail(fmt.Errorf("-regress/-scorecard/-impact-scope/-tests-touched need -diff: they describe the working tree against -base"))
 	}
 	emitReports(summary, cfg, reportFlags{format: *format, sarif: *sarifOut}, eng, human)
 	enforceGate(summary, cfg, human)
+}
+
+// runDiffMode filters the summary to changed lines and applies the optional
+// -diff add-ons. It returns the (possibly replaced) filtered summary.
+func runDiffMode(cfg *config.Config, root, base string, add diffExtrasOpts, summary *model.RunSummary, human io.Writer) *model.RunSummary {
+	changed, err := git.ChangedLines("", git.ResolveBase("", base))
+	if err != nil {
+		fail(err)
+	}
+	var hidden int
+	summary, hidden = engine.FilterSummary(summary, changed)
+	fmt.Fprintf(human, "diff-only: base=%s, %d new findings, %d pre-existing hidden\n\n", base, len(summary.Findings), hidden)
+	if err := diffExtras(cfg, root, summary, changed, add, human); err != nil {
+		fail(err)
+	}
+	return summary
+}
+
+// diffExtrasOpts carries the -diff add-on switches and their shared inputs.
+type diffExtrasOpts struct {
+	base          string
+	wantRegress   bool
+	wantScorecard bool
+	wantImpact    bool
+	wantTests     bool
+	jsonMode      bool
+}
+
+// diffExtras runs the -diff-only add-ons: metric regressions and the change
+// scorecard. Both are report-only — they never touch gate semantics.
+func diffExtras(cfg *config.Config, root string, summary *model.RunSummary, changed map[string][]diff.Range, opt diffExtrasOpts, human io.Writer) error {
+	if opt.wantRegress {
+		n, err := applyRegressions(cfg, opt.base, root, summary, changed)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(human, "regressions: %d measurement(s) got worse than %s\n\n", n, opt.base)
+	}
+	if opt.wantScorecard {
+		card := scorecard.Build(summary, scorecard.Options{Changed: changed, Root: root, ScanStubs: true})
+		scorecard.Print(human, card, opt.jsonMode)
+		fmt.Fprintln(human)
+	}
+	return applyGateChecks(cfg, root, summary, changed, opt, human)
+}
+
+// applyGateChecks runs the two gate-ized acceptance checks — impact scope
+// (LC-403) and tests-touched (LC-404) — and appends their findings like
+// -regress does. The CLI flags activate; policy can veto (enabled:false)
+// or tune (cap, severity).
+func applyGateChecks(cfg *config.Config, root string, summary *model.RunSummary, changed map[string][]diff.Range, opt diffExtrasOpts, human io.Writer) error {
+	if !opt.wantImpact && !opt.wantTests {
+		return nil
+	}
+	opts := gatecheck.Resolve(cfg)
+	opts.Changed = changed
+	opts.Root = root
+	if !opt.wantImpact {
+		opts.WantImpact = false
+	}
+	if !opt.wantTests {
+		opts.WantTests = false
+	}
+	if !opts.WantImpact && !opts.WantTests {
+		return nil
+	}
+	_, defs, uses, err := facts.CollectWithRefs(root)
+	if err != nil {
+		return err
+	}
+	findings := gatecheck.BlastRadiusCheck(defs, uses, opts)
+	findings = append(findings, gatecheck.TestsTouchedCheck(opts)...)
+	if len(findings) == 0 {
+		fmt.Fprintln(human, "gate-checks: impact-scope and tests-touched clean")
+		return nil
+	}
+	summary.Findings = append(summary.Findings, findings...)
+	model.SortFindings(summary.Findings)
+	nImpact, nTests := 0, 0
+	for _, f := range findings {
+		if f.RuleID == gatecheck.RuleIDImpactScope {
+			nImpact++
+		} else {
+			nTests++
+		}
+	}
+	fmt.Fprintf(human, "gate-checks: impact-scope %d over cap, tests-touched %d\n\n", nImpact, nTests)
+	return nil
+}
+
+// applyThresholdOverrides overrides the error threshold of the cognitive and
+// cyclomatic metrics in every configured language section, so
+// `check -max-cognitive N` needs no policy edit. A zero argument means
+// "leave the policy value alone".
+func applyThresholdOverrides(cfg *config.Config, maxCognitive, maxCyclomatic int) {
+	for lang, sec := range cfg.Languages {
+		if sec.Metrics == nil {
+			sec.Metrics = map[string]config.MetricConfig{}
+		}
+		if maxCognitive > 0 {
+			sec.Metrics["cognitive-complexity"] = config.MetricConfig{Error: maxCognitive}
+		}
+		if maxCyclomatic > 0 {
+			sec.Metrics["cyclomatic-complexity"] = config.MetricConfig{Error: maxCyclomatic}
+		}
+		cfg.Languages[lang] = sec
+	}
 }
 
 // reportFlags carries the check-command output switches.
@@ -342,6 +512,7 @@ func cmdMetrics(args []string) {
 
 func cmdInit(args []string) {
 	set := flag.NewFlagSet("init", flag.ExitOnError)
+	preset := set.String("preset", "", "start from a built-in gate tuning (see: metricgate rules presets)")
 	parseArgs(set, args)
 	target := "policy.yaml"
 	if set.NArg() > 0 {
@@ -350,10 +521,21 @@ func cmdInit(args []string) {
 	if _, err := os.Stat(target); err == nil {
 		fail(fmt.Errorf("%s already exists", target))
 	}
-	if err := os.WriteFile(target, []byte(config.DefaultYAML), 0o644); err != nil {
+	body := config.DefaultYAML
+	if *preset != "" {
+		p, ok := config.PresetByName(*preset)
+		if !ok {
+			fail(fmt.Errorf("unknown preset %q (available: %s)", *preset, strings.Join(config.PresetNames(), ", ")))
+		}
+		body = config.PresetYAML(p)
+	}
+	if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
 		fail(err)
 	}
 	fmt.Printf("wrote %s — edit thresholds and rules to taste\n", target)
+	if *preset != "" {
+		fmt.Printf("preset %q active — `metricgate rules explain list` shows what it changed\n", *preset)
+	}
 }
 
 // cmdContext prints the dense constraint context pack for a path: the block
@@ -366,18 +548,6 @@ func cmdContext(args []string) {
 	maxTokens := set.Int("max-tokens", 0, "estimated model-token budget (approximate unless a tokenizer is supplied)")
 	allFiles := set.Bool("all", false, "include files excluded by policy (legacy unfiltered facts mode)")
 	parseArgs(set, args)
-	charsSet, tokensSet := false, false
-	set.Visit(func(f *flag.Flag) {
-		if f.Name == "max-chars" {
-			charsSet = true
-		}
-		if f.Name == "max-tokens" {
-			tokensSet = true
-		}
-	})
-	if charsSet && tokensSet {
-		fail(fmt.Errorf("-max-chars and -max-tokens are mutually exclusive"))
-	}
 	root := "."
 	if set.NArg() > 0 {
 		root = set.Arg(0)
@@ -398,15 +568,51 @@ func cmdContext(args []string) {
 	if len(files) == 0 {
 		fail(fmt.Errorf("no supported source files selected under %s", root))
 	}
-	budget, counter := *maxChars, facts.TokenCounter(facts.CharCounter{})
-	if *maxTokens > 0 {
-		budget, counter = *maxTokens, facts.CharEstimate{}
-	}
-	pack, err := facts.RenderBudgeted(files, cfg, facts.BudgetOptions{Budget: budget, Counter: counter})
+	budget, counter := contextBudget(set, *maxChars, *maxTokens)
+	pack, err := facts.RenderBudgeted(files, cfg, facts.BudgetOptions{
+		Budget: budget, Counter: counter, MapScores: repoMapFor(root, files, cfg),
+	})
 	if err != nil {
 		fail(fmt.Errorf("context budget: %w (required constraints need a larger budget)", err))
 	}
 	fmt.Print(pack.Text)
+}
+
+// contextBudget resolves the -max-chars / -max-tokens pair, which are mutually
+// exclusive, into one budget and the counter that measures it.
+func contextBudget(set *flag.FlagSet, maxChars, maxTokens int) (int, facts.TokenCounter) {
+	charsSet, tokensSet := false, false
+	set.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "max-chars":
+			charsSet = true
+		case "max-tokens":
+			tokensSet = true
+		}
+	})
+	if charsSet && tokensSet {
+		fail(fmt.Errorf("-max-chars and -max-tokens are mutually exclusive"))
+	}
+	if maxTokens > 0 {
+		return maxTokens, facts.CharEstimate{}
+	}
+	return maxChars, facts.CharCounter{}
+}
+
+// repoMapFor returns the importance ranking the context pack should embed. When
+// the fact set already covers the whole repo (root is "."), it is ranked
+// directly; a scoped run gets a whole-repo ranking instead, so the pack still
+// shows where the target sits. A ranking that cannot be built (unreadable
+// tree, no files) returns nil and the pack falls back to ranking what it has.
+func repoMapFor(root string, files []*facts.FileFacts, cfg *config.Config) []repomap.FileScore {
+	if root == "." || root == "./" {
+		return facts.RepoMap(files)
+	}
+	repoFiles, err := facts.CollectSelected(".", cfg)
+	if err != nil || len(repoFiles) == 0 {
+		return nil
+	}
+	return facts.RepoMap(repoFiles)
 }
 
 // cmdSymbols queries the cross-file definition index: exact definitions
@@ -526,74 +732,4 @@ func cmdCheckPreview(configPath, root, format string, human io.Writer) {
 	for _, d := range preview.PrunedDirs {
 		fmt.Fprintf(human, "  pruned dir  %s (%s: %s)\n", d.Path, d.Reason, d.MatchedExclude)
 	}
-}
-
-// cmdRules exposes deterministic rule/policy explain operations.
-func cmdRules(args []string) {
-	if len(args) == 0 || args[0] != "explain" {
-		fail(fmt.Errorf("rules needs subcommand: explain"))
-	}
-	set := flag.NewFlagSet("rules explain", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
-	format := set.String("format", "text", "text|json")
-	parseArgs(set, args[1:])
-	cmdRulesExplain(set, args[1:], *configPath, *format)
-}
-
-func cmdRulesExplain(set *flag.FlagSet, args []string, configPath, format string) {
-	cfg, err := loadPolicy(configPath)
-	if err != nil {
-		fail(err)
-	}
-
-	if len(args) == 0 || args[0] == "list" {
-		cmdRulesList(cfg, format)
-		return
-	}
-
-	if args[0] == "explain" {
-		if len(args) < 2 {
-			fail(fmt.Errorf("rules explain requires rule ID"))
-		}
-		ruleID := args[1]
-		explainRule(cfg, "go", ruleID, format)
-		return
-	}
-
-	fail(fmt.Errorf("unknown subcommand: %s", args[0]))
-}
-
-func cmdRulesList(cfg *config.Config, format string) {
-	if format == "json" {
-		data, _ := json.MarshalIndent(cfg.Languages, "", "  ")
-		os.Stdout.Write(append(data, '\n'))
-		return
-	}
-
-	for lang, sec := range cfg.Languages {
-		fmt.Printf("[%s]\n", lang)
-		for ruleID := range sec.Rules {
-			fmt.Printf("  - %s\n", ruleID)
-		}
-		for metricID := range sec.Metrics {
-			fmt.Printf("  - metric:%s\n", metricID)
-		}
-	}
-}
-
-func explainRule(cfg *config.Config, lang, ruleID, format string) {
-	explain := cfg.ExplainRule(lang, ruleID)
-
-	if format == "json" {
-		data, _ := json.MarshalIndent(explain, "", "  ")
-		os.Stdout.Write(append(data, '\n'))
-		return
-	}
-
-	fmt.Printf("Rule: %s (language: %s)\n", ruleID, lang)
-	fmt.Printf("  Enabled:     %v\n", explain.Enabled)
-	fmt.Printf("  Reason:      %s\n", explain.Reason)
-	fmt.Printf("  Severity:    %s\n", explain.Severity)
-	fmt.Printf("  Source:      %s\n", explain.PolicySource)
-	fmt.Printf("  Thresholds:  warn=%d, error=%d\n", explain.Thresholds.Warn, explain.Thresholds.Error)
 }

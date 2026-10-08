@@ -39,85 +39,46 @@ func cmdTrends(args []string) {
 	defer st.Close()
 
 	limit := *runs
-	records, err := st.LatestRuns(limit)
+	report, err := st.Report(limit)
 	if err != nil {
 		fail(err)
 	}
-	if len(records) == 0 {
+	if report.Runs == 0 {
 		if *format == "json" {
-			out := []byte(`{"runs":0,"series":[],"topRules":[]}` + "\n")
-			os.Stdout.Write(out)
+			os.Stdout.Write([]byte(`{"runs":0,"series":[],"topRules":[]}` + "\n"))
 			return
 		}
 		fmt.Println("no runs stored yet — run `metricgate check` first")
 		return
 	}
-	trend, err := st.SeverityTrend(limit)
-	if err != nil {
-		fail(err)
-	}
-	rules, err := st.RuleFrequency(limit)
-	if err != nil {
-		fail(err)
-	}
-	if err := emitTrends(os.Stdout, *format, records, trend, rules); err != nil {
+	if err := emitTrends(os.Stdout, *format, report); err != nil {
 		fail(err)
 	}
 }
 
-// trendsPayload is the JSON shape of `metricgate trends -format json`. It is
-// kept narrow on purpose: a local trend dump is meant to feed a chart, not
-// to be parsed back into the engine. Adding a new field is safe (consumers
-// ignore extras); renaming is a breaking change.
-type trendsPayload struct {
-	Runs     int                `json:"runs"`
-	Range    *trendsRange       `json:"range,omitempty"`
-	Series   []store.TrendPoint `json:"series"`
-	TopRules []store.RuleCount  `json:"topRules"`
-}
-
-type trendsRange struct {
-	Start string `json:"start"`
-	End   string `json:"end"`
-}
-
-func emitTrends(w io.Writer, format string, records []store.RunRecord, trend store.SeverityTrend, rules []store.RuleCount) error {
+func emitTrends(w io.Writer, format string, report store.TrendReport) error {
 	if format == "json" {
-		out := trendsPayload{
-			Runs:     len(records),
-			Series:   trend.Series,
-			TopRules: rules,
-		}
-		if len(records) > 0 {
-			// records are newest-first; series is oldest-first. The first
-			// record is therefore the end of the range and the last record
-			// is the start.
-			out.Range = &trendsRange{
-				Start: records[len(records)-1].StartedAt,
-				End:   records[0].StartedAt,
-			}
-		}
-		data, err := json.MarshalIndent(out, "", "  ")
+		data, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
 			return err
 		}
 		_, err = w.Write(append(data, '\n'))
 		return err
 	}
-	fmt.Fprintf(w, "runs: %d\n", len(records))
-	if len(records) > 0 {
-		fmt.Fprintf(w, "range: %s .. %s\n", records[len(records)-1].StartedAt, records[0].StartedAt)
+	fmt.Fprintf(w, "runs: %d\n", report.Runs)
+	if report.Range != nil {
+		fmt.Fprintf(w, "range: %s .. %s\n", report.Range.Start, report.Range.End)
 	}
 	fmt.Fprintln(w, "severity trend (per run, oldest first):")
-	for _, p := range trend.Series {
+	for _, p := range report.Series {
 		fmt.Fprintf(w, "  %s  E=%d W=%d I=%d\n", p.StartedAt, p.Errors, p.Warnings, p.Infos)
 	}
-	if len(rules) == 0 {
+	if len(report.TopRules) == 0 {
 		fmt.Fprintln(w, "top rules: (no findings recorded)")
 		return nil
 	}
 	fmt.Fprintln(w, "top rules:")
-	for _, r := range rules {
+	for _, r := range report.TopRules {
 		fmt.Fprintf(w, "  %-40s %d\n", r.RuleID, r.Count)
 	}
 	return nil

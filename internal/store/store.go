@@ -175,6 +175,55 @@ type RuleCount struct {
 	Count  int
 }
 
+// TrendRange is the first and last run timestamp in a report window.
+type TrendRange struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+// TrendReport is the deterministic, JSON-friendly summary of the recent trend
+// window: a severity series (oldest first), the range it spans, and the rules
+// that fired most often. It is shared by the CLI `trends` verb and the MCP
+// server so the two payloads cannot drift. Adding a field is safe (consumers
+// ignore extras); renaming is a breaking change.
+type TrendReport struct {
+	Runs     int          `json:"runs"`
+	Range    *TrendRange  `json:"range,omitempty"`
+	Series   []TrendPoint `json:"series"`
+	TopRules []RuleCount  `json:"topRules"`
+}
+
+// Report folds the most recent limit runs (limit <= 0 means every run) into one
+// report. A store with no runs yields a zero report, not an error; the series
+// and rule lists are always non-nil so the JSON reads "[]" rather than "null".
+func (s *Store) Report(limit int) (TrendReport, error) {
+	records, err := s.LatestRuns(limit)
+	if err != nil {
+		return TrendReport{}, err
+	}
+	trend, err := s.SeverityTrend(limit)
+	if err != nil {
+		return TrendReport{}, err
+	}
+	rules, err := s.RuleFrequency(limit)
+	if err != nil {
+		return TrendReport{}, err
+	}
+	out := TrendReport{Runs: len(records), Series: trend.Series, TopRules: rules}
+	if out.Series == nil {
+		out.Series = []TrendPoint{}
+	}
+	if out.TopRules == nil {
+		out.TopRules = []RuleCount{}
+	}
+	if len(records) > 0 {
+		// records are newest-first; series is oldest-first. The first record
+		// is therefore the end of the range and the last record is the start.
+		out.Range = &TrendRange{Start: records[len(records)-1].StartedAt, End: records[0].StartedAt}
+	}
+	return out, nil
+}
+
 // LatestRuns returns the most recent runs, newest first. limit <= 0 means
 // "every run" (still capped at the database size; this is for tests and the
 // `metricgate trends` default window of 20).

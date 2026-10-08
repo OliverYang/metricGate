@@ -11,17 +11,10 @@ import (
 )
 
 func cmdAPI(args []string) {
-	if len(args) == 0 {
-		fail(fmt.Errorf("api needs a subcommand: snapshot|diff"))
-	}
-	switch args[0] {
-	case "snapshot":
-		cmdAPISnapshot(args[1:])
-	case "diff":
-		cmdAPIDiff(args[1:])
-	default:
-		fail(fmt.Errorf("unknown api subcommand %q (want snapshot|diff)", args[0]))
-	}
+	dispatch("api", "snapshot|diff", args, map[string]func([]string){
+		"snapshot": cmdAPISnapshot,
+		"diff":     cmdAPIDiff,
+	})
 }
 
 func cmdAPISnapshot(args []string) {

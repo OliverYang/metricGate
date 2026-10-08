@@ -1,0 +1,32 @@
+#!/bin/sh
+# Block a commit whose changed lines trip the gate.
+#
+# Install it either way:
+#   cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#   # or, versioned and shared:
+#   git config core.hooksPath hooks
+#
+# It is diff-scoped on purpose. A whole-tree gate on a repository with legacy
+# debt is red from the first run and stays red, so people learn to pass
+# --no-verify. -diff reports only what this commit adds, which means the gate is
+# green on day one and can only ratchet.
+#
+# Exit codes: 0 lets the commit through, anything else blocks it. See
+# docs/workflow.md for why the two "cannot check" paths below exit 0.
+set -u
+
+bin=${METRICGATE:-metricgate}
+if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "pre-commit: $bin not found; skipping the gate. Set METRICGATE to its path." >&2
+    exit 0
+fi
+
+# A repository with no commits yet has no base to diff against. metricgate says
+# so explicitly rather than failing silently, but the first commit is not worth
+# blocking on either way.
+if ! git rev-parse --verify --quiet HEAD >/dev/null; then
+    echo "pre-commit: no commits yet; skipping the diff-scoped gate" >&2
+    exit 0
+fi
+
+exec "$bin" check . -diff

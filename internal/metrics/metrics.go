@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
@@ -21,9 +22,12 @@ type FuncStats struct {
 	EndLine    int // 1-based inclusive
 	Length     int // lines
 	Params     int
+	FanOut     int
+	BoolParams int
 	Cyclomatic int
 	Cognitive  int
 	MaxNesting int
+	NPath      uint64
 	// Maintainability (B-2): Halstead volume of the body and this
 	// function's MI. Body is retained for the census walk only.
 	Body   *sitter.Node `json:"-"`
@@ -50,6 +54,15 @@ const (
 	MetricFileLength = "file-length"
 	MetricNesting    = "nesting-depth"
 	MetricParams     = "params-count"
+	MetricNPath      = "npath-complexity"
+
+	// MetricFanOut counts the distinct callees of one function (Yourdon &
+	// Constantine's fan-out: how many modules this module calls).
+	MetricFanOut = "fan-out"
+	// MetricBoolParams counts parameters declared bool/boolean — the
+	// "flag argument" bad smell (Fowler): each extra bool doubles the
+	// states the caller must reason about.
+	MetricBoolParams = "boolean-params"
 
 	// Class-level (CK family, Java only).
 	MetricWMC  = "wmc"
@@ -58,6 +71,53 @@ const (
 	MetricCBO  = "cbo"
 	MetricDIT  = "dit"
 )
+
+// sharedMetrics are the identifiers every language produces. The CK family is
+// Java-only and appended by IDsFor.
+var sharedMetrics = []string{
+	MetricCyclomatic, MetricCognitive, MetricFuncLength,
+	MetricFileLength, MetricNesting, MetricParams, MetricNPath,
+	MetricFanOut, MetricBoolParams, MetricMaintainability,
+}
+
+// javaOnlyMetrics are the CK class metrics, produced only for Java.
+var javaOnlyMetrics = []string{MetricWMC, MetricNOM, MetricLCOM, MetricCBO, MetricDIT}
+
+// IDsFor returns the metric identifiers a language produces, in a stable
+// order.
+//
+// It exists because "which rules can fire" was previously knowable only by
+// running the measurer: the rule catalogue held AST and architecture rules but
+// no metric, so an audit of that catalogue was silent about the rules that
+// produce most findings. engine.Catalog is its only consumer, and
+// TestCatalogCoversEveryMeasuredMetric holds it to what a real run emits.
+func IDsFor(lang string) []string {
+	out := append([]string{}, sharedMetrics...)
+	if lang == string(parser.LangJava) {
+		out = append(out, javaOnlyMetrics...)
+	}
+	return out
+}
+
+// Titles is the one-line description of each metric, used wherever a metric is
+// listed as a rule (the catalogue, a policy audit). It falls back to the id.
+var Titles = map[string]string{
+	MetricCyclomatic:      "Function cyclomatic complexity above threshold",
+	MetricCognitive:       "Function cognitive complexity above threshold",
+	MetricFuncLength:      "Function longer than threshold",
+	MetricFileLength:      "File longer than threshold",
+	MetricNesting:         "Function nests deeper than threshold",
+	MetricParams:          "Function takes more parameters than threshold",
+	MetricNPath:           "Function has more execution paths than threshold (NPATH)",
+	MetricFanOut:          "Function calls more distinct callees than threshold (fan-out)",
+	MetricBoolParams:      "Function takes more boolean parameters than threshold",
+	MetricMaintainability: "Maintainability index below threshold",
+	MetricWMC:             "Weighted methods per class above threshold",
+	MetricNOM:             "Number of methods per class above threshold",
+	MetricLCOM:            "Lack of cohesion of methods above threshold",
+	MetricCBO:             "Coupling between object classes above threshold",
+	MetricDIT:             "Depth of inheritance tree above threshold",
+}
 
 // DefaultThresholds is the built-in warn/error pair per metric — the single
 // source of truth shared by the engine and the context renderer. Policies
@@ -72,6 +132,17 @@ var DefaultThresholds = map[string]struct {
 	MetricFileLength: {400, 800},
 	MetricNesting:    {4, 6},
 	MetricParams:     {5, 8},
+	// NPATH (Nejmeh 1988): the AT&T Bell Labs empirical limit of 200 is the
+	// published convention (checkstyle default max is 200 as well).
+	MetricNPath: {200, 200},
+
+	// Fan-out (Yourdon & Constantine, structured design): a module should
+	// call few others; the defaults stay gate-light and policies override
+	// per language.
+	MetricFanOut: {10, 20},
+	// Boolean parameters (flag-argument smell, Fowler): each extra bool
+	// doubles the hidden states of the call; two bools are already four.
+	MetricBoolParams: {2, 4},
 
 	// CK family, Java only. LCOM is advisory by default (the original CK
 	// definition flags real designs often); WMC/NOM/CBO/DIT warn high.
@@ -96,25 +167,6 @@ func text(src []byte, n *sitter.Node) string {
 	return string(src[n.StartByte():n.EndByte()])
 }
 
-// logicOp returns "&&"/"||" for logical binary expressions, "" otherwise.
-// Go names the operator field; Java emits the operator as an anonymous child.
-func logicOp(src []byte, n *sitter.Node) string {
-	if op := n.ChildByFieldName("operator"); op != nil {
-		if t := text(src, op); t == "&&" || t == "||" {
-			return t
-		}
-	}
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
-		if !c.IsNamed() {
-			if t := text(src, c); t == "&&" || t == "||" {
-				return t
-			}
-		}
-	}
-	return ""
-}
-
 // hasToken reports whether one of the node's anonymous children is exactly
 // the given token (e.g. the `default` keyword inside a Java switch label).
 func hasToken(src []byte, n *sitter.Node, tok string) bool {
@@ -132,7 +184,7 @@ func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.Languag
 	prof := ProfileFor(lang)
 	fs := &FileStats{File: file, Lines: bytes.Count(src, []byte{'\n'}) + 1}
 
-	measureClasses(lang, src, tree.RootNode(), fs, prof)
+	measureClasses(lang, src, tree.RootNode(), fs)
 
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {
@@ -186,11 +238,13 @@ func measureFunc(lang parser.LanguageID, prof *LangProfile, src []byte, fn *sitt
 	st.Length = st.EndLine - st.StartLine + 1
 	if params := fn.ChildByFieldName("parameters"); params != nil {
 		st.Params = countParams(lang, params)
+		st.BoolParams = countBoolParams(lang, src, params)
 	}
 	if body := fn.ChildByFieldName("body"); body != nil {
 		st.Body = body
-		st.Cyclomatic = cyclomatic(prof, body, src)
-		st.Cognitive, st.MaxNesting = cognitive(prof, body, src)
+		st.FanOut = fanOut(lang, src, body)
+		st.Cyclomatic, st.Cognitive, st.MaxNesting = irScore(lang, src, fn)
+		st.NPath = irNPath(lang, src, fn)
 	}
 	return st
 }
@@ -252,69 +306,91 @@ func countParams(lang parser.LanguageID, list *sitter.Node) int {
 	return n
 }
 
-// cyclomatic: 1 + decision points. Per language the decision points are the
-// branch kinds, the case entries (Java `default` opens no new path), the
-// ternary operator (Java) and the && / || operators. See docs/metrics.md.
-func cyclomatic(prof *LangProfile, body *sitter.Node, src []byte) int {
-	cc := 1
-	var walk func(n *sitter.Node)
-	walk = func(n *sitter.Node) {
-		if n == nil {
+// countBoolParams counts parameters declared bool (Go) or boolean (Java).
+// The flag-argument smell: every bool doubles the hidden states the caller
+// must reason about, so a two-bool call site already hides four modes.
+func countBoolParams(lang parser.LanguageID, src []byte, list *sitter.Node) int {
+	boolKind := "type_identifier" // Go: bool is spelled as a type_identifier
+	if lang == parser.LangJava {
+		boolKind = "boolean_type"
+	}
+	n := 0
+	var walk func(node *sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node.Kind() == boolKind && (lang == parser.LangJava || text(src, node) == "bool") {
+			n++
 			return
 		}
-		switch {
-		case prof.CaseKinds.Has(n) && hasToken(src, n, "default"):
-			// `default:` opens no new path.
-		case prof.BranchKinds.Has(n), prof.CaseKinds.Has(n), prof.TernaryKind == n.Kind():
-			cc++
-		case n.Kind() == "binary_expression":
-			if logicOp(src, n) != "" {
-				cc++
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			walk(node.NamedChild(i))
+		}
+	}
+	for i := uint(0); i < list.NamedChildCount(); i++ {
+		walk(list.NamedChild(i))
+	}
+	return n
+}
+
+// fanOut counts the distinct callees invoked inside one function body —
+// Yourdon & Constantine's fan-out. The callee identity is the whitespace-
+// stripped spelling of the call target: Go uses the function field of a
+// call_expression (identifier "Do" or selector "pkg.Do" — different
+// targets stay distinct), Java uses the name identifier of a
+// method_invocation (chained calls x.a().b() contribute a and b).
+// Function-literal invocations (Go) and constructor calls (Java) are not
+// behavior-of-another-unit calls and are excluded.
+func fanOut(lang parser.LanguageID, src []byte, body *sitter.Node) int {
+	callKind, calleeField := "call_expression", "function"
+	if lang == parser.LangJava {
+		callKind, calleeField = "method_invocation", "name"
+	}
+	seen := map[string]bool{}
+	var walk func(node *sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node.Kind() == callKind {
+			if callee := node.ChildByFieldName(calleeField); callee != nil && callee.Kind() != "function_literal" {
+				seen[flattenWS(text(src, callee))] = true
 			}
 		}
-		for i := uint(0); i < n.ChildCount(); i++ {
-			walk(n.Child(i))
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			walk(node.NamedChild(i))
 		}
 	}
 	walk(body)
-	return cc
+	return len(seen)
 }
 
-// cognitive computes cognitive complexity and the deepest nesting reached,
-// in one walk. nesting is 0 at the function body top level.
-func cognitive(prof *LangProfile, body *sitter.Node, src []byte) (cog, maxNest int) {
-	var walk func(n *sitter.Node, nesting int)
-	walk = func(n *sitter.Node, nesting int) {
-		if n == nil {
-			return
+// flattenWS removes all whitespace, so a folded multi-line call target
+// compares equal to its one-line spelling.
+func flattenWS(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
 		}
-		inner := nesting
-		switch {
-		case prof.BranchKinds.Has(n), prof.SwitchKinds.Has(n):
-			cog += 1 + nesting
-			inner = nesting + 1
-		case prof.FlatCog.Has(n):
-			// catch: +1 flat, no nesting change.
-			cog++
-		case prof.LambdaKinds.Has(n):
-			// Nested functions add a nesting level but no flat bonus.
-			inner = nesting + 1
-		case n.Kind() == "binary_expression":
-			if op := logicOp(src, n); op != "" {
-				parent := n.Parent()
-				if parent == nil || parent.Kind() != "binary_expression" || logicOp(src, parent) != op {
-					// Start of a run of the same logical operator.
-					cog++
-				}
-			}
-		}
-		if nesting > maxNest {
-			maxNest = nesting
-		}
-		for i := uint(0); i < n.ChildCount(); i++ {
-			walk(n.Child(i), inner)
-		}
+		return r
+	}, s)
+}
+
+// irScore lowers one declaration into the IR and scores it, returning
+// cyclomatic, cognitive and the deepest nesting reached. All decision-point
+// knowledge lives in the language adapters and the engine; this package only
+// knows which node kinds open a function.
+func irScore(lang parser.LanguageID, src []byte, fn *sitter.Node) (cyc, cog, maxNest int) {
+	rep := analyzeFunction(lowererFor(lang).lowerFunc(fn, src))
+	return int(rep.Cyclomatic), int(rep.Cognitive), int(rep.MaxNesting)
+}
+
+// irNPath lowers one declaration and returns its NPATH path count.
+func irNPath(lang parser.LanguageID, src []byte, fn *sitter.Node) uint64 {
+	return analyzeFunction(lowererFor(lang).lowerFunc(fn, src)).NPath
+}
+
+// lowererFor returns the IR lowerer of a language.
+func lowererFor(lang parser.LanguageID) nodeLowerer {
+	switch lang {
+	case parser.LangJava:
+		return javaLowerer{}
+	default:
+		return goLowerer{}
 	}
-	walk(body, 0)
-	return cog, maxNest
 }

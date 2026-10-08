@@ -228,6 +228,128 @@ class D {
 	}
 }
 
+// Parameter-aware bans (args_ban) fire only when a string-literal argument
+// equals a banned value: the SEC-01 shape — ban MessageDigest.getInstance("MD5")
+// without flagging the legitimate getInstance("SHA-256"). Variable arguments
+// never fire (runtime-picked algorithms stay a review question).
+func TestPolicyBanArgs(t *testing.T) {
+	eng := newPolicyEngine(t, `
+version: 1
+languages:
+  java:
+    banned-api:
+      - match: MessageDigest.getInstance
+        args_ban: ["MD5", "MD2"]
+        reason: MD5/MD2 做摘要已有已知碰撞
+        use: 改用 SHA-256
+`)
+	findings, err := eng.CheckSource("svc/Digest.java", []byte(`package svc;
+
+import java.security.MessageDigest;
+
+class Digest {
+    byte[] bad() throws Exception {
+        return MessageDigest.getInstance("MD5").digest(new byte[0]);
+    }
+    byte[] good() throws Exception {
+        return MessageDigest.getInstance("SHA-256").digest(new byte[0]);
+    }
+    byte[] runtime(String alg) throws Exception {
+        return MessageDigest.getInstance(alg).digest(new byte[0]);
+    }
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := countRules(findings)
+	if counts["banned-MessageDigest-getInstance"] != 1 {
+		t.Fatalf("banned-MessageDigest-getInstance = %d, want 1 (MD5 literal fires; SHA-256 and the variable do not)", counts["banned-MessageDigest-getInstance"])
+	}
+	for _, f := range findings {
+		if f.RuleID == "banned-MessageDigest-getInstance" {
+			if !strings.Contains(f.Message, "MD5") || !strings.Contains(f.Message, "禁值参数") {
+				t.Errorf("message = %q, want the banned value named", f.Message)
+			}
+		}
+	}
+
+	// Go's selector-shaped call query carries the argument_list capture too.
+	goEng := newPolicyEngine(t, `
+version: 1
+languages:
+  go:
+    banned-api:
+      - match: exec.Command
+        args_ban: ["sh", "bash"]
+`)
+	goFindings, err := goEng.CheckSource("svc/run.go", []byte(`package svc
+
+func runShell(cmd string) error {
+	c1 := exec.Command("sh", "-c", cmd)
+	c2 := exec.Command("git", "log", "--oneline")
+	_, _, _ = c1, c2, cmd
+	return nil
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countRules(goFindings)["banned-exec-Command"]; n != 1 {
+		t.Errorf("banned-exec-Command = %d, want 1 (sh literal fires; git does not)", n)
+	}
+}
+
+// Constructor bans (kind: constructor) see what call bans cannot:
+// new SimpleDateFormat() is an object_creation_expression, not a
+// method_invocation. The simple-type query fires on new SimpleDateFormat(...)
+// wherever it appears; prefix patterns cover a class family.
+func TestPolicyBanConstructor(t *testing.T) {
+	eng := newPolicyEngine(t, `
+version: 1
+languages:
+  java:
+    banned-api:
+      - match: SimpleDateFormat
+        kind: constructor
+        reason: 线程不安全，用 DateTimeFormatter
+        use: DateTimeFormatter
+      - match: Thread
+        kind: constructor
+`)
+	findings, err := eng.CheckSource("svc/NewFix.java", []byte(`package svc;
+
+import java.text.SimpleDateFormat;
+
+class NewFix {
+    Object bad() {
+        return new SimpleDateFormat("yyyy-MM-dd");
+    }
+    Thread worker() {
+        return new Thread(() -> {});
+    }
+    Object ok() {
+        return new String("fine");
+    }
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := countRules(findings)
+	if counts["banned-SimpleDateFormat"] != 1 {
+		t.Errorf("banned-SimpleDateFormat = %d, want 1 (new SimpleDateFormat fires; other constructors do not)", counts["banned-SimpleDateFormat"])
+	}
+	if counts["banned-Thread"] != 1 {
+		t.Errorf("banned-Thread = %d, want 1", counts["banned-Thread"])
+	}
+	for _, f := range findings {
+		if f.RuleID == "banned-SimpleDateFormat" && !strings.Contains(f.Message, "DateTimeFormatter") {
+			t.Errorf("message = %q, want the compliant alternative", f.Message)
+		}
+	}
+}
+
 // A ban that cannot be expressed must be dropped, not fail the run.
 func TestPolicyBanMalformedEntriesDropped(t *testing.T) {
 	eng := newPolicyEngine(t, `
@@ -270,6 +392,165 @@ languages:
 	for _, id := range []string{"banned-fmt-Print*", "empty-block", "todo-comment"} {
 		if !seen[id] {
 			t.Errorf("rule %q missing from catalogue", id)
+		}
+	}
+}
+
+// Deep receivers and FQN spellings used to fall past the receiver-shape
+// enumeration (3+ segments were dropped, FQN constructors escaped). Bans now
+// match by source spelling at any receiver depth, a short receiver also
+// matches its FQN form, and folded multi-line spellings still compare equal.
+func TestPolicyBanDeepReceiver(t *testing.T) {
+	eng := newPolicyEngine(t, `
+version: 1
+languages:
+  java:
+    banned-api:
+      - match: Executors.newFixedThreadPool
+        reason: 公共 ForkJoinPool 不可控
+        use: new ThreadPoolExecutor 显式定参
+      - match: SimpleDateFormat
+        kind: constructor
+  go:
+    banned-api:
+      - match: time.Now
+`)
+	javaFindings, err := eng.CheckSource("svc/Deep.java", []byte(`package svc;
+
+class Deep {
+    java.util.concurrent.ExecutorService a() {
+        return java.util.concurrent.Executors.newFixedThreadPool(2);
+    }
+
+    java.util.concurrent.ExecutorService b() {
+        return java.util.concurrent
+            .Executors
+            .newFixedThreadPool(6);
+    }
+
+    Object c() {
+        return new java.text.SimpleDateFormat("yyyy");
+    }
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	javaCounts := countRules(javaFindings)
+	if javaCounts["banned-Executors-newFixedThreadPool"] != 2 {
+		t.Errorf("banned-Executors-newFixedThreadPool = %d, want 2 (FQN inline + folded multi-line FQN)", javaCounts["banned-Executors-newFixedThreadPool"])
+	}
+	if javaCounts["banned-SimpleDateFormat"] != 1 {
+		t.Errorf("banned-SimpleDateFormat = %d, want 1 (FQN constructor no longer escapes)", javaCounts["banned-SimpleDateFormat"])
+	}
+	joined := ""
+	for _, f := range javaFindings {
+		if f.RuleID == "banned-Executors-newFixedThreadPool" {
+			joined += f.Message + "\n"
+		}
+	}
+	if !strings.Contains(joined, "java.util.concurrent.Executors.newFixedThreadPool") {
+		t.Errorf("messages = %q, want the real source spelling", joined)
+	}
+	if !strings.Contains(joined, "ThreadPoolExecutor") {
+		t.Errorf("messages = %q, want the compliant alternative", joined)
+	}
+
+	goFindings, err := eng.CheckSource("svc/deep.go", []byte(`package svc
+
+import "time"
+
+func stamp() int64 {
+	return time.Now().UnixNano()
+}
+
+func masked(x clock) int64 {
+	return x.Now()
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countRules(goFindings)["banned-time-Now"]; n != 1 {
+		t.Errorf("banned-time-Now = %d, want 1 (receiver must match; x.Now does not)", n)
+	}
+}
+
+// silent-catch flags catch blocks whose statements never reference the
+// caught exception, never throw, and never log — the deterministic proxy for
+// a swallowed exception. Empty blocks stay empty-block's territory; building
+// a response from e.getMessage() counts as handling (information flows out).
+// The rule is built-in (no policy entry needed) but severity stays
+// overridable like any rule id.
+func TestPolicySilentCatch(t *testing.T) {
+	eng := newPolicyEngine(t, `
+version: 1
+languages:
+  java:
+    rules:
+      silent-catch:
+        severity: error
+`)
+	findings, err := eng.CheckSource("demo/Sample.java", []byte(`package demo;
+
+class Sample {
+    int commentOnly(Exception e) {
+        try {
+            return 1;
+        } catch (Exception e2) {
+            // 忽略
+        }
+        return 0;
+    }
+
+    int rethrown(Exception e) {
+        try {
+            return 1;
+        } catch (Exception e2) {
+            throw new IllegalStateException(e2);
+        }
+    }
+
+    int logged(Exception e) {
+        try {
+            return 1;
+        } catch (Exception e2) {
+            log.error("failed", e2);
+        }
+        return 0;
+    }
+
+    int emptyBlock(Exception e) {
+        try {
+            return 1;
+        } catch (Exception e2) {
+        }
+        return 0;
+    }
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := countRules(findings)
+	if counts["silent-catch"] != 1 {
+		t.Fatalf("silent-catch = %d, want 1 (all: %v)", counts["silent-catch"], counts)
+	}
+	for _, f := range findings {
+		if f.RuleID != "silent-catch" {
+			continue
+		}
+		if f.Severity != model.SevError {
+			t.Errorf("severity = %s, want policy override error", f.Severity)
+		}
+		if f.StartLine != 7 {
+			t.Errorf("anchored at line %d, want 7 (the catch line where the body block starts)", f.StartLine)
+		}
+		if !strings.Contains(f.Message, "is caught but never referenced") {
+			t.Errorf("message = %q", f.Message)
+		}
+		if !strings.Contains(f.Message, "\"e2\"") {
+			t.Errorf("message must name the parameter, got %q", f.Message)
 		}
 	}
 }

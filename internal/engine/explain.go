@@ -13,14 +13,14 @@ import (
 
 // ExplainDecision wraps config.ExplainDecision with engine-specific context.
 type ExplainDecision struct {
-	Path         string            // relative path
-	Status       string            // "included", "excluded", "unsupported"
-	Reason       string            // machine-readable reason
-	Language     string            // "go", "java", "unknown"
-	MatchedPattern string          // matching exclude pattern
-	PolicySource map[string]string // rule_id -> source
-	RuleIDs      []string          // applicable rules
-	Err          error             // parse error if any
+	Path           string            // relative path
+	Status         string            // "included", "excluded", "unsupported"
+	Reason         string            // machine-readable reason
+	Language       string            // "go", "java", "unknown"
+	MatchedPattern string            // matching exclude pattern
+	PolicySource   map[string]string // rule_id -> source
+	RuleIDs        []string          // applicable rules
+	Err            error             // parse error if any
 }
 
 // ExplainPath returns why a single file is included or excluded.
@@ -29,13 +29,13 @@ func (e *Engine) ExplainPath(relPath string) *ExplainDecision {
 	decision := e.cfg.ExplainPath(relPath)
 
 	out := &ExplainDecision{
-		Path:         decision.Path,
-		Status:       decision.Status,
-		Reason:       decision.Reason,
-		Language:     decision.Language,
+		Path:           decision.Path,
+		Status:         decision.Status,
+		Reason:         decision.Reason,
+		Language:       decision.Language,
 		MatchedPattern: decision.MatchedPattern,
-		PolicySource: decision.EffectivePolicy,
-		RuleIDs:      decision.RuleIDs,
+		PolicySource:   decision.EffectivePolicy,
+		RuleIDs:        decision.RuleIDs,
 	}
 
 	// Try to parse the file to check for parse errors

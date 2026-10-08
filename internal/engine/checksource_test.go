@@ -67,3 +67,36 @@ func TestCheckSourceEmptyBodyIsNotARuleFinding(t *testing.T) {
 		}
 	}
 }
+
+// A snippet that does not parse must still say so. This is the MCP check_code
+// path, i.e. the one a coding agent calls on freshly generated code: returning
+// a clean result for unparseable input is the worst possible failure mode for
+// a gate, because the agent reads "0 errors" and moves on.
+func TestCheckSourceReportsParseErrors(t *testing.T) {
+	eng, err := New(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	findings, err := eng.CheckSource("gen/broken.go", []byte("package gen\n\nfunc F( {\n\treturn 1\n}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen bool
+	for _, f := range findings {
+		if f.RuleID != "parse-error" {
+			continue
+		}
+		seen = true
+		if f.Severity != model.SevInfo {
+			t.Errorf("parse-error severity = %s, want info (it must not fail the gate)", f.Severity)
+		}
+		if f.File != "gen/broken.go" {
+			t.Errorf("parse-error file = %q, want the virtual name", f.File)
+		}
+	}
+	if !seen {
+		t.Errorf("no parse-error finding for unparseable source; got %v", findings)
+	}
+}

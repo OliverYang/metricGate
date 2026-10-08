@@ -4,3 +4,4 @@
 .metricgate/
 *.db
 .pi/
+.workbuddy-ai/

@@ -57,9 +57,9 @@ func TestRunOnTestdata(t *testing.T) {
 	}
 	// sample.go + java/Sample.java + the arch fixture (3) + the archsup
 	// fixture (2) + the clone fixtures (2) + the clone-suppression fixture
-	// (2) + the CK fixture (1) + the stub fixture (1)
-	if s.Files != 13 {
-		t.Fatalf("files = %d, want 13", s.Files)
+	// (2) + the CK fixture (1) + the stub fixture (1) + the sdp fixture (6)
+	if s.Files != 19 {
+		t.Fatalf("files = %d, want 19", s.Files)
 	}
 	if n := len(s.ParseErrors); n != 0 {
 		t.Fatalf("unexpected parse errors: %v", s.ParseErrors)
@@ -79,6 +79,9 @@ func TestRunOnTestdata(t *testing.T) {
 		"banned-System-out-print*": 1,
 		"print-stack-trace":        1,
 		"empty-block":              2,
+		// boom()'s catch references e (printStackTrace) and swallow() is empty,
+		// so silent-catch stays out: division of labor with print-stack-trace
+		// and empty-block.
 	}, javaCounts, "java")
 
 	var paramsFinding bool

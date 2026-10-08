@@ -97,7 +97,7 @@ type compiledForbid struct {
 func newMatcher(p Policy, pkgs []string) matcher {
 	m := matcher{
 		forbids: compileForbids(p.Forbids, pkgs),
-		layerOf: assignLayers(p.Layers, pkgs),
+		layerOf: AssignLayers(p.Layers, pkgs),
 		allowed: map[string]map[string]bool{},
 	}
 	m.compileAllowed(p.Layers, pkgs)
@@ -128,8 +128,15 @@ func matching(pattern string, pkgs []string) map[string]bool {
 	return set
 }
 
-// assignLayers gives every package its first matching layer.
-func assignLayers(layers []Layer, pkgs []string) map[string]Layer {
+// AssignLayers gives every package its first matching layer. A package absent
+// from the result belongs to no layer, and is therefore unconstrained by
+// layering (see the note on Layer).
+//
+// It is exported because a policy audit has to answer "which packages did this
+// declaration actually cover?" — and that question must be answered by the same
+// rule the checker uses, not by a second implementation that could disagree
+// about overlapping patterns.
+func AssignLayers(layers []Layer, pkgs []string) map[string]Layer {
 	out := map[string]Layer{}
 	for _, l := range layers {
 		for _, pkg := range pkgs {
@@ -200,6 +207,12 @@ func (m matcher) layerViolation(e Edge) (Violation, bool) {
 	}
 	msg := fmt.Sprintf("layer %q (%s) may not depend on layer %q (%s); allowed: [%s]",
 		from.Name, e.From, to.Name, e.To, strings.Join(from.MayDependOn, ", "))
+	// The finding must state the correct fix and exclude the wrong one
+	// (pilot conclusion): the port-adapter idiom is the verified repair path
+	// (R2 U04: the model re-derived it twice from findings alone), copying
+	// code instead is the failure mode to name explicitly.
+	msg += " — fix: define a port (interface) in layer \"" + from.Name +
+		"\" and let layer \"" + to.Name + "\" implement it, injected at the composition root; do not copy code to bypass layering"
 	return atEdge(e, RuleLayerViolation, msg), true
 }
 

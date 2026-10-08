@@ -103,18 +103,6 @@ func joinPath(dir, name string) string {
 	return dir + "/" + name
 }
 
-func countLines(path string) int {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	n := bytes.Count(data, []byte{'\n'})
-	if len(data) > 0 && data[len(data)-1] != '\n' {
-		n++
-	}
-	return n
-}
-
 // Archive exports the tree at ref into a fresh temp directory (repo-relative
 // layout preserved) so an adapter can parse the base revision. The caller owns
 // the returned cleanup. Extraction uses the stdlib tar reader, so it does not

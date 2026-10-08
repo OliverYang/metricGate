@@ -13,12 +13,14 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/clones"
 	"metricgate/internal/config"
 	"metricgate/internal/parser"
+	"metricgate/internal/refs"
 	"metricgate/internal/selection"
 	"metricgate/internal/sources"
 	"metricgate/internal/symbols"
@@ -43,6 +45,7 @@ type FileFacts struct {
 	Imports  []string      `json:"imports,omitempty"`
 	Symbols  []Symbol      `json:"symbols"`
 	CloneFns []clones.Func `json:"-"` // clone fingerprints for the reuse hints
+	Refs     []refs.Ref    `json:"-"` // call/type use sites for the impact index
 }
 
 // Extract pulls the facts out of one parsed file.
@@ -157,6 +160,9 @@ func parseFacts(files []string, root string) ([]*FileFacts, error) {
 			for i := range f.CloneFns {
 				f.CloneFns[i].File = selection.SanitizePath(root, f.CloneFns[i].File)
 			}
+			for i := range f.Refs {
+				f.Refs[i].File = selection.SanitizePath(root, f.Refs[i].File)
+			}
 			out = append(out, f)
 		}
 	}
@@ -186,9 +192,10 @@ func parseFile(parsers map[parser.LanguageID]*parser.Parser, lang parser.Languag
 	}
 	defer tree.Close()
 	f := Extract(path, src, tree, lang)
-	// The same tree yields the clone fingerprints, so the reuse hints in
-	// the rendered pack cost no extra parsing pass.
+	// The same tree yields the clone fingerprints and the reference sites,
+	// so the reuse hints and the impact index cost no extra parsing pass.
 	f.CloneFns = clones.Extract(lang, path, src, tree, clones.Default)
+	f.Refs = refs.Extract(path, src, tree, lang)
 	return f, nil
 }
 
@@ -218,16 +225,12 @@ func goVis(name string) string {
 	if name == "" {
 		return "private"
 	}
-	for _, r := range name {
-		if unicode.IsUpper(r) {
-			return "exported"
-		}
-		return "private"
+	r, _ := utf8.DecodeRuneInString(name)
+	if unicode.IsUpper(r) {
+		return "exported"
 	}
 	return "private"
 }
-
-// goReceiver reduces "(pp *Parser)" to "Parser".
 
 // effectiveVis combines name and receiver visibility: a symbol is visible
 // at most as much as the least visible of the two.
@@ -238,6 +241,8 @@ func effectiveVis(nameVis, recvVis string) string {
 	}
 	return nameVis
 }
+
+// goReceiver reduces "(pp *Parser)" to "Parser".
 func goReceiver(src []byte, n *sitter.Node) string {
 	r := text(src, n.ChildByFieldName("receiver"))
 	r = strings.TrimPrefix(r, "(")

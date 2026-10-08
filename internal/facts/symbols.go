@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 
+	"metricgate/internal/refs"
 	"metricgate/internal/symbols"
 )
 
@@ -45,13 +46,43 @@ func Defs(f *FileFacts) []symbols.Def {
 	return out
 }
 
+// AllDefs flattens every file's definitions into one slice.
+func AllDefs(files []*FileFacts) []symbols.Def {
+	var out []symbols.Def
+	for _, f := range files {
+		out = append(out, Defs(f)...)
+	}
+	return out
+}
+
+// AllRefs flattens every file's use sites into one slice.
+func AllRefs(files []*FileFacts) []refs.Ref {
+	var out []refs.Ref
+	for _, f := range files {
+		out = append(out, f.Refs...)
+	}
+	return out
+}
+
 // Index builds a definition index over the fact sheets.
 func Index(files []*FileFacts) *symbols.Index {
-	var defs []symbols.Def
-	for _, f := range files {
-		defs = append(defs, Defs(f)...)
+	return symbols.Build(AllDefs(files))
+}
+
+// RefIndex builds a reference index over the fact sheets: every call site and
+// type use the parse pass already saw.
+func RefIndex(files []*FileFacts) *refs.Index {
+	return refs.Build(AllRefs(files))
+}
+
+// CollectWithRefs collects the fact sheets plus the definition and reference
+// indexes in one walk, so the impact command parses each file exactly once.
+func CollectWithRefs(root string) ([]*FileFacts, *symbols.Index, *refs.Index, error) {
+	files, err := Collect(root)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	return symbols.Build(defs)
+	return files, Index(files), RefIndex(files), nil
 }
 
 // SimilarSymbols renders the "existing symbols you may have meant" hints:

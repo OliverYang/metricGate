@@ -24,19 +24,32 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
-    # Organisational constraints live here, not in Go code: the engine compiles
+      # fan-out (Yourdon & Constantine) and boolean-params (Fowler's flag
+      # argument smell) also start in an observation period: warn at the
+      # defaults, error placed above the repo's current max so nothing
+      # blocks until the first findings pass review.
+      fan-out:               { warn: 10, error: 50 }
+      boolean-params:        { warn: 2,  error: 10 }
+      # npath-complexity (Nejmeh 1988, AT&T/checkstyle limit 200) starts in an
+      # observation period: warn at the published 200 so findings are visible,
+      # error set above the repo's current max (3072) so nothing blocks until
+      # the first findings pass review — then tune error down toward 200.
+      npath-complexity:      { warn: 200, error: 5000 }
     # each entry into the same deterministic rule pipeline (same findings, same
     # severities, same `metricgate: ignore` suppression).
     banned-api:
       - match: fmt.Print*
-        reason: direct fmt.Print* writes to stdout; use the project logger
+        reason: direct fmt.Print* writes to stdout, bypassing structured logging
+        use: log via the project logger facade instead
       - match: panic
-        reason: direct panic(); return an error so callers can decide
+        reason: direct panic() aborts without letting callers decide
+        use: return an error so callers can decide
         except_files: ["_test.go"]
       - kind: import
         match: os/exec
-        reason: only the git adapter and the CLI may shell out
-        except_files: ["internal/git/git.go", "cmd/metricgate/main.go", "_test.go"]
+        reason: shelling out must stay in one auditable place (the git adapter)
+        use: reuse internal/git's exec helpers, or inject a command-execution port interface
+        except_files: ["internal/git/git.go", "internal/git/changes.go", "internal/hotspots/hotspots.go", "internal/gittest/gittest.go", "cmd/metricgate/main.go", "_test.go"]
 
   java:
     rules:
@@ -54,11 +67,17 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
+      # Same observation period as the Go section above.
+      fan-out:               { warn: 10, error: 50 }
+      boolean-params:        { warn: 2,  error: 10 }
+      npath-complexity:      { warn: 200, error: 5000 }
     banned-api:
       - match: System.out.print*
-        reason: direct System.out.print* writes to the console; use the project logger
+        reason: direct System.out.print* writes to the console, bypassing structured logging
+        use: log via the project logger facade instead
       - match: System.err.print*
-        reason: direct System.err.print* writes to the console; use the project logger
+        reason: direct System.err.print* writes to the console, bypassing structured logging
+        use: log via the project logger facade instead
 
 # The design invariants of this project, enforced on every run instead of
 # living in a README nobody re-reads: the checker core is a pure library with no
@@ -66,6 +85,17 @@ languages:
 # the only shell.
 architecture:
   cycles: error
+  # SDP stays advisory on purpose. Following our own "reuse the existing
+  # implementation" guidance adds a dependency edge, and a new edge can make a
+  # stable package depend on a less stable one — so a gate that fails on SDP
+  # would punish exactly the behaviour we ask for. Warning + fail_on: error
+  # means the finding is always visible and never blocking.
+  sdp: warning
+  # Instability is a ratio over integer coupling counts, so a gap below about
+  # 1/(Ca+Ce) is quantization, not design debt. Our packages have Ca+Ce between
+  # 2 and 18, i.e. a resolution of 0.06–0.14; the two noise-level violations
+  # this repository used to report had gaps of 0.01 and 0.11.
+  sdp_tolerance: 0.10
   layers:
     - name: cli
       packages: ["cmd/**"]
@@ -79,7 +109,15 @@ architecture:
         - internal/parser
         - internal/config
         - internal/model
+        - internal/selection
         - internal/diff
+        - internal/regress
+        - internal/refs
+        - internal/impact
+        - internal/repomap
+        - internal/risk
+        - internal/dist
+        - internal/deps
       may_depend_on: [core]
     - name: adapter
       packages:

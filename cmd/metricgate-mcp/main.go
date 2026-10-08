@@ -20,11 +20,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"metricgate/internal/bundle"
+	"metricgate/internal/calllog"
 	"metricgate/internal/config"
 	"metricgate/internal/engine"
 	"metricgate/internal/facts"
 	"metricgate/internal/git"
-	"metricgate/internal/model"
+	"metricgate/internal/impact"
 	"metricgate/internal/stubs"
 	"metricgate/internal/symbols"
 )
@@ -33,6 +34,9 @@ const toolVersion = "0.1.0"
 
 func main() {
 	configPath := flag.String("config", "policy.yaml", "policy file (loaded once at startup)")
+	callLogPath := flag.String("calllog", os.Getenv("METRICGATE_CALLLOG"),
+		"append one JSON line per tool call to this file; '1' means "+calllog.DefaultPath+
+			". Off unless set here or via $METRICGATE_CALLLOG; local file only, never sent anywhere, and never records the code argument")
 	flag.Parse()
 
 	cfg, err := loadPolicy(*configPath)
@@ -47,32 +51,9 @@ func main() {
 	}
 	defer eng.Close()
 
-	svc := &service{eng: eng, cfg: cfg}
+	svc := &service{eng: eng, cfg: cfg, log: newCallLogger(*callLogPath)}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "metricgate", Version: toolVersion}, nil)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "get_constraints",
-		Description: "Get the dense constraint pack (exact signatures/imports + active policy rules and limits) for a file or directory. Call BEFORE generating code and follow it, so output aligns with the existing API surface.",
-	}, svc.getConstraints)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "check_code",
-		Description: "Deterministically check in-memory code (0 tokens, milliseconds) without writing to disk. Call after EVERY generated/edited snippet; fix all findings before returning the code.",
-	}, svc.checkCode)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "check_path",
-		Description: "Check files on disk with rules + metrics. With diff_only=true only new violations are reported (legacy code is not re-flagged).",
-	}, svc.checkPath)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "list_stubs",
-		Description: "List unfinished code: empty bodies, panic(\"not implemented\") bodies, Java UnsupportedOperationException throws — each with its exact definition site. Use as the repair worklist.",
-	}, svc.listStubs)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "find_symbols",
-		Description: "Deterministic cross-file symbol index (0 tokens): exact lookups by name and near-miss suggestions (typos, case twins) so generated code aligns with the existing API surface. Call before inventing a new helper name.",
-	}, svc.findSymbols)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "get_review_bundle",
-		Description: "Build a deterministic, budgeted review input for a host agent: the current diff plus path selection, active policy constraints, and compact facts. Read-only; metricgate never calls an LLM. Prefer this over sending whole files; pass include_source only when the diff alone is insufficient.",
-	}, svc.getReviewBundle)
+	registerTools(srv, svc)
 
 	if err := srv.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "metricgate-mcp:", err)
@@ -85,12 +66,6 @@ func loadPolicy(path string) (*config.Config, error) {
 		return config.Default()
 	}
 	return config.LoadFile(path)
-}
-
-// service implements the MCP tool handlers on top of one engine instance.
-type service struct {
-	eng *engine.Engine
-	cfg *config.Config
 }
 
 type constraintsIn struct {
@@ -211,69 +186,6 @@ func (s *service) getReviewBundle(ctx context.Context, req *mcp.CallToolRequest,
 	return nil, out, nil
 }
 
-type checkCodeIn struct {
-	Name string `json:"name" jsonschema:"virtual file name for the code, e.g. service.go or UserService.java; the extension picks the language"`
-	Code string `json:"code" jsonschema:"the source code to check"`
-}
-
-type checkCodeOut struct {
-	Verdict  string          `json:"verdict"`
-	Errors   int             `json:"errors"`
-	Warnings int             `json:"warnings"`
-	Findings []model.Finding `json:"findings"`
-}
-
-func (s *service) checkCode(ctx context.Context, req *mcp.CallToolRequest, in checkCodeIn) (*mcp.CallToolResult, checkCodeOut, error) {
-	if in.Code == "" {
-		return nil, checkCodeOut{}, fmt.Errorf("code is empty")
-	}
-	findings, err := s.eng.CheckSource(in.Name, []byte(in.Code))
-	if err != nil {
-		return nil, checkCodeOut{}, err
-	}
-	return nil, summarizeFindings(findings), nil
-}
-
-type checkPathIn struct {
-	Path     string `json:"path,omitempty" jsonschema:"file or directory to check (default .)"`
-	DiffOnly bool   `json:"diff_only,omitempty" jsonschema:"only report findings on lines changed vs HEAD"`
-}
-
-type checkPathOut struct {
-	Verdict  string          `json:"verdict"`
-	Files    int             `json:"files"`
-	Errors   int             `json:"errors"`
-	Warnings int             `json:"warnings"`
-	Hidden   int             `json:"hidden,omitempty"`
-	Findings []model.Finding `json:"findings"`
-}
-
-func (s *service) checkPath(ctx context.Context, req *mcp.CallToolRequest, in checkPathIn) (*mcp.CallToolResult, checkPathOut, error) {
-	path := in.Path
-	if path == "" {
-		path = "."
-	}
-	summary, err := s.eng.Run(path)
-	if err != nil {
-		return nil, checkPathOut{}, err
-	}
-	out := checkPathOut{Files: summary.Files}
-	if in.DiffOnly {
-		changed, err := git.ChangedLines("", git.ResolveBase("", "HEAD"))
-		if err != nil {
-			return nil, checkPathOut{}, err
-		}
-		var hidden int
-		summary, hidden = engine.FilterSummary(summary, changed)
-		out.Hidden = hidden
-	}
-	out.Findings = summary.Findings
-	out.Errors = summary.Count(model.SevError)
-	out.Warnings = summary.Count(model.SevWarning)
-	out.Verdict = verdict(s.cfg, out.Errors, out.Warnings)
-	return nil, out, nil
-}
-
 type stubsIn struct {
 	Path string `json:"path,omitempty" jsonschema:"file or directory to scan (default .)"`
 }
@@ -365,35 +277,30 @@ func (s *service) findSymbols(ctx context.Context, req *mcp.CallToolRequest, in 
 	return nil, out, nil
 }
 
-// summarizeFindings renders a check_code verdict.
-func summarizeFindings(findings []model.Finding) checkCodeOut {
-	out := checkCodeOut{Findings: findings}
-	for _, f := range findings {
-		switch f.Severity {
-		case model.SevError:
-			out.Errors++
-		case model.SevWarning:
-			out.Warnings++
-		}
-	}
-	out.Verdict = "PASS"
-	if out.Errors > 0 {
-		out.Verdict = "FAIL: fix the errors"
-	} else if out.Warnings > 0 {
-		out.Verdict = "WARN: fix the warnings before submitting"
-	}
-	return out
+type impactIn struct {
+	Path  string `json:"path,omitempty" jsonschema:"file or directory to index (default .)"`
+	Query string `json:"query" jsonschema:"symbol name to analyse (exact match; near-miss names are reported in the note when nothing matches)"`
+	Max   int    `json:"max,omitempty" jsonschema:"maximum references to return (default 50)"`
 }
 
-// verdict renders the gate verdict for a path check.
-func verdict(cfg *config.Config, errors, warnings int) string {
-	failOn := cfg.FailOn()
-	trips := errors
-	if failOn == model.SevWarning {
-		trips += warnings
+// getImpact answers "what breaks if this symbol changes?" from the definition
+// and reference indexes built in one walk. It is the same computation the CLI
+// impact verb performs, so the two cannot drift.
+func (s *service) getImpact(ctx context.Context, req *mcp.CallToolRequest, in impactIn) (*mcp.CallToolResult, impact.Report, error) {
+	if strings.TrimSpace(in.Query) == "" {
+		return nil, impact.Report{}, fmt.Errorf("query is empty")
 	}
-	if trips > 0 {
-		return fmt.Sprintf("FAIL (%d findings at fail_on=%s)", trips, failOn)
+	path := in.Path
+	if path == "" {
+		path = "."
 	}
-	return "PASS"
+	_, defs, uses, err := facts.CollectWithRefs(path)
+	if err != nil {
+		return nil, impact.Report{}, err
+	}
+	report := impact.Compute(in.Query, defs, uses)
+	if in.Max > 0 && len(report.References) > in.Max {
+		report.References = report.References[:in.Max]
+	}
+	return nil, report, nil
 }

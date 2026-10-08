@@ -231,13 +231,21 @@ func attachEvidence(f *model.Finding, ctx *MatchCtx, capture string) {
 	f.Evidence = model.NewEvidence(ctx.Src, n.StartByte(), n.EndByte())
 }
 
-// Meta is rule metadata for reports (SARIF driver.rules).
+// Meta is rule metadata for reports (SARIF driver.rules) and for policy
+// audits.
 type Meta struct {
 	ID    string
 	Title string
+	// Language is the parser id the rule belongs to ("go", "java"). It is empty
+	// for whole-graph rules, which are language-independent. A policy audit
+	// needs it to tell "this rule found nothing" apart from "this rule had no
+	// files to look at" — the two call for opposite responses.
+	Language string
 }
 
-// Metas returns rule metadata for a rule set.
+// Metas returns rule metadata for a rule set. Language is left empty: it is a
+// property of the pack, not of the rule, so whoever assembled the packs fills
+// it in.
 func Metas(all []*Rule) []Meta {
 	metas := make([]Meta, 0, len(all))
 	for _, r := range all {
@@ -256,6 +264,34 @@ func ForLanguage(id parser.LanguageID) []*Rule {
 		return JavaRules()
 	default:
 		return nil
+	}
+}
+
+// chainDepthRule builds the language-neutral call-chain rule over the
+// per-language query: matches are nested method_invocation / call
+// expression trees and OnMatch keeps only the outermost chain whose depth
+// exceeds the max_depth option (default 3, Lanza & Marinescu's chain-size
+// detection strategy: "chain size > 3").
+func chainDepthRule(query string, depthOf func(ctx *MatchCtx) int) *Rule {
+	return &Rule{
+		ID:              "call-chain-depth",
+		Title:           "Message chain longer than max_depth (train wreck)",
+		DefaultSeverity: model.SevWarning,
+		DefaultEnabled:  true,
+		Query:           query,
+		AnchorCapture:   "chain",
+		OnMatch: func(ctx *MatchCtx) *model.Finding {
+			node := ctx.Captures["chain"]
+			if nestedInChain(node) {
+				return nil // an outer link of the same chain reports; don't bill twice
+			}
+			depth := depthOf(ctx)
+			max := maxChainDepth(ctx.Options)
+			if depth <= max {
+				return nil
+			}
+			return chainFinding(node, depth, max, ctx)
+		},
 	}
 }
 

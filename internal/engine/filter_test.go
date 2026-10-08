@@ -54,4 +54,3 @@ func TestFilterSummary(t *testing.T) {
 		t.Errorf("metrics = %d, want 2 (unfiltered)", len(out.Metrics))
 	}
 }
-

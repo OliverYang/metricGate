@@ -9,13 +9,13 @@ import (
 
 // ExplainDecision describes why a file is included or excluded from scanning.
 type ExplainDecision struct {
-	Path             string            // relative path to the file
-	Status           string            // "included", "excluded", "unsupported"
-	Reason           string            // machine-readable reason
-	Language         string            // "go", "java", "unknown"
-	MatchedPattern   string            // matching exclude pattern (if excluded)
-	EffectivePolicy  map[string]string // rule_id -> source ("builtin", "policy_file")
-	RuleIDs          []string          // applicable rule IDs
+	Path            string            // relative path to the file
+	Status          string            // "included", "excluded", "unsupported"
+	Reason          string            // machine-readable reason
+	Language        string            // "go", "java", "unknown"
+	MatchedPattern  string            // matching exclude pattern (if excluded)
+	EffectivePolicy map[string]string // rule_id -> source ("builtin", "policy_file")
+	RuleIDs         []string          // applicable rule IDs
 }
 
 // ExclusionReason identifies why a file was filtered out.
@@ -90,21 +90,13 @@ func (c *Config) ExplainPath(relPath string) *ExplainDecision {
 		// Collect rule IDs and their sources
 		for ruleID := range sec.Rules {
 			decision.RuleIDs = append(decision.RuleIDs, ruleID)
-			_, _, explicit := c.ValueSource(lang+".rules."+ruleID, "builtin")
-			source := "builtin"
-			if explicit {
-				source = "policy_file"
-			}
+			source, _, _ := c.ValueSource("languages."+lang+".rules."+ruleID, "builtin")
 			decision.EffectivePolicy[ruleID] = source
 		}
 		for metricID := range sec.Metrics {
 			// Metrics are also rules in metricgate
 			decision.RuleIDs = append(decision.RuleIDs, "metric:"+metricID)
-			_, _, explicit := c.ValueSource(lang+".metrics."+metricID, "builtin")
-			source := "builtin"
-			if explicit {
-				source = "policy_file"
-			}
+			source, _, _ := c.ValueSource("languages."+lang+".metrics."+metricID, "builtin")
 			decision.EffectivePolicy["metric:"+metricID] = source
 		}
 	}
@@ -158,67 +150,78 @@ func checkExcludePattern(exclude []string, relPath string) (ExclusionReason, str
 	return ReasonIncluded, ""
 }
 
-// ExplainRule returns the effective configuration for a specific rule.
+// ExplainRule returns the effective configuration for a specific rule. The
+// PolicySource it reports is where the value came from: "policy_file" for a
+// key the document wrote, "preset:<name>" for one the active preset supplied,
+// or "builtin" for a value nobody overrode. That is what makes a preset's
+// deviations auditable instead of silent.
 func (c *Config) ExplainRule(lang, ruleID string) RuleExplain {
 	sec, ok := c.Languages[lang]
 	if !ok {
-		return RuleExplain{
-			Enabled:      false,
-			Reason:       "language_not_configured",
-			Severity:     "",
-			Thresholds:   MetricThresholds{},
-			PolicySource: "builtin",
-		}
+		return RuleExplain{Reason: "language_not_configured", PolicySource: "builtin"}
 	}
-
-	rc, hasRule := sec.Rules[ruleID]
-	_, hasMetric := sec.Metrics[ruleID]
-
-	var enabled *bool
-	var severity string
-	var thresholds MetricThresholds
-	var policySource string
-
-	if hasRule {
-		if rc.Enabled != nil {
-			enabled = rc.Enabled
-		} else {
-			enabled = nil // use default
-		}
-		severity = rc.Severity
-		source, _, explicit := c.ValueSource(lang+".rules."+ruleID, "builtin")
-		policySource = source
-		if !explicit {
-			policySource = "builtin"
-		}
-	} else if hasMetric {
-		// Metrics are treated as rules with enabled=true by default
-		enabled = &[]bool{true}[0]
-		source, _, explicit := c.ValueSource(lang+".metrics."+ruleID, "builtin")
-		policySource = source
-		if !explicit {
-			policySource = "builtin"
-		}
-	} else {
-		return RuleExplain{
-			Enabled:    false,
-			Reason:     "rule_not_found",
-			Severity:   "",
-			Thresholds: MetricThresholds{},
-		}
+	if rc, isRule := sec.Rules[ruleID]; isRule {
+		return c.explainRuleEntry(lang, ruleID, rc)
 	}
+	if _, isMetric := sec.Metrics[ruleID]; isMetric {
+		return c.explainMetricEntry(lang, ruleID)
+	}
+	if strings.HasPrefix(ruleID, "banned-") {
+		return c.explainBanEntry(lang)
+	}
+	return RuleExplain{Reason: "rule_not_found"}
+}
 
-	warn, errAt, _ := c.MetricThresholds(lang, ruleID)
-	thresholds.Warn = warn
-	thresholds.Error = errAt
-
+// explainRuleEntry reports a rule configured under rules.<id>. A listed rule is
+// enabled unless it explicitly says otherwise; the only built-in rule that
+// defaults off (todo-comment) is always listed with enabled: false.
+func (c *Config) explainRuleEntry(lang, ruleID string, rc RuleConfig) RuleExplain {
+	severity, srcKey := rc.Severity, "languages."+lang+".rules."+ruleID
+	if severity == "" && strings.HasPrefix(ruleID, "banned-") {
+		severity, srcKey = c.BanSeverity(lang), "languages."+lang+".banned-api-severity"
+	}
+	source, _, _ := c.ValueSource(srcKey, "builtin")
 	return RuleExplain{
-		Enabled:      enabled != nil && *enabled,
+		Enabled:      rc.Enabled == nil || *rc.Enabled,
 		Reason:       "configured",
 		Severity:     severity,
-		Thresholds:   thresholds,
-		PolicySource: policySource,
+		Thresholds:   c.explainThresholds(lang, ruleID),
+		PolicySource: source,
 	}
+}
+
+// explainMetricEntry reports a metric configured under metrics.<id>.
+func (c *Config) explainMetricEntry(lang, ruleID string) RuleExplain {
+	source, _, _ := c.ValueSource("languages."+lang+".metrics."+ruleID, "builtin")
+	return RuleExplain{
+		Enabled:      true,
+		Reason:       "configured",
+		Thresholds:   c.explainThresholds(lang, ruleID),
+		PolicySource: source,
+	}
+}
+
+// explainBanEntry reports a banned-api rule that has no per-rule entry: its
+// severity comes from the language's banned-api-severity fallback.
+func (c *Config) explainBanEntry(lang string) RuleExplain {
+	source, _, _ := c.ValueSource("languages."+lang+".banned-api-severity", "builtin")
+	return RuleExplain{
+		Enabled:      true,
+		Reason:       "configured",
+		Severity:     c.BanSeverity(lang),
+		PolicySource: source,
+	}
+}
+
+// MetricThresholdsFor returns a metric's configured warn/error pair.
+func (c *Config) MetricThresholdsFor(lang, metricID string) MetricThresholds {
+	warn, errAt, _ := c.MetricThresholds(lang, metricID)
+	return MetricThresholds{Warn: warn, Error: errAt}
+}
+
+// explainThresholds reads the warn/error pair of a metric.
+func (c *Config) explainThresholds(lang, metricID string) MetricThresholds {
+	return c.MetricThresholdsFor(lang, metricID)
 }
 
 // RuleExplain contains the effective configuration for a single rule.

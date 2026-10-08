@@ -96,15 +96,20 @@ func NewEvidence(src []byte, start, end uint) *Evidence {
 	}
 }
 
-// MetricResult is one measured value for one scope (a function, or the file).
-// Warn/Err record the thresholds that applied when the value was measured.
+// MetricResult is one measured value for one scope (a function, a class, or
+// the file). Warn/Err record the thresholds that applied when the value was
+// measured. StartLine/EndLine anchor the scope so a consumer (regression
+// detection, reports) can point at the measured declaration instead of
+// re-parsing; a file-scoped metric reports line 1.
 type MetricResult struct {
-	Metric string `json:"metric"`
-	File   string `json:"file"`
-	Scope  string `json:"scope"`
-	Value  int    `json:"value"`
-	Warn   int    `json:"warn"`
-	Err    int    `json:"error"`
+	Metric    string `json:"metric"`
+	File      string `json:"file"`
+	Scope     string `json:"scope"`
+	Value     int    `json:"value"`
+	Warn      int    `json:"warn"`
+	Err       int    `json:"error"`
+	StartLine int    `json:"startLine,omitempty"`
+	EndLine   int    `json:"endLine,omitempty"`
 }
 
 // RunSummary is the outcome of one engine run over a codebase.
@@ -114,7 +119,11 @@ type RunSummary struct {
 	Findings    []Finding      `json:"findings"`
 	Metrics     []MetricResult `json:"metrics"`
 	Ignored     int            `json:"ignored,omitempty"`
-	Duration    time.Duration  `json:"-"`
+	// IgnoredByRule splits Ignored by rule id, for the policy audit. A rule
+	// silenced many times is a rule the team has voted against, and only the
+	// per-rule view shows which one it is.
+	IgnoredByRule map[string]int `json:"ignoredByRule,omitempty"`
+	Duration      time.Duration  `json:"-"`
 }
 
 // Count returns how many findings carry the given severity.
@@ -128,11 +137,12 @@ func (r *RunSummary) Count(sev Severity) int {
 	return n
 }
 
-// sortByKeys orders items by a list of three-way key comparators: the first
-// comparator that distinguishes two items decides. Both public sort helpers
-// are declarative key lists over it — which is exactly what metricgate's
-// own duplicate-code gate holds them to.
-func sortByKeys[T any](items []T, keys ...func(a, b T) int) {
+// SortByKeys orders items by a list of three-way key comparators: the first
+// comparator that distinguishes two items decides. It is the shared building
+// block for every deterministic ordering in metricgate — findings, metric
+// snapshots, references and regression deltas all sort through it, so two
+// runs over the same inputs emit byte-identical output.
+func SortByKeys[T any](items []T, keys ...func(a, b T) int) {
 	sort.SliceStable(items, func(i, j int) bool {
 		for _, key := range keys {
 			if c := key(items[i], items[j]); c != 0 {
@@ -146,7 +156,7 @@ func sortByKeys[T any](items []T, keys ...func(a, b T) int) {
 // SortFindings orders findings by file, then line, then rule id, so output
 // is stable between runs.
 func SortFindings(fs []Finding) {
-	sortByKeys(fs,
+	SortByKeys(fs,
 		func(a, b Finding) int { return strings.Compare(a.File, b.File) },
 		func(a, b Finding) int { return cmp.Compare(a.StartLine, b.StartLine) },
 		func(a, b Finding) int { return strings.Compare(a.RuleID, b.RuleID) },
@@ -155,7 +165,7 @@ func SortFindings(fs []Finding) {
 
 // SortMetrics orders metric snapshots by file, then scope, then metric name.
 func SortMetrics(ms []MetricResult) {
-	sortByKeys(ms,
+	SortByKeys(ms,
 		func(a, b MetricResult) int { return strings.Compare(a.File, b.File) },
 		func(a, b MetricResult) int { return strings.Compare(a.Scope, b.Scope) },
 		func(a, b MetricResult) int { return strings.Compare(a.Metric, b.Metric) },

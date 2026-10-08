@@ -175,9 +175,7 @@ func scan(root string, cfg clones.Config) ([]clones.Func, error) {
 		if err != nil {
 			continue
 		}
-		for _, fn := range clones.Extract(lang, rel(root, path), src, tree, cfg) {
-			out = append(out, fn)
-		}
+		out = append(out, clones.Extract(lang, rel(root, path), src, tree, cfg)...)
 		tree.Close()
 	}
 	return out, nil

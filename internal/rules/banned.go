@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"metricgate/internal/config"
 	"metricgate/internal/model"
 	"metricgate/internal/parser"
+
+	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 // BanKind is how a banned entry is matched.
@@ -16,21 +19,33 @@ type BanKind string
 const (
 	// BanCall matches a call. The pattern is dot-separated: in Go
 	// "pkg.Name" (or a bare "name" for an unqualified call), in Java
-	// "receiver.method" or "Object.field.method".
+	// "receiver.method" — the receiver may be any depth, matched by its
+	// source spelling ("System.out.println", a fully qualified
+	// "java.util.concurrent.Executors.newFixedThreadPool"); a short
+	// receiver also matches its fully-qualified form.
 	BanCall BanKind = "call"
 	// BanImport matches an imported package path.
 	BanImport BanKind = "import"
+	// BanConstructor matches instance creation: new X(...) is an
+	// object_creation_expression in Java, which call bans (method_invocation
+	// queries) cannot see — the CONC-02-shaped gap. Java-only: Go has no
+	// constructor syntax worth gating (its "new"/"make" are plain calls and
+	// are already reachable via call bans). The match is the simple class
+	// name; a trailing "*" prefix-matches.
+	BanConstructor BanKind = "constructor"
 )
 
 // Ban is one organisation-level banned API or import, as compiled from the
 // policy's `banned-api:` list. This is the data form of the constraint layer:
 // adding an organisational rule means editing YAML, not Go.
 type Ban struct {
-	Kind   BanKind
-	Match  string   // pattern, with the trailing "*" folded into Prefix
-	Prefix bool     // match by name prefix (pattern ended with "*")
-	Reason string   // shown in the finding message and the context pack
-	Except []string // file-name suffixes where the ban does not apply
+	Kind    BanKind
+	Match   string   // pattern, with the trailing "*" folded into Prefix
+	Prefix  bool     // match by name prefix (pattern ended with "*")
+	Reason  string   // shown in the finding message and the context pack
+	Use     string   // compliant alternative ("use X instead"); appended to findings and digests
+	ArgsBan []string // parameter-aware: fire only when a string-literal argument equals one of these
+	Except  []string // file-name suffixes where the ban does not apply
 }
 
 // RuleID is the stable finding id of a ban: "banned-" plus the pattern with
@@ -83,7 +98,7 @@ func banFromConfig(e config.BanConfig) (Ban, bool) {
 	if kind == "" {
 		kind = BanCall
 	}
-	if kind != BanCall && kind != BanImport {
+	if kind != BanCall && kind != BanImport && kind != BanConstructor {
 		return Ban{}, false
 	}
 	match := strings.TrimSpace(e.Match)
@@ -91,18 +106,24 @@ func banFromConfig(e config.BanConfig) (Ban, bool) {
 		return Ban{}, false
 	}
 	prefix := false
-	if kind == BanCall && strings.HasSuffix(match, "*") {
+	if (kind == BanCall || kind == BanConstructor) && strings.HasSuffix(match, "*") {
 		prefix, match = true, strings.TrimSuffix(match, "*")
 	}
 	if strings.Trim(match, ".") == "" {
 		return Ban{}, false
 	}
+	argsBan := e.ArgsBan
+	if kind == BanImport {
+		argsBan = nil // imports have no arguments
+	}
 	return Ban{
-		Kind:   kind,
-		Match:  match,
-		Prefix: prefix,
-		Reason: strings.TrimSpace(e.Reason),
-		Except: e.ExceptFiles,
+		Kind:    kind,
+		Match:   match,
+		Prefix:  prefix,
+		Reason:  strings.TrimSpace(e.Reason),
+		Use:     strings.TrimSpace(e.Use),
+		ArgsBan: argsBan,
+		Except:  e.ExceptFiles,
 	}, true
 }
 
@@ -110,7 +131,7 @@ func banFromConfig(e config.BanConfig) (Ban, bool) {
 // cannot express a shape contributes nothing for it.
 var banBuilders = map[string]map[BanKind]func(Ban) *Rule{
 	"go":   {BanCall: goCallBan, BanImport: goImportBan},
-	"java": {BanCall: javaCallBan, BanImport: javaImportBan},
+	"java": {BanCall: javaCallBan, BanImport: javaImportBan, BanConstructor: javaConstructorBan},
 }
 
 // BannedRules turns compiled bans into rules for one language.
@@ -134,7 +155,9 @@ func BannedRules(lang string, bans []Ban) []*Rule {
 func goCallBan(b Ban) *Rule {
 	pkg, name := splitLast(b.Match)
 	if pkg == "" {
-		return callRule(b, `(call_expression function: (identifier) @fn) @call`,
+		return callRule(b, `(call_expression
+    function: (identifier) @fn
+    arguments: (argument_list) @args) @call`,
 			func(ctx *MatchCtx) (string, bool) {
 				return matchedName(ctx, name, b)
 			})
@@ -142,14 +165,19 @@ func goCallBan(b Ban) *Rule {
 	return callRule(b, `
 (call_expression
   function: (selector_expression
-    operand: (identifier) @pkg
-    field: (field_identifier) @fn)) @call`,
+    operand: (_) @recv
+    field: (field_identifier) @fn)
+  arguments: (argument_list) @args) @call`,
 		func(ctx *MatchCtx) (string, bool) {
-			if ctx.Text(ctx.Captures["pkg"]) != pkg {
+			recv := flatText(ctx, "recv")
+			if !receiverMatch(recv, pkg) {
 				return "", false
 			}
 			fn, ok := matchedName(ctx, name, b)
-			return pkg + "." + fn, ok
+			if !ok {
+				return "", false
+			}
+			return recv + "." + fn, ok
 		})
 }
 
@@ -162,6 +190,73 @@ func matchedName(ctx *MatchCtx, name string, b Ban) (string, bool) {
 	return fn, true
 }
 
+// flatText returns the captured node's source text with all whitespace
+// removed, so a line-wrapped qualified name still compares equal to its
+// policy spelling ("java.util.concurrent\n\t.Executors.newFixedThreadPool").
+func flatText(ctx *MatchCtx, key string) string {
+	n := ctx.Captures[key]
+	if n == nil {
+		return ""
+	}
+	return stripSpace(ctx.Text(n))
+}
+
+func stripSpace(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// receiverMatch reports whether a captured receiver spells the banned one:
+// exact equality, or the fully-qualified form "pkg.Recv" matching a short
+// "Recv" ban (the inline-FQN escape).
+func receiverMatch(got, want string) bool {
+	return got == want || strings.HasSuffix(got, "."+want)
+}
+
+// bannedArg reports the first string-literal argument of the call whose
+// value equals one of the ban's banned values ("" + false when none).
+// Non-literal arguments (variables, method calls) never match: an algorithm
+// picked at runtime stays a review question, not a false positive.
+func bannedArg(ctx *MatchCtx, values []string) (string, bool) {
+	args := ctx.Captures["args"]
+	if args == nil {
+		return "", false
+	}
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		lit := stringLiteral(ctx.Src, args.NamedChild(i))
+		if lit == "" {
+			continue
+		}
+		for _, v := range values {
+			if lit == v {
+				return lit, true
+			}
+		}
+	}
+	return "", false
+}
+
+// stringLiteral returns the unquoted text of a string-literal node, or ""
+// when the node is not one (Go "interpreted_string_literal", Java
+// "string_literal").
+func stringLiteral(src []byte, n *sitter.Node) string {
+	if n == nil {
+		return ""
+	}
+	switch n.Kind() {
+	case "string", "string_literal", "interpreted_string_literal":
+	default:
+		return ""
+	}
+	return strings.Trim(string(src[n.StartByte():n.EndByte()]), `"`)
+}
+
 func goImportBan(b Ban) *Rule {
 	return importRule(b, `
 (import_spec path: (interpreted_string_literal) @path)
@@ -172,46 +267,59 @@ func goImportBan(b Ban) *Rule {
 
 // --- Java -----------------------------------------------------------------
 
-// javaCallBan dispatches on the receiver shape: a bare method name, one
-// receiver identifier, or the classic two-part "System.out.println". Deeper
-// receivers would need type resolution and are deliberately out of scope.
+// javaCallBan matches a bare method name, or — for any receiver depth —
+// captures the whole receiver expression and compares its text: identifier
+// ("obj.help"), field_access chains ("System.out.println") and fully
+// qualified names all fall out of one query. Matching stays by source
+// spelling (no type resolution); a short receiver also matches its FQN form.
 func javaCallBan(b Ban) *Rule {
 	parts := strings.Split(b.Match, ".")
 	method, recv := parts[len(parts)-1], parts[:len(parts)-1]
-	switch len(recv) {
-	case 0:
-		return callRule(b, `(method_invocation name: (identifier) @fn) @call`,
+	if len(recv) == 0 {
+		return callRule(b, `(method_invocation
+    name: (identifier) @fn
+    arguments: (argument_list) @args) @call`,
 			func(ctx *MatchCtx) (string, bool) { return matchedName(ctx, method, b) })
-	case 1:
-		return callRule(b, `
-(method_invocation
-  object: (identifier) @obj
-  name: (identifier) @fn) @call`,
-			func(ctx *MatchCtx) (string, bool) {
-				if ctx.Text(ctx.Captures["obj"]) != recv[0] {
-					return "", false
-				}
-				fn, ok := matchedName(ctx, method, b)
-				return recv[0] + "." + fn, ok
-			})
-	case 2:
-		return callRule(b, `
-(method_invocation
-  object: (field_access
-    object: (identifier) @sys
-    field: (identifier) @stream)
-  name: (identifier) @fn) @call`,
-			func(ctx *MatchCtx) (string, bool) {
-				if ctx.Text(ctx.Captures["sys"]) != recv[0] ||
-					ctx.Text(ctx.Captures["stream"]) != recv[1] {
-					return "", false
-				}
-				fn, ok := matchedName(ctx, method, b)
-				return recv[0] + "." + recv[1] + "." + fn, ok
-			})
-	default:
-		return nil
 	}
+	want := strings.Join(recv, ".")
+	return callRule(b, `
+(method_invocation
+  object: (_) @recv
+  name: (identifier) @fn
+  arguments: (argument_list) @args) @call`,
+		func(ctx *MatchCtx) (string, bool) {
+			got := flatText(ctx, "recv")
+			if !receiverMatch(got, want) {
+				return "", false
+			}
+			fn, ok := matchedName(ctx, method, b)
+			if !ok {
+				return "", false
+			}
+			return got + "." + fn, ok
+		})
+}
+
+// javaConstructorBan matches instance creation. The type capture is a
+// wildcard, so both "new SimpleDateFormat()" and the FQN spelling
+// "new java.text.SimpleDateFormat()" (a scoped type node) match; the name
+// compared is the type's last dotted segment. Generic types (new Foo<T>())
+// are still outside the ban's reach.
+func javaConstructorBan(b Ban) *Rule {
+	return callRule(b, `
+(object_creation_expression
+  type: (_) @fn
+  arguments: (argument_list) @args) @call`,
+		func(ctx *MatchCtx) (string, bool) {
+			typ := flatText(ctx, "fn")
+			if i := strings.LastIndex(typ, "."); i >= 0 {
+				typ = typ[i+1:]
+			}
+			if !nameMatch(typ, b.Match, b.Prefix) {
+				return "", false
+			}
+			return typ, true
+		})
 }
 
 func javaImportBan(b Ban) *Rule {
@@ -237,7 +345,15 @@ func callRule(b Ban, query string, match func(*MatchCtx) (string, bool)) *Rule {
 			if !ok {
 				return nil
 			}
-			return at(ctx, "call", banMessage(b, seen))
+			msg := banMessage(b, seen)
+			if len(b.ArgsBan) > 0 {
+				arg, hit := bannedArg(ctx, b.ArgsBan)
+				if !hit {
+					return nil
+				}
+				msg += fmt.Sprintf("（命中禁值参数 %q）", arg)
+			}
+			return at(ctx, "call", msg)
 		},
 	}
 }
@@ -301,10 +417,16 @@ func excluded(ctx *MatchCtx, b Ban) bool {
 }
 
 func banMessage(b Ban, seen string) string {
-	if b.Reason != "" {
-		return fmt.Sprintf("%s is banned: %s", seen, b.Reason)
+	if b.Reason == "" && b.Use == "" {
+		return fmt.Sprintf("%s is banned by policy", seen)
 	}
-	return fmt.Sprintf("%s is banned by policy", seen)
+	if b.Reason == "" {
+		return fmt.Sprintf("%s is banned；替代写法：%s", seen, b.Use)
+	}
+	if b.Use != "" {
+		return fmt.Sprintf("%s is banned: %s；替代写法：%s", seen, b.Reason, b.Use)
+	}
+	return fmt.Sprintf("%s is banned: %s", seen, b.Reason)
 }
 
 func at(ctx *MatchCtx, capture, msg string) *model.Finding {

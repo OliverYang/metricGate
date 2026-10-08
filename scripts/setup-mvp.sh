@@ -1,0 +1,22 @@
+#!/bin/bash
+set -e
+echo "========================================"
+echo "MetricGate Constraint MVP 初始化"
+echo "========================================"
+echo ""
+echo "📁 创建目录结构..."
+mkdir -p docs templates/constraints scripts reports
+echo "✅ 目录创建完成"
+echo ""
+echo "📝 已创建的文档:"
+echo "  - MVP_PLAN.md (详细实施计划)"
+echo "  - README_MVP.md (快速开始指南)"
+echo "  - docs/constraint-inventory.md (约束清单)"
+echo "  - docs/interview-questions.md (访谈问题)"
+echo ""
+echo "🎯 下一步:"
+echo "  1. 阅读 MVP_PLAN.md"
+echo "  2. 开始填写 constraint-inventory.md"
+echo "  3. (可选) 访谈团队成员"
+echo ""
+echo "💪 加油！4 周时间足够跑通整个流程!"

@@ -19,7 +19,7 @@ func TestParseNumstat(t *testing.T) {
 func TestHotspotFormulaAndOrdering(t *testing.T) {
 	// max churn 200. a.go churn=100 MI=50 -> .5*50=25;
 	// b.go churn=200 MI=90 -> 1*10=10; c.go churn=50 no MI -> .25*100=25.
-	got := rank(map[string]int{"a.go": 100, "b.go": 200, "c.go": 50}, map[string]float64{"a.go": 50, "b.go": 90}, 10)
+	got := scoreFiles(map[string]int{"a.go": 100, "b.go": 200, "c.go": 50}, map[string]float64{"a.go": 50, "b.go": 90}, nil, 10)
 	if len(got) != 3 {
 		t.Fatalf("got %d hotspots", len(got))
 	}
@@ -34,34 +34,23 @@ func TestHotspotFormulaAndOrdering(t *testing.T) {
 	}
 }
 
-func TestHotspotTopCap(t *testing.T) {
-	got := rank(map[string]int{"a": 10, "b": 9, "c": 8}, nil, 2)
-	if len(got) != 2 || got[0].File != "a" || got[1].File != "b" {
-		t.Errorf("top cap = %+v", got)
+// Risk annotates a hotspot without changing its churn-based score or order.
+func TestRiskAnnotatesWithoutReordering(t *testing.T) {
+	churn := map[string]int{"a.go": 100, "b.go": 200}
+	got := scoreFiles(churn, nil, map[string]float64{"a.go": 42.5}, 10)
+	if len(got) != 2 || got[0].File != "b.go" {
+		t.Fatalf("order changed: %+v", got)
+	}
+	if got[1].File != "a.go" || got[1].Risk != 42.5 || got[0].Risk != 0 {
+		t.Errorf("risk annotation wrong: %+v", got)
 	}
 }
 
-// rank is the pure scoring half of Compute, factored so the exact formula
-// can be checked without a git subprocess.
-func rank(churn map[string]int, mis map[string]float64, max int) []FileHotspot {
-	maxChurn := 0
-	for _, c := range churn {
-		if c > maxChurn {
-			maxChurn = c
-		}
+func TestHotspotTopCap(t *testing.T) {
+	got := scoreFiles(map[string]int{"a": 10, "b": 9, "c": 8}, nil, nil, 2)
+	if len(got) != 2 || got[0].File != "a" || got[1].File != "b" {
+		t.Errorf("top cap = %+v", got)
 	}
-	if maxChurn == 0 {
-		return nil
-	}
-	var out []FileHotspot
-	for file, c := range churn {
-		debt := 100.0
-		if mi, ok := mis[file]; ok && mi > 0 {
-			debt = 100 - mi
-		}
-		out = append(out, FileHotspot{File: file, Churn: c, MI: mis[file], Score: float64(c) / float64(maxChurn) * debt})
-	}
-	return sortAndLimit(out, max)
 }
 
 func TestComputeRejectsNonGitDirectory(t *testing.T) {

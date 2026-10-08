@@ -1,177 +1,120 @@
 // Package metrics provides language-agnostic complexity metrics.
 // The IR (Intermediate Representation) layer decouples AST parsing from
-// scoring logic, enabling easy addition of new languages.
+// scoring logic, so a language's grammar knowledge lives in exactly one
+// adapter and every scoring rule lives in exactly one engine.
 package metrics
 
-// LogicalOp represents normalized logical operators across languages.
-type LogicalOp string
-
-const (
-	LogicalAnd        LogicalOp = "&&"
-	LogicalOr         LogicalOp = "||"
-	LogicalCoalesce   LogicalOp = "??"
-)
-
 // SwitchCase represents one arm of a switch statement.
+//
+// IsDefault marks the arm that opens no new decision path (Go default_case,
+// Java `default:` switch_label).
 type SwitchCase struct {
-	IsDefault bool   // true for default/arm without decision
-	Body      []Node // body nodes
+	IsDefault bool
+	Body      []Node
 }
 
-// Node is the language-agnostic intermediate representation for complexity analysis.
-// Each node type maps to specific cognitive/cyclomatic scoring rules defined in
-// the engine package. All scoring logic lives in engine.Analyze(); this IR carries
-// no scores itself.
+// Node is the language-agnostic intermediate representation for complexity
+// analysis. Nodes carry shape only — every scoring rule lives in engine.go, so
+// a construct's cost is defined exactly once for all languages.
 //
-// Design principles:
-// - Every construct that affects complexity has its own variant
-// - Transparent containers (Group) recurse without scoring
-// - Functions are measured independently (nesting resets at function boundary)
-// - Nested functions appear as children, not inflating parent's score
+// Adapters must lower every child of every AST node: a construct an adapter
+// does not recognize has to surface as Group, or inside another node's Test,
+// Init or Body — never as nothing. Dropped children silently lose complexity,
+// which is how the first draft of these adapters under-scored every switch.
 type Node interface {
 	isNode()
 }
 
-// Function represents a function-like unit (function, method, closure, lambda, etc.).
-// The engine scores each independently; nesting resets to 0 at this boundary.
+// Function is one lowered function-like unit: what an adapter produces from a
+// declaration node and what the Engine scores. It is deliberately not a Node —
+// a unit is the thing being measured, never something measured inside another.
+// Declarations nested inside a body (a Java anonymous class's method, say)
+// lower transparently, so their statements are charged to the enclosing unit.
 type Function struct {
-	Name string   // function name (opaque to engine)
-	Kind string   // "function", "method", "closure", "lambda", etc.
-	Line uint32   // 1-based line number where function starts
-	Body []Node   // body nodes
+	Name string // function name, as the report labels it
+	Kind string // "function", "method", "constructor", ...
+	Line uint32 // 1-based line where the declaration starts
+	Body []Node
 }
 
-func (Function) isNode() {}
+// Lambda represents an inline function body (Go func_literal, Java
+// lambda_expression) whose statements are scored into the *enclosing*
+// function, one nesting level deeper.
+type Lambda struct {
+	Body []Node
+}
 
-// Branch represents an if/else or else-if chain.
-// Scoring: +1 cognitive + nesting bonus for 'then', +1 flat cognitive for 'alternate'.
+func (Lambda) isNode() {}
+
+// Branch represents an if statement, with its else / else-if chain reachable
+// through Alternate (a nested Branch for `else if`, otherwise the else body).
 type Branch struct {
-	Test      []Node // condition expression
-	Then      []Node // consequent body (nested)
-	Alternate Node   // else or else-if (nil if none)
+	Test      []Node
+	Then      []Node
+	Alternate Node // nil when the if has no else
 }
 
 func (Branch) isNode() {}
 
-// Conditional represents a ternary expression (?:).
-// Scoring: +1 cognitive + nesting bonus.
+// Conditional represents an expression-level choice whose value is one of two
+// arms: the Java ternary, and in future languages a match expression.
 type Conditional struct {
-	Test      []Node // condition
-	Then      []Node // true branch
-	Alternate []Node // false branch
+	Test      []Node
+	Then      []Node
+	Alternate []Node
 }
 
 func (Conditional) isNode() {}
 
 // Loop represents any loop construct (for/while/do-while/foreach/range).
-// Scoring: +1 cognitive + nesting bonus, +1 cyclomatic.
+// Init carries the header expressions (iterator, condition, range source);
+// they sit inside the loop's nesting level, like the body.
 type Loop struct {
+	Init []Node
 	Body []Node
 }
 
 func (Loop) isNode() {}
 
-// Switch represents a switch/select/match statement.
-// Scoring: +1 cognitive + nesting bonus (switch itself is NOT cyclomatic);
-// each non-default case adds +1 cyclomatic.
+// Switch represents a switch/select/match statement. Init carries the
+// scrutinee and any initializer, which sit inside the switch's nesting level.
 type Switch struct {
+	Init  []Node
 	Cases []SwitchCase
 }
 
 func (Switch) isNode() {}
 
-// Catch represents an exception handler (try/catch/except).
-// Scoring: +1 cognitive + nesting bonus, +1 cyclomatic.
+// Catch represents an exception handler (catch/except/rescue clause).
 type Catch struct {
 	Body []Node
 }
 
 func (Catch) isNode() {}
 
-// Jump represents a labeled break/continue/goto.
-// Scoring: +1 cognitive only if labeled.
-type Jump struct {
-	Labeled bool // true for labeled jumps
-}
-
-func (Jump) isNode() {}
-
-// Logical represents a sequence of like logical operators.
-// Scoring: +1 cognitive per node, +1 cyclomatic per extra operand.
-// Adapters must fold runs of same-operator into single node (e.g., a && b && c -> one Logical with 3 operands).
+// Logical represents a run of like logical operators, already folded: `a &&
+// b && c` is one Logical holding three operands. A nested run of a *different*
+// operator appears as an operand that is itself a Logical. The operator itself
+// is not carried: every run costs the same whatever it joins.
 type Logical struct {
-	Op       LogicalOp
 	Operands []Node // at least 2 operands
 }
 
 func (Logical) isNode() {}
 
-// NullGuard represents explicit null-dependent control flow splits.
-// Examples: optional chaining (?->), safe navigation (&.), null-aware access.
-// Scoring: +1 cyclomatic per guard, NO cognitive/nesting impact.
-type NullGuard struct {
-	Body []Node
-}
-
-func (NullGuard) isNode() {}
-
-// Call represents a function call for recursion detection.
-// Scoring: +1 cognitive if callee matches enclosing function name (recursion).
-type Call struct {
-	Callee *string // function name being called (nil if unknown)
-}
-
-func (Call) isNode() {}
-
-// Group is a transparent container for constructs that hold children but carry
-// no score of their own (statements, expressions, blocks). The engine simply
-// recurses into it.
+// Group is a transparent container: the engine recurses into it and scores
+// nothing. Adapters use it for statements, blocks and expression wrappers.
 type Group []Node
 
 func (Group) isNode() {}
 
-// ModuleLevel represents top-level code in a file (module scope).
-// The engine wraps module-level nodes under an implicit "module" frame.
-type ModuleLevel []Node
-
-func (ModuleLevel) isNode() {}
-
-// FileReport represents the analysis result for a single source file.
-type FileReport struct {
-	Path            string // file path (relative to project root)
-	Cognitive       uint32 // total cognitive complexity
-	Cyclomatic      uint32 // total cyclomatic complexity
-	Functions       []FunctionReport // all functions at all nesting depths
-	ParseErrors     []string // parser errors (if any)
-}
-
-// FunctionReport represents metrics for a single function-like unit.
+// FunctionReport is the engine's verdict on one Function.
 type FunctionReport struct {
-	Name       string            // function name
-	Kind       string            // "function", "method", "closure", etc.
-	Line       uint32            // 1-based line number
-	Cognitive  uint32            // cognitive complexity score
-	Cyclomatic uint32            // cyclomatic complexity score
-	Children   []FunctionReport  // nested functions (independent scores)
-}
-
-// Summary represents project-wide rollup statistics across all files.
-// Complexity is right-skewed, so percentiles (not mean/stddev) describe the tail.
-type Summary struct {
-	FileCount         int
-	FunctionCount     int
-	ParseErrorCount   int
-	ParseErrorFileCount int
-	ParseErrorFiles   []string // paths of files with parse errors
-	Cognitive         MetricSummary
-	Cyclomatic        MetricSummary
-}
-
-// MetricSummary describes distribution of one metric over all functions.
-type MetricSummary struct {
-	Sum      uint32 // total sum
-	Max      uint32 // maximum value
-	Median   uint32 // 50th percentile
-	P90      uint32 // 90th percentile
-	P95      uint32 // 95th percentile
+	Name       string
+	Kind       string
+	Line       uint32 // 1-based
+	Cognitive  uint32
+	Cyclomatic uint32
+	MaxNesting uint32
+	NPath      uint64 // acyclic execution paths (Nejmeh 1988)
 }

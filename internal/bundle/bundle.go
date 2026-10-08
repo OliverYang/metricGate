@@ -399,15 +399,15 @@ func buildConstraints(eng *engine.Engine, decisions []selection.Decision) []Cons
 				continue
 			}
 			seen[key] = true
-			
+
 			explain := eng.ExplainRule(d.Language, ruleID)
 			out = append(out, Constraint{
-				ID: ruleID, 
-				Kind: "rule", 
+				ID:       ruleID,
+				Kind:     "rule",
 				Language: d.Language,
-				Enabled: explain.Enabled, 
+				Enabled:  explain.Enabled,
 				Severity: explain.Severity,
-				Source: explain.PolicySource,
+				Source:   explain.PolicySource,
 			})
 		}
 		// Add metrics
@@ -420,16 +420,16 @@ func buildConstraints(eng *engine.Engine, decisions []selection.Decision) []Cons
 				continue
 			}
 			seen[key] = true
-			
+
 			explain := eng.ExplainRule(d.Language, metricID)
 			out = append(out, Constraint{
-				ID: "metric:" + metricID, 
-				Kind: "metric", 
+				ID:       "metric:" + metricID,
+				Kind:     "metric",
 				Language: d.Language,
-				Enabled: explain.Enabled,
-				Warn: explain.Thresholds.Warn, 
-				Error: explain.Thresholds.Error,
-				Source: explain.PolicySource,
+				Enabled:  explain.Enabled,
+				Warn:     explain.Thresholds.Warn,
+				Error:    explain.Thresholds.Error,
+				Source:   explain.PolicySource,
 			})
 		}
 	}
