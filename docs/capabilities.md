@@ -193,7 +193,7 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 | 只闸新增 | `check -diff [-base ref]` | 规则 finding 看行号是否在 diff 内；函数级度量看区间是否与函数相交（"你碰了它就归你"）；`file-length` 只报**新增文件**；未跟踪文件视为全新增 |
 | 变差即报 | `check -diff -regress` | 对比 `-base`（默认 merge-base）报告"度量变差但没跨阈值"的函数 |
 | API 面快照/闸门 | `api snapshot -out F` · `api diff -base F` | 导出导出面；签名删除/变更即 exit 1 |
-| 架构形状漂移闸门 | `arch snapshot -out F` · `arch diff -base F` | 冻结包依赖方向；新增/删除任一方向即 exit 1（逐次运行的分层闸门抓不住的“架构形状变化”） |
+| 架构形状漂移闸门 | `arch snapshot -out F` · `arch diff -base F` | 冻结包依赖方向；新增/删除任一方向即 exit 1（逐次运行的分层闸门抓不住的“架构形状变化”）；`check -arch-base F` 把同一漂移变成 gate finding（默认 error）接入 pre-commit/CI |
 | 路径选择解释 | `explain [path]` | 这个文件为什么被纳入/排除？适用哪些规则、来自哪一层策略？ |
 | 策略来源追溯 | `rules explain list` · `rules explain <id>` · `rules presets` | 每个值的来源：`builtin` \| `policy_file` \| `preset:NAME`；`list` 含 `[graph]` 段，列出每条整图规则及武装它的策略键 |
 | 策略完备性审计 | `rules gaps [path]` | 逐条规则给出沉默的原因：`firing` / `armed` / `report_only` / `disabled` / `undeclared` / `flag_only` / `no_files`，外加 hot rules、分层覆盖缺口、按规则的压制计数 |
@@ -249,7 +249,7 @@ func Parse(a, b, c, d, e, f, g int) int { ... }
 | 命令 | 作用 | 主要 flag |
 |---|---|---|
 | `init [file]` | 写出起始策略 | `-preset` |
-| `check [path]` | 规则 + 度量 + 闸门 | `-sarif` `-diff` `-base` `-regress` `-format` `-preview` `-max-cognitive` `-max-cyclomatic` `-config` |
+| `check [path]` | 规则 + 度量 + 闸门 | `-sarif` `-diff` `-base` `-regress` `-format` `-preview` `-max-cognitive` `-max-cyclomatic` `-arch-base` `-config` |
 | `metrics [path]` | 逐文件度量表 | `-config` |
 | `stats [path]` | 分位数表 + 最差 scope | `-top` `-format` `-config` |
 | `context [path]` | 给 LLM 的约束包（预算受限） | `-max-chars` `-max-tokens` `-all` `-config` |
@@ -318,6 +318,7 @@ go run honnef.co/go/tools/cmd/staticcheck@latest ./...   # 零告警
 gofmt -l internal/ cmd/             # 空
 ./metricgate check .                # 用自己检查自己（dogfood）
 ./metricgate check . -diff          # 只报本次改动新增的（hook / CI 用的就是这个）
+./metricgate check . -arch-base arch.json   # 架构形状漂移也一并闸住（pre-commit/CI 推荐带此旗标）
 ./metricgate calls                  # 读本地 MCP 调用日志（默认关闭，见 workflow.md）
 ```
 

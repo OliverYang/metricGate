@@ -37,4 +37,14 @@ if ! git rev-parse --verify --quiet HEAD >/dev/null; then
     exit 0
 fi
 
-exec "$bin" check . -diff
+# The architecture-shape gate needs a blessed snapshot (arch snapshot). No
+# snapshot file, no arch gate — a documented degradation (the line below says
+# so), never a silent one.
+archflags=""
+if [ -f "$PWD/arch.json" ]; then
+    archflags="-arch-base $PWD/arch.json"
+else
+    echo "pre-commit: no arch.json at repo root; arch-drift gate inactive (run 'metricgate arch snapshot' to bless one)" >&2
+fi
+
+exec "$bin" check . -diff $archflags
