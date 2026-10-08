@@ -5,7 +5,7 @@
 > 与 `value-proof.md` 的分工：那篇讲**方法论**（该证明什么、什么会推翻它），
 > 本文讲**结论**（现在相信什么、不信什么、还没测什么）。
 >
-> 最后更新：2026-09-28。状态会变，证据指针不会。
+> 最后更新：2026-10-08。状态会变，证据指针不会。
 
 ## 状态图例
 
@@ -33,10 +33,12 @@
 | 11 | 成本 ≈ 0（0 token、毫秒级） | ✅ | `evaluation.md` | 只证明"便宜"，不证明"有用"，必须叠在 6/7/8/9 之上 |
 | 12 | 知识论证不随模型变强而衰减 | ✅ | `value-proof.md` §3（结构性论证，非实验） | 与"能力论证"（#2）相反：仓库约束不在权重里，且每天在变 |
 | 13 | 容错解析：语法错误降级为 info，不中断整轮 | ✅ | 2026-09-28 修复后实测（见下"本轮修复"） | **修复前这条是假的**：finding 被覆盖丢弃、`ParseErrors` 从不写入 |
-| 14 | 闭环收敛：每千 token 的违规避免数提升 | ⏳ | 设计见 `ab-experiment.md`（**R2，未跑**） | 端点必须落在编译器抓不到的地方（#6/#7/#5/#4） |
-| 15 | 闸门在真实 agent 循环里被调用、findings 被修掉 | ⏳ | **装置就绪**：`workflow.md` §4（MCP `-calllog` + `metricgate calls`）；真实会话**未跑** | **它决定量级**：每任务调用 < 1 次 ⇒ 循环内通道是理论的。现在能回答了，缺的是真实数据 |
+| 14 | 闭环收敛：每千 token 的违规避免数提升 | ⚠️ | R2 修复端点 **0.0041**、R3 预防端点 **0.0014** 违规避免/千 token（均高于弃置线 >0，H2 弱确认；`evaluation-r2-stability.md`、`evaluation-r3-grounding.md` §6） | 修复路径成立（7/7 一轮收敛为主）；预防路径 31.8%→4.5% 但**生成成本膨胀 1.74× 未分解**（A 臂同条件重跑待做）——引用时必须带这个未决项 |
+| 15 | 闸门在真实 agent 循环里被调用、findings 被修掉 | ⏳ | **装置就绪且已接线**：`workflow.md` §4（MCP `-calllog` + `metricgate calls`）；2026-10-08 接入真实 harness（见下"接线落地"）；真实会话数据**采集中** | **它决定量级**：每任务调用 < 1 次 ⇒ 循环内通道是理论的。现在能回答了，缺的是真实数据 |
 | 16 | 拦下幻觉包 / 未声明的新依赖 | ⏳ | R1 未触达（任务都是单文件新增） | `unknown-dependency` 逻辑存在且有测试，但**基率未测** |
 | 17 | 克隆检测 / 依赖白名单的基率 | ⏳ | R1 §5 局限 5：**0% 是设计局限，不是"无价值"的证据** | 单文件新增任务天然不产生克隆 |
+| 18 | 防住 B 类架构违规（R3 唯一未防类别） | ⏳ | **装置就绪**：digest 跨层惯用法节（生成前）、layer-violation 结构修法后缀（修复期）、`arch snapshot/diff` 漂移闸门（长周期，42 包/151 方向已 bless）——`docs/design/arch-guard-design.md`；预防收益 **M2 未跑**（判定线：≥3/5） | R3 B 类 0/1 滑脱、修复 6.59× 最贵；三项机制全部落地并过测试，但"惯用法注入能否在生成期防住"仍是假设，M2 之前不能说"能防" |
+| 19 | 抓 LLM 特有的代码形态劣化（路径爆炸/扇出/旗标参数/伪绿测试） | ⏳ | **检查项已落地**：npath/fan-out/boolean-params/call-chain-depth/test-no-assert（论文出处见 `docs/metrics.md` 与 `docs/capabilities.md`）；**人类基线已测**：npath p50=4/p90=48、fan-out p50=4、bool p50=0，阈值落在分布尾部（`evaluation-m2b-paper-metrics-protocol.md`） | 复杂度家族对 LLM 的收益已被 R1/R3 间接测量；新四项对 LLM 的**特异性未测**——M2-B 三臂协议已预注册，跑批前不能说"抓 LLM 特有失败" |
 
 ## 已从文档中删除的说法
 
@@ -65,7 +67,20 @@
    任何提示、任何编译器都看不见的。（#9）
 
 不能说的：更快找到代码（#3 ❌）、更少幻觉（#2 ❌）、防住了重复（#4 ⚠️ 只说 20%）、
-检出更多（#1 ❌）。以及任何 #14–#17 的量级断言 —— 那些还没测。
+检出更多（#1 ❌）。以及 #15–#19 的量级断言（真实循环采纳率、B 类预防率、LLM 特异性）——
+那些装置已就绪、数据还没到。
+
+## 接线落地（2026-10-08）
+
+#15 的装置从"仓库里有"推进到"接进了真实 harness"：
+
+| 落地项 | 位置/命令 | 状态 |
+|---|---|---|
+| pi harness 接入 MCP 闸门 | `.pi/mcp.json`（项目级）→ `go build -o /tmp/metricgate-mcp ./cmd/metricgate-mcp`，带 `-calllog 1` 启动 | 已配置（项目级优先于用户级；`.metricgate/` 已在 .gitignore） |
+| pre-commit hook 安装 | `git config core.hooksPath hooks`（版本化共享，非拷贝） | 已安装 |
+| 调用日志采集 | `.metricgate/mcp-calls.jsonl`（`metricgate calls` 汇总） | 0 数据起；#15 的 R6 证据由此持续累积 |
+
+验证：MCP 注册 `pi mcp list` 可见；hook 装后任意 `git commit` 会跑 `check -diff`（三情形已验证：无提交仓库 exit 0、干净提交 exit 0、新增行越界 exit 1）。
 
 ## 本轮修复（代码 + 文档）
 
@@ -140,10 +155,10 @@
 ## 复现
 
 ```bash
-go build ./... && go test ./...            # 25 包
+go build ./... && go test ./internal/...      # 34 包（当前状态；当时的 25 包见 2026-09-28 记录）
 go run honnef.co/go/tools/cmd/staticcheck@latest ./...   # 零告警
 gofmt -l internal/ cmd/                    # 空
-./metricgate check .                       # 1 error / 66 warnings（既有）
+./metricgate check .                       # 1 error（既有 explain_cmd.go:45）/ ~200 warnings
 
 # 台账 #13 的复现：语法错误文件必须报 parse-error
 mkdir -p /tmp/mg-broken && cd /tmp/mg-broken
