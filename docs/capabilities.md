@@ -269,7 +269,7 @@ func Parse(a, b, c, d, e, f, g int) int { ... }
 | `explain [path]` | 路径选择与适用规则解释 | `-preview` `-format` |
 | `api snapshot -out F` · `api diff -base F` | API 面快照 / 破坏性变更闸门 | `-out` `-base` `-format` |
 | `arch snapshot -out F` · `arch diff -base F` | 架构形状快照 / 漂移闸门 | `-out` `-base` `-format` |
-| `constraints digest` | 非标约束摘要：按包裁剪的分层契约/禁用API/阈值/复用清单/红线，注入生成前（R3 实测 31.8%→4.5%） | `-pkg` `-config` `-lang` `-format` `-no-reuse` |
+| `constraints digest` | 非标约束摘要：按包裁剪的分层契约/禁用API/包内依赖先例/阈值/复用清单/红线，注入生成前（R3 实测 31.8%→4.5%） | `-pkg` `-config` `-lang` `-format` `-no-reuse` |
 | `constraints extract` | 非标规范文档→条款→三档判型（✅/⚠️/❌）+ policy 查重→候选 YAML | `-file` `-lang` `-config` `-format` `-out` |
 | `constraints status` | 约束落地后的检出情况：逐规则命中/零命中/不适用（按语言分流）+ 闸门预判 | `-config` `-format` |
 | `constraints rule` | 规则集成接口：Spec JSON+fixture → 引擎真跑验证（反例必中/正例零误伤）→ PASS/FAIL + 可合并 policy 片段（节点落盘可改可重跑可回退） | `-spec` `-bad` `-good` `-config` `-format` `-out` |

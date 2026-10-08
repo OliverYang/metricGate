@@ -39,6 +39,14 @@ type Options struct {
 	Index *symbols.Index
 	// TargetPkg is the package filter applied to Index entries. Empty = Index unfiltered.
 	TargetPkg string
+	// Imports are the raw import strings of the TARGET package's own files
+	// (facts.FileFacts.Imports: Go carries an optional "alias path" prefix,
+	// Java the whole "import x.y.Z;" statement). They feed the in-package
+	// dependency-precedent section: the target package's existing legal
+	// imports are the cheapest compliance injection (M2-B V1/V2: agents
+	// imitate in-package precedents instead of reaching across layers).
+	// Nil/empty → section omitted.
+	Imports []string
 	// PackageResolved reports whether the caller's facts walk confirmed the
 	// target package exists. False + non-empty Package makes Build append the
 	// unknown-target warning BEFORE rendering, so both text and JSON forms
@@ -144,7 +152,11 @@ func buildWarnings(cfg *config.Config, lang string, opts Options) []string {
 // buildSections assembles the optional sections in LLM-priority order
 // (layer contract first, red lines last); a section with no lines is
 // omitted. banSection is pure, so calling it here and in buildWarnings is
-// cheap and keeps each helper single-purpose.
+// cheap and keeps each helper single-purpose. 包内依赖先例 sits next to
+// 依赖白名单: the allowlist says what is legal in general, the precedents
+// say what THIS package already does (M2-B: in-package precedents are the
+// cheapest compliance injection — V1/V2 agents imitated them and never
+// reached across layers).
 func buildSections(cfg *config.Config, lang string, opts Options, maxSym int) []Section {
 	banLines, banSrcs, _ := banSection(cfg, lang, opts.Package)
 	builders := []sectionBuilder{
@@ -160,6 +172,10 @@ func buildSections(cfg *config.Config, lang string, opts Options, maxSym int) []
 		func() (Section, bool) {
 			lines, srcs := depsSection(cfg)
 			return wrap("依赖白名单", lines, srcs)
+		},
+		func() (Section, bool) {
+			lines, srcs := precedentSection(opts.Imports, opts.Package, opts.Lang, cfg)
+			return wrap("包内依赖先例", lines, srcs)
 		},
 		func() (Section, bool) {
 			lines, srcs := thresholdSection(cfg, lang)
@@ -438,6 +454,88 @@ func depsSection(cfg *config.Config) ([]string, []string) {
 	}
 	lines = append(lines, "清单之外的 import 会被 unknown-dependency 拦截（std 库除外）")
 	return lines, srcs
+}
+
+// precedentSection lists the target package's EXISTING in-repo imports as
+// dependency precedents (M2-B V1/V2 finding: agents facing a blank choose
+// the import path by imitation — in-package precedents made U04's core→adapter
+// violation disappear without any digest injection, while V3 (no precedent)
+// violated in L0). Rendered only for internal/ imports of a named target
+// package: std and third-party imports are not architecture decisions.
+// The section complements 依赖白名单 (what is allowed in general) with what
+// THIS package already does (the concrete legal route to imitate).
+func precedentSection(raw []string, pkg string, lang string, cfg *config.Config) ([]string, []string) {
+	if pkg == "" || len(raw) == 0 {
+		return nil, nil
+	}
+	java := lang == "java"
+	var lines []string
+	seen := map[string]bool{}
+	for _, imp := range raw {
+		p := precedentPath(imp, java, cfg.Dependencies.Self)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		lines = append(lines, "本包已依赖 "+p)
+	}
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	sort.Strings(lines)
+	lines = append(lines, "以上是包内已验证的合法依赖方向；新增依赖前先确认分层契约允许，需要跨层能力时优先复用既有依赖暴露的能力")
+	return lines, []string{"facts:" + pkg + "#imports"}
+}
+
+// isInternalImport reports whether an import path points inside the repo's
+// own internal/ tree (module prefix optional: "internal/x" and
+// "metricgate/internal/x" both qualify). std and third-party imports are not
+// architecture decisions, so they never become precedents.
+func isInternalImport(p string) bool {
+	return strings.HasPrefix(p, "internal/") || strings.Contains(p, "/internal/")
+}
+
+// precedentPath normalises one raw import string to a bare precedent path,
+// or "" when the import is not a precedent: Go wants in-repo internal/
+// imports (alias prefix stripped); Java wants the statement text cleaned and
+// only imports inside the declared module self prefixes (no internal/
+// convention). lang selects the family; a Go-digest caller may still pass a
+// stray "import …" statement and it is cleaned anyway.
+func precedentPath(raw string, java bool, self []string) string {
+	p := raw
+	isJava := java || strings.HasPrefix(strings.TrimSpace(p), "import ")
+	if isJava {
+		// Java facts store the whole statement: import x.y.Z; / import static x.y.Z;
+		p = strings.TrimPrefix(p, "import ")
+		p = strings.TrimSuffix(strings.TrimSpace(p), ";")
+		if i := strings.LastIndex(p, " "); i >= 0 {
+			p = p[i+1:]
+		}
+		p = strings.Trim(p, "\"")
+		if !hasSelfPrefix(p, self) {
+			return ""
+		}
+		return p
+	}
+	if i := strings.Index(p, " "); i >= 0 {
+		p = p[i+1:] // drop the Go alias prefix; the path is the last word
+	}
+	p = strings.Trim(p, "\"")
+	if !isInternalImport(p) {
+		return ""
+	}
+	return p
+}
+
+// hasSelfPrefix reports whether p lives inside one of the declared module
+// self prefixes (the repo's own Java code).
+func hasSelfPrefix(p string, self []string) bool {
+	for _, s := range self {
+		if strings.HasPrefix(p, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // thresholdSection reports effective thresholds via the engine's own

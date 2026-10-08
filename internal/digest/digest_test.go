@@ -309,3 +309,57 @@ func TestBuildCrossLayerIdiom(t *testing.T) {
 	repo := Build(cfg, Options{Lang: "go"})
 	assertDigestNotContains(t, repo.Rendered, "跨层惯用法", "repo-wide digest has no idiom section")
 }
+
+// The in-package dependency-precedent section lists the target package's own
+// internal/ imports (M2-B V1/V2: agents imitate in-package precedents), with
+// Go alias prefixes and Java statement text cleaned.
+func TestBuildDependencyPrecedent(t *testing.T) {
+	cfg := testConfig(t, fullPolicy)
+
+	res := Build(cfg, Options{
+		Package:         "internal/engine",
+		Lang:            "go",
+		PackageResolved: true,
+		Imports: []string{
+			"metricgate/internal/model",
+			"sym metricgate/internal/symbols", // Go alias prefix must be stripped
+			"metricgate/internal/model",       // duplicate must collapse
+			"fmt",                             // std is not an architecture decision
+			"example.com/x",                   // third-party likewise
+		},
+	})
+	assertDigestContains(t, res.Rendered, "■ 包内依赖先例", "precedent section present")
+	assertDigestContains(t, res.Rendered, "本包已依赖 metricgate/internal/model", "module-prefixed import listed")
+	assertDigestContains(t, res.Rendered, "本包已依赖 metricgate/internal/symbols", "alias prefix stripped")
+	assertDigestNotContains(t, res.Rendered, "本包已依赖 fmt", "std imports excluded")
+	assertDigestNotContains(t, res.Rendered, "本包已依赖 example.com/x", "third-party excluded")
+	assertDigestContains(t, res.Rendered, "以上是包内已验证的合法依赖方向", "imitation instruction")
+	found := false
+	for _, s := range res.Sections {
+		if s.Name == "包内依赖先例" {
+			found = true
+			if len(s.Sources) != 1 || s.Sources[0] != "facts:internal/engine#imports" {
+				t.Errorf("precedent sources = %v, want facts:internal/engine#imports", s.Sources)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("precedent section missing from Sections")
+	}
+
+	// Java statement form is cleaned too; precedent = import inside the
+	// module self prefix (org.osc.scan.portal).
+	jres := Build(cfg, Options{
+		Package:         "org/osc/scan/portal/service",
+		Lang:            "java",
+		PackageResolved: true,
+		Imports:         []string{"import org.osc.scan.portal.dao.UserDao;"},
+	})
+	assertDigestContains(t, jres.Rendered, "本包已依赖 org.osc.scan.portal.dao.UserDao", "java statement cleaned")
+
+	// No imports / no target package → no section.
+	none := Build(cfg, Options{Package: "internal/engine", Lang: "go", PackageResolved: true})
+	assertDigestNotContains(t, none.Rendered, "包内依赖先例", "no imports → no section")
+	repo := Build(cfg, Options{Lang: "go", Imports: []string{"metricgate/internal/model"}})
+	assertDigestNotContains(t, repo.Rendered, "包内依赖先例", "repo-wide digest has no precedent section")
+}

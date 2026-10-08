@@ -442,6 +442,11 @@ func collectWalk(cfg *config.Config, in digestFlags) digest.Options {
 			if opts.Lang == "" {
 				opts.Lang = f.Language
 			}
+			// In-package import precedents for the dependency-precedent
+			// section: production files only (tests chase whatever they like).
+			if !strings.HasSuffix(f.File, "_test.go") && !strings.HasSuffix(f.File, "Test.java") {
+				opts.Imports = append(opts.Imports, f.Imports...)
+			}
 		}
 	}
 	if opts.Lang == "" {
