@@ -216,7 +216,12 @@ func (c *Config) explainBanEntry(lang string) RuleExplain {
 // MetricThresholdsFor returns a metric's configured warn/error pair.
 func (c *Config) MetricThresholdsFor(lang, metricID string) MetricThresholds {
 	warn, errAt, _ := c.MetricThresholds(lang, metricID)
-	return MetricThresholds{Warn: warn, Error: errAt}
+	return MetricThresholds{
+		Warn:     warn,
+		Error:    errAt,
+		WarnOff:  c.MetricWarnOff(lang, metricID),
+		ErrorOff: c.MetricErrorOff(lang, metricID),
+	}
 }
 
 // explainThresholds reads the warn/error pair of a metric.
@@ -233,10 +238,14 @@ type RuleExplain struct {
 	PolicySource string
 }
 
-// MetricThresholds holds the warn/error thresholds for a metric.
+// MetricThresholds holds the warn/error thresholds for a metric. A WarnOff
+// / ErrorOff flag records an explicit `warn: off` / `error: off` in the
+// policy — the corresponding int is 0 but means "disabled", not "default".
 type MetricThresholds struct {
-	Warn  int
-	Error int
+	Warn     int
+	Error    int
+	WarnOff  bool
+	ErrorOff bool
 }
 
 // ExplainAllPaths returns decisions for all files under root that would be scanned.

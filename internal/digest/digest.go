@@ -448,12 +448,15 @@ func thresholdSection(cfg *config.Config, lang string) ([]string, []string) {
 	for _, row := range thresholdRows {
 		w, e := engine.EffectiveThresholds(cfg, lang, row.id)
 		if w == 0 && e == 0 {
-			continue // metric disabled
+			continue // metric disabled (or both levels off)
 		}
-		if e > 0 {
+		switch {
+		case w > 0 && e > 0:
 			lines = append(lines, fmt.Sprintf("%s ≤%d（超过 %d 为错误）— 超出即拆函数", row.label, w, e))
-		} else {
-			lines = append(lines, fmt.Sprintf("%s ≤%d — 超出即拆函数", row.label, w))
+		case w > 0:
+			lines = append(lines, fmt.Sprintf("%s ≤%d（error 已关闭，只告警）— 超出即拆函数", row.label, w))
+		default:
+			lines = append(lines, fmt.Sprintf("%s 超过 %d 为错误（warn 已关闭）", row.label, e))
 		}
 		srcs = append(srcs, "builtin:metrics."+row.id)
 	}

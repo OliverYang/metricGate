@@ -186,7 +186,14 @@ func printPreset(p config.Preset) {
 	for _, lang := range sortedKeys(p.MetricThresholds) {
 		for _, metricID := range sortedKeys(p.MetricThresholds[lang]) {
 			mc := p.MetricThresholds[lang][metricID]
-			fmt.Printf("  [%s] metric %s -> warn=%d, error=%d\n", lang, metricID, mc.Warn, mc.Error)
+			w, e := fmt.Sprintf("%d", mc.Warn), fmt.Sprintf("%d", mc.Error)
+			if mc.WarnOff {
+				w = "off"
+			}
+			if mc.ErrorOff {
+				e = "off"
+			}
+			fmt.Printf("  [%s] metric %s -> warn=%s, error=%s\n", lang, metricID, w, e)
 		}
 	}
 	fmt.Println()
@@ -206,7 +213,19 @@ func explainRule(cfg *config.Config, lang, ruleID, format string) {
 	fmt.Printf("  Reason:      %s\n", explain.Reason)
 	fmt.Printf("  Severity:    %s\n", explain.Severity)
 	fmt.Printf("  Source:      %s\n", explain.PolicySource)
-	fmt.Printf("  Thresholds:  warn=%d, error=%d\n", explain.Thresholds.Warn, explain.Thresholds.Error)
+	switch {
+	case explain.Thresholds.WarnOff || explain.Thresholds.ErrorOff:
+		w, e := "off", "off"
+		if !explain.Thresholds.WarnOff {
+			w = fmt.Sprintf("%d", explain.Thresholds.Warn)
+		}
+		if !explain.Thresholds.ErrorOff {
+			e = fmt.Sprintf("%d", explain.Thresholds.Error)
+		}
+		fmt.Printf("  Thresholds:  warn=%s, error=%s\n", w, e)
+	default:
+		fmt.Printf("  Thresholds:  warn=%d, error=%d\n", explain.Thresholds.Warn, explain.Thresholds.Error)
+	}
 }
 
 // valueSource reports where a dotted policy key's value came from.

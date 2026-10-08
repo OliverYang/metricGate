@@ -26,15 +26,15 @@ languages:
       params-count:          { warn: 5,  error: 8 }
       # fan-out (Yourdon & Constantine) and boolean-params (Fowler's flag
       # argument smell) also start in an observation period: warn at the
-      # defaults, error placed above the repo's current max so nothing
-      # blocks until the first findings pass review.
-      fan-out:               { warn: 10, error: 50 }
-      boolean-params:        { warn: 2,  error: 10 }
+      # defaults, error turned off entirely (`error: off`) so nothing blocks
+      # until the first findings pass review — then set a real error line.
+      fan-out:               { warn: 10, error: off }
+      boolean-params:        { warn: 2,  error: off }
       # npath-complexity (Nejmeh 1988, AT&T/checkstyle limit 200) starts in an
       # observation period: warn at the published 200 so findings are visible,
-      # error set above the repo's current max (3072) so nothing blocks until
-      # the first findings pass review — then tune error down toward 200.
-      npath-complexity:      { warn: 200, error: 5000 }
+      # error off so nothing blocks until the first findings pass review —
+      # then set a real error line (previously a magic 5000 above the repo max).
+      npath-complexity:      { warn: 200, error: off }
     # each entry into the same deterministic rule pipeline (same findings, same
     # severities, same `metricgate: ignore` suppression).
     banned-api:
@@ -67,10 +67,10 @@ languages:
       file-length:           { warn: 400, error: 800 }
       nesting-depth:         { warn: 4,  error: 6 }
       params-count:          { warn: 5,  error: 8 }
-      # Same observation period as the Go section above.
-      fan-out:               { warn: 10, error: 50 }
-      boolean-params:        { warn: 2,  error: 10 }
-      npath-complexity:      { warn: 200, error: 5000 }
+      # Same observation period as the Go section above (error: off).
+      fan-out:               { warn: 10, error: off }
+      boolean-params:        { warn: 2,  error: off }
+      npath-complexity:      { warn: 200, error: off }
     banned-api:
       - match: System.out.print*
         reason: direct System.out.print* writes to the console, bypassing structured logging

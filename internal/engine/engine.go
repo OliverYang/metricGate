@@ -324,10 +324,19 @@ func EffectiveThresholds(cfg *config.Config, lang, metricID string) (warn, errAt
 	if enabled != nil && !*enabled {
 		return 0, 0
 	}
-	if w > 0 {
+	// An explicit `warn: off` / `error: off` disables that severity level
+	// entirely (resolved to 0, which the verdict logic reads as "cannot fire");
+	// it takes precedence over any value — including the default — for that
+	// level only. The other level keeps default-or-override semantics.
+	warnOff, errOff := cfg.MetricWarnOff(lang, metricID), cfg.MetricErrorOff(lang, metricID)
+	if warnOff {
+		warn = 0
+	} else if w > 0 {
 		warn = w
 	}
-	if er > 0 {
+	if errOff {
+		errAt = 0
+	} else if er > 0 {
 		errAt = er
 	}
 	return warn, errAt

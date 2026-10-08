@@ -193,11 +193,26 @@ func limitLine(cfg *config.Config, lang parser.LanguageID, id string) string {
 	if en != nil && !*en {
 		return ""
 	}
-	if w > 0 {
+	// `warn: off` / `error: off` win over any value, then overrides apply.
+	warnOff, errOff := cfg.MetricWarnOff(string(lang), id), cfg.MetricErrorOff(string(lang), id)
+	if warnOff {
+		warn = 0
+	} else if w > 0 {
 		warn = w
 	}
-	if e > 0 {
+	if errOff {
+		errAt = 0
+	} else if e > 0 {
 		errAt = e
+	}
+	if warn == 0 && errAt == 0 {
+		return ""
+	}
+	if warnOff {
+		return fmt.Sprintf("- limit %s: warn off / error >%d", id, errAt)
+	}
+	if errOff {
+		return fmt.Sprintf("- limit %s: warn >%d / error off", id, warn)
 	}
 	return fmt.Sprintf("- limit %s: warn >%d / error >%d", id, warn, errAt)
 }

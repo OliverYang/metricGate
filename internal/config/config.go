@@ -49,11 +49,65 @@ type RuleConfig struct {
 }
 
 // MetricConfig overrides one metric's thresholds. A zero value means
-// "use the metric default".
+// "use the metric default" — which is why "off" has its own flag: warn: 0
+// cannot express "disabled" (it means "default").
+//
+// In YAML, `warn: off` / `error: off` disable that severity level entirely:
+// the metric can only ever fire the other level. This is the honest form of
+// the observation-period entry (`error: 5000` above the repo max was the
+// workaround). Either flag can combine with an explicit value for the other
+// level, e.g. `{ warn: 10, error: off }`.
 type MetricConfig struct {
 	Enabled *bool `yaml:"enabled,omitempty"`
 	Warn    int   `yaml:"warn,omitempty"`
 	Error   int   `yaml:"error,omitempty"`
+	// WarnOff/ErrorOff record an explicit `warn: off` / `error: off` in the
+	// policy file. Programmatic constructors (presets, CLI flags) leave them
+	// false and keep the plain-int semantics.
+	WarnOff  bool `yaml:"-"`
+	ErrorOff bool `yaml:"-"`
+}
+
+// UnmarshalYAML accepts ints or the scalar "off" (case-insensitive) for the
+// warn/error fields; any other string is a policy error, not a silent zero.
+func (m *MetricConfig) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		Enabled *bool     `yaml:"enabled"`
+		Warn    yaml.Node `yaml:"warn"`
+		Error   yaml.Node `yaml:"error"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	m.Enabled = raw.Enabled
+	for _, pair := range []struct {
+		node yaml.Node
+		slot *int
+		off  *bool
+		name string
+	}{
+		{raw.Warn, &m.Warn, &m.WarnOff, "warn"},
+		{raw.Error, &m.Error, &m.ErrorOff, "error"},
+	} {
+		n := pair.node
+		if n.Kind == 0 {
+			continue // field absent
+		}
+		if n.Kind == yaml.ScalarNode {
+			if strings.EqualFold(strings.TrimSpace(n.Value), "off") {
+				*pair.off = true
+				continue
+			}
+			var iv int
+			if err := n.Decode(&iv); err != nil {
+				return fmt.Errorf("metric %s: expected an integer or \"off\", got %q", pair.name, n.Value)
+			}
+			*pair.slot = iv
+			continue
+		}
+		return fmt.Errorf("metric %s: expected an integer or \"off\", got a %s", pair.name, n.Tag)
+	}
+	return nil
 }
 
 // LanguageConfig groups per-language overrides.
@@ -296,7 +350,8 @@ func (c *Config) RuleOptions(lang, ruleID string) map[string]any {
 }
 
 // MetricThresholds returns the configured thresholds for a metric. Zero
-// values mean "not overridden; use the metric default".
+// values mean "not overridden; use the metric default". Use MetricWarnOff /
+// MetricErrorOff to detect an explicit `off`.
 func (c *Config) MetricThresholds(lang, metricID string) (warn, errAt int, enabled *bool) {
 	sec, ok := langSection(c, lang)
 	if !ok {
@@ -307,6 +362,33 @@ func (c *Config) MetricThresholds(lang, metricID string) (warn, errAt int, enabl
 		return 0, 0, nil
 	}
 	return mc.Warn, mc.Error, mc.Enabled
+}
+
+// metricOff reports an explicit `warn: off` / `error: off` on the metric.
+func (c *Config) metricOff(lang, metricID string) (warnOff, errOff bool) {
+	sec, ok := langSection(c, lang)
+	if !ok {
+		return false, false
+	}
+	mc, ok := sec.Metrics[metricID]
+	if !ok {
+		return false, false
+	}
+	return mc.WarnOff, mc.ErrorOff
+}
+
+// MetricWarnOff reports whether the policy disables the metric's warning
+// level via `warn: off`.
+func (c *Config) MetricWarnOff(lang, metricID string) bool {
+	w, _ := c.metricOff(lang, metricID)
+	return w
+}
+
+// MetricErrorOff reports whether the policy disables the metric's error
+// level via `error: off`.
+func (c *Config) MetricErrorOff(lang, metricID string) bool {
+	_, e := c.metricOff(lang, metricID)
+	return e
 }
 
 // FailOn converts the gate setting into a Severity, defaulting to error.

@@ -80,9 +80,11 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 
 每个度量 id 同时是一个规则 id，来源标为 `metric`（区别于规则的 `rule`）。命中阈值时按 `value > warn` / `value > error` 生成 finding。
 
-## 4. 度量清单
-
 阈值比较语义：**严格大于**（`value > warn` → warning，`value > error` → error）。
+
+某一层级可整体关闭：`warn: off` / `error: off`（大小写不敏感）——该度量只剩另一层级，例如观察期写 `{ warn: 200, error: off }`（早期用远高于仓库极值的魔数如 `error: 5000` 表达同一意图，现已可直接关掉）。`0` 不是 off，是「未配置，用内置默认」。
+
+## 4. 度量清单
 
 ### 4.1 语言级（函数/文件作用域）
 
@@ -209,7 +211,7 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 | `gate` | `fail_on` | `error`（默认）/ `warning`：达到该级别即 exit 1 |
 | — | `exclude` | 按**目录名**跳过的目录 |
 | `languages.<id>` | `rules.<id>` | 单条规则的 `enabled` / `severity` / `options` |
-| | `metrics.<id>` | 单度量的 `enabled` / `warn` / `error` |
+| | `metrics.<id>` | 单度量的 `enabled` / `warn` / `error`（`warn: off` / `error: off` = 关闭该层级） |
 | | `banned-api` | 禁用清单（见 §3.2） |
 | | `banned-api-severity` | 该语言所有 ban 的兜底 severity |
 | `dependencies` | `allow` / `self` | 依赖白名单（见 §5.2） |
