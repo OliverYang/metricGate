@@ -38,7 +38,7 @@
 | 16 | 拦下幻觉包 / 未声明的新依赖 | ⏳ | R1 未触达（任务都是单文件新增） | `unknown-dependency` 逻辑存在且有测试，但**基率未测** |
 | 17 | 克隆检测 / 依赖白名单的基率 | ⏳ | R1 §5 局限 5：**0% 是设计局限，不是"无价值"的证据** | 单文件新增任务天然不产生克隆 |
 | 18 | 防住 B 类架构违规（R3 唯一未防类别） | ⏳ | **装置就绪**：digest 跨层惯用法节（生成前）、layer-violation 结构修法后缀（修复期）、`arch snapshot/diff` 漂移闸门（长周期，42 包/151 方向已 bless）——`docs/design/arch-guard-design.md`；预防收益 **M2 未跑**（判定线：≥3/5） | R3 B 类 0/1 滑脱、修复 6.59× 最贵；三项机制全部落地并过测试，但"惯用法注入能否在生成期防住"仍是假设，M2 之前不能说"能防" |
-| 19 | 抓 LLM 特有的代码形态劣化（路径爆炸/扇出/旗标参数/伪绿测试） | ⏳ | **检查项已落地**：npath/fan-out/boolean-params/call-chain-depth/test-no-assert（论文出处见 `docs/metrics.md` 与 `docs/capabilities.md`）；**人类基线已测**：npath p50=4/p90=48、fan-out p50=4、bool p50=0，阈值落在分布尾部（`evaluation-m2b-paper-metrics-protocol.md`） | 复杂度家族对 LLM 的收益已被 R1/R3 间接测量；新四项对 LLM 的**特异性未测**——M2-B 三臂协议已预注册，跑批前不能说"抓 LLM 特有失败" |
+| 19 | 抓 LLM 特有的代码形态劣化（路径爆炸/扇出/旗标参数/伪绿测试） | ⚠️（部分） | **检查项已落地**（论文出处见 `docs/metrics.md` 与 `docs/capabilities.md`）；**M2-B 30 run 已测**（`evaluation-m2b-results.md`）：boolean-params 超阈率 2.17% vs 人类 0.024%（≈90×）——模型特有失败模式实锤；npath/fan-out 低于人类基线（0×/0.13×）——是通用质量门禁而非模型特异性；test-no-assert 目标失败模式（伪绿测试）未被任务集触发，主张降回机制论证级 | 只能说：boolean-params 对 LLM 代码有特异性价值；不能说：npath/fan-out/test-no-assert "抓 LLM 特有失败" |
 
 ## 已从文档中删除的说法
 
@@ -67,8 +67,8 @@
    任何提示、任何编译器都看不见的。（#9）
 
 不能说的：更快找到代码（#3 ❌）、更少幻觉（#2 ❌）、防住了重复（#4 ⚠️ 只说 20%）、
-检出更多（#1 ❌）。以及 #15–#19 的量级断言（真实循环采纳率、B 类预防率、LLM 特异性）——
-那些装置已就绪、数据还没到。
+检出更多（#1 ❌）。以及 #15/#18 的量级断言（真实循环采纳率、B 类预防率——装置已就绪、
+数据还没到）；#19 只能说 boolean-params 的特异性（90×），不能外推到 npath/fan-out/test-no-assert。
 
 ## 接线落地（2026-10-08）
 

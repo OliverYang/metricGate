@@ -71,8 +71,9 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [evaluation-hint-and-cost.md](evaluations/evaluation-hint-and-cost.md) | 提示强度、探索成本与 SDP 冲突：三个后续实验设计 |
 | [evaluation-r2-repair-loop.md](evaluations/evaluation-r2-repair-loop.md) | **R2 修复回路实验（实测）**：findings JSON 喂回 agent 自修，7/7 达标、1.72× token、0 功能丢失 |
 | [evaluation-r3-grounding.md](evaluations/evaluation-r3-grounding.md) | **R3 前置接地实验（实测）**：constraints digest 注入，首过违规 31.8%→4.5%，P+B 复合终态 0/22 |
-| [evaluation-m2b-paper-metrics-protocol.md](evaluations/evaluation-m2b-paper-metrics-protocol.md) | **M2-B 协议（预注册，未执行）**：论文指标阈值（npath/fan-out/boolean-params 等）对 LLM 代码的净效应两臂实验 + 人类代码分布基线 |
+| [evaluation-m2b-paper-metrics-protocol.md](evaluations/evaluation-m2b-paper-metrics-protocol.md) | **M2-B 协议（预注册，已执行）**：论文指标阈值（npath/fan-out/boolean-params 等）对 LLM 代码的净效应三臂实验 + 人类代码分布基线 |
 | [evaluation-m2b-taskset-paper-metrics.md](evaluations/evaluation-m2b-taskset-paper-metrics.md) | **M2-B 任务集（预注册附件，已验证触发）**：10 任务落包 + 坏形状参考实现（npath/fan-out/boolean-params/test-no-assert/layer-violation 全部引擎实测 fire）+ 沙箱泄露点补充清单 + 三臂 prompt 模板 |
+| [evaluation-m2b-results.md](evaluations/evaluation-m2b-results.md) | **M2-B 执行报告（实测，30 run）**：H1 证伪（新阈值行注入净效应 0→digest 维持 curated）、H2 未触发、H3 部分成立（boolean-params 超阈率 90× 人类 = 模型特有；npath/fan-out 为通用门禁）；U04 未复现归因（包内先例救了 V1/V2）+ V3 L1 参数注入防住 B 类 |
 | [ab-experiment.md](evaluations/ab-experiment.md) | LLM 约束效果 A/B 实验设计（下一步核心验证） |
 
 ## [research/](research/) — 调研笔记

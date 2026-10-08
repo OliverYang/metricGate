@@ -131,3 +131,34 @@ func TestJavaParamsAndVarargs(t *testing.T) {
 		t.Errorf("params = %d, want 3", got)
 	}
 }
+
+// countBoolParams: Go grouped declarations count every name in the group —
+// `a, b bool` is two bool parameters, not one (M2-B N05 finding).
+func TestBoolParamsGroupedDeclaration(t *testing.T) {
+	fs := analyze(t, parser.LangGo, `package x
+
+func Mixed(a bool, b, c bool, d int) { _ = a; _ = b; _ = c; _ = d }
+
+func Solo(only bool) { _ = only }
+
+func None(a, b int) { _ = a; _ = b }
+`)
+	var mixed, solo *FuncStats
+	for i := range fs.Functions {
+		switch fs.Functions[i].Name {
+		case "Mixed":
+			mixed = &fs.Functions[i]
+		case "Solo":
+			solo = &fs.Functions[i]
+		}
+	}
+	if mixed == nil || solo == nil {
+		t.Fatalf("functions missing: %+v", fs.Functions)
+	}
+	if mixed.BoolParams != 3 {
+		t.Errorf("Mixed BoolParams = %d, want 3 (a + grouped b,c)", mixed.BoolParams)
+	}
+	if solo.BoolParams != 1 {
+		t.Errorf("Solo BoolParams = %d, want 1", solo.BoolParams)
+	}
+}

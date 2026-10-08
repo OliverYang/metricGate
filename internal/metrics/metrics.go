@@ -309,16 +309,47 @@ func countParams(lang parser.LanguageID, list *sitter.Node) int {
 // countBoolParams counts parameters declared bool (Go) or boolean (Java).
 // The flag-argument smell: every bool doubles the hidden states the caller
 // must reason about, so a two-bool call site already hides four modes.
+// Go grouped declarations count every name in the group: `a, b bool` is
+// two bool parameters, not one.
 func countBoolParams(lang parser.LanguageID, src []byte, list *sitter.Node) int {
 	boolKind := "type_identifier" // Go: bool is spelled as a type_identifier
 	if lang == parser.LangJava {
 		boolKind = "boolean_type"
 	}
 	n := 0
+	isBool := func(node *sitter.Node) bool {
+		return node.Kind() == boolKind && (lang == parser.LangJava || text(src, node) == "bool")
+	}
+	countGroup := func(decl *sitter.Node) int {
+		// A bool-typed parameter_declaration contributes one per identifier
+		// (unnamed parameters contribute one, matching countParams).
+		ids := 0
+		for i := uint(0); i < decl.NamedChildCount(); i++ {
+			c := decl.NamedChild(i)
+			if c.Kind() == "identifier" {
+				ids++
+			}
+		}
+		if ids == 0 {
+			return 1
+		}
+		return ids
+	}
 	var walk func(node *sitter.Node)
 	walk = func(node *sitter.Node) {
-		if node.Kind() == boolKind && (lang == parser.LangJava || text(src, node) == "bool") {
-			n++
+		if node.Kind() == "parameter_declaration" || node.Kind() == "formal_parameter" {
+			// Count the group iff its own type child is bool (do not descend:
+			// nested functions have their own parameter lists).
+			for i := uint(0); i < node.NamedChildCount(); i++ {
+				if isBool(node.NamedChild(i)) {
+					n += countGroup(node)
+					break
+				}
+			}
+			return
+		}
+		if node.Kind() == "spread_parameter" {
+			// Variadic bool stays uncounted (documented edge, same as before).
 			return
 		}
 		for i := uint(0); i < node.NamedChildCount(); i++ {
