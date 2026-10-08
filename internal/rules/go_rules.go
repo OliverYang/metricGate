@@ -12,6 +12,7 @@ func GoRules() []*Rule {
 		todoComment(),
 		GoUnknownDependency(),
 		goChainDepth(),
+		goTestNoAssert(),
 	}
 }
 

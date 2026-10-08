@@ -28,7 +28,7 @@ func budgetFixture(t *testing.T) ([]*FileFacts, *config.Config) {
 
 func TestRenderBudgetedDeterministicWithinBudgets(t *testing.T) {
 	files, cfg := budgetFixture(t)
-	for _, budget := range []int{1000, 2000, 6000} {
+	for _, budget := range []int{1100, 2000, 6000} {
 		a, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: budget, Counter: CharCounter{}, TargetFiles: []string{"pkg/a.go"}})
 		if err != nil {
 			t.Fatalf("budget %d: %v", budget, err)
@@ -67,7 +67,7 @@ func TestRenderBudgetedOptionalOmissionIsAtomic(t *testing.T) {
 	files, cfg := budgetFixture(t)
 	// Required header+constraints fit; optional facts (and the repo map) are
 	// omitted as whole items while all policy lines remain intact. The budget
-	// tracks the required set's size — currently ~870 chars with the full
+	// tracks the required set's size — currently ~960 chars with the full
 	// default rule catalog — plus headroom for one optional item to be admitted.
 	res, err := RenderBudgeted(files, cfg, BudgetOptions{Budget: 1000, Counter: CharCounter{}})
 	if err != nil {

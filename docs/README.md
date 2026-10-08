@@ -72,6 +72,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [evaluation-r2-repair-loop.md](evaluations/evaluation-r2-repair-loop.md) | **R2 修复回路实验（实测）**：findings JSON 喂回 agent 自修，7/7 达标、1.72× token、0 功能丢失 |
 | [evaluation-r3-grounding.md](evaluations/evaluation-r3-grounding.md) | **R3 前置接地实验（实测）**：constraints digest 注入，首过违规 31.8%→4.5%，P+B 复合终态 0/22 |
 | [evaluation-m2b-paper-metrics-protocol.md](evaluations/evaluation-m2b-paper-metrics-protocol.md) | **M2-B 协议（预注册，未执行）**：论文指标阈值（npath/fan-out/boolean-params 等）对 LLM 代码的净效应两臂实验 + 人类代码分布基线 |
+| [evaluation-m2b-taskset-paper-metrics.md](evaluations/evaluation-m2b-taskset-paper-metrics.md) | **M2-B 任务集（预注册附件，已验证触发）**：10 任务落包 + 坏形状参考实现（npath/fan-out/boolean-params/test-no-assert/layer-violation 全部引擎实测 fire）+ 沙箱泄露点补充清单 + 三臂 prompt 模板 |
 | [ab-experiment.md](evaluations/ab-experiment.md) | LLM 约束效果 A/B 实验设计（下一步核心验证） |
 
 ## [research/](research/) — 调研笔记

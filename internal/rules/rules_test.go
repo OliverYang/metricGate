@@ -159,6 +159,59 @@ func TestJavaTestNoAssert(t *testing.T) {
 	}
 }
 
+const goTestsSrc = `package t
+
+import "testing"
+
+func helper(x int) int { return x }
+
+func TestNoAssert(t *testing.T) {
+	cases := []struct {
+		name  string
+		input []int
+	}{
+		{"empty", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := helper(len(c.input))
+			t.Log("got", got)
+		})
+	}
+}
+
+func TestWithError(t *testing.T) {
+	if got := helper(1); got != 1 {
+		t.Errorf("helper(1) = %d, want 1", got)
+	}
+}
+
+func TestWithRequire(t *testing.T) {
+	require(t, helper(2) == 2)
+}
+
+func require(t *testing.T, ok bool) { t.Helper(); if !ok { t.Fatal("bad") } }
+
+func TestWithPanic(t *testing.T) {
+	defer func() { recover() }()
+	panic("expected")
+}
+
+func TestMain(m *testing.M) { }
+
+func helperNotATest(x int) int { return x }
+`
+
+func TestGoTestNoAssert(t *testing.T) {
+	fs := findingsByRule(runRules(t, parser.LangGo, goTestsSrc), "test-no-assert")
+	if len(fs) != 1 {
+		t.Fatalf("findings = %d, want 1 (only TestNoAssert; got %+v)", len(fs), fs)
+	}
+	if !contains(fs[0].Message, "TestNoAssert") {
+		t.Errorf("message %q should name the offending test", fs[0].Message)
+	}
+}
+
 // Java-lambda bodies, Go closures and multi-line chains must not break the
 // queries; a quick smoke over both languages.
 func TestChainRuleSmoke(t *testing.T) {
