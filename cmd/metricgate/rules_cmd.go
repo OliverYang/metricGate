@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"metricgate/internal/config"
@@ -185,18 +186,32 @@ func printPreset(p config.Preset) {
 	}
 	for _, lang := range sortedKeys(p.MetricThresholds) {
 		for _, metricID := range sortedKeys(p.MetricThresholds[lang]) {
-			mc := p.MetricThresholds[lang][metricID]
-			w, e := fmt.Sprintf("%d", mc.Warn), fmt.Sprintf("%d", mc.Error)
-			if mc.WarnOff {
-				w = "off"
-			}
-			if mc.ErrorOff {
-				e = "off"
-			}
-			fmt.Printf("  [%s] metric %s -> warn=%s, error=%s\n", lang, metricID, w, e)
+			fmt.Printf("  [%s] metric %s -> %s\n", lang, metricID, formatMetricThreshold(p.MetricThresholds[lang][metricID]))
 		}
 	}
 	fmt.Println()
+}
+
+// formatMetricThreshold renders one configured threshold pair, honoring an
+// explicit `warn: off` / `error: off`.
+func formatMetricThreshold(mc config.MetricConfig) string {
+	w, e := "off", "off"
+	if !mc.WarnOff {
+		w = strconv.Itoa(mc.Warn)
+	}
+	if !mc.ErrorOff {
+		e = strconv.Itoa(mc.Error)
+	}
+	return fmt.Sprintf("warn=%s, error=%s", w, e)
+}
+
+// formatLevel renders one threshold level for the explain output; off=true
+// means the policy disabled this level entirely (`warn: off` / `error: off`).
+func formatLevel(value int, off bool) string {
+	if off {
+		return "off"
+	}
+	return strconv.Itoa(value)
 }
 
 func explainRule(cfg *config.Config, lang, ruleID, format string) {
@@ -215,14 +230,9 @@ func explainRule(cfg *config.Config, lang, ruleID, format string) {
 	fmt.Printf("  Source:      %s\n", explain.PolicySource)
 	switch {
 	case explain.Thresholds.WarnOff || explain.Thresholds.ErrorOff:
-		w, e := "off", "off"
-		if !explain.Thresholds.WarnOff {
-			w = fmt.Sprintf("%d", explain.Thresholds.Warn)
-		}
-		if !explain.Thresholds.ErrorOff {
-			e = fmt.Sprintf("%d", explain.Thresholds.Error)
-		}
-		fmt.Printf("  Thresholds:  warn=%s, error=%s\n", w, e)
+		fmt.Printf("  Thresholds:  warn=%s, error=%s\n",
+			formatLevel(explain.Thresholds.Warn, explain.Thresholds.WarnOff),
+			formatLevel(explain.Thresholds.Error, explain.Thresholds.ErrorOff))
 	default:
 		fmt.Printf("  Thresholds:  warn=%d, error=%d\n", explain.Thresholds.Warn, explain.Thresholds.Error)
 	}

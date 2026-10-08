@@ -208,13 +208,17 @@ func limitLine(cfg *config.Config, lang parser.LanguageID, id string) string {
 	if warn == 0 && errAt == 0 {
 		return ""
 	}
-	if warnOff {
-		return fmt.Sprintf("- limit %s: warn off / error >%d", id, errAt)
+	return fmt.Sprintf("- limit %s: warn %s / error %s", id,
+		formatLimitLevel(warn, warnOff), formatLimitLevel(errAt, errOff))
+}
+
+// formatLimitLevel renders one limit level; off=true means the policy
+// disabled the level entirely (`warn: off` / `error: off`).
+func formatLimitLevel(v int, off bool) string {
+	if off {
+		return "off"
 	}
-	if errOff {
-		return fmt.Sprintf("- limit %s: warn >%d / error off", id, warn)
-	}
-	return fmt.Sprintf("- limit %s: warn >%d / error >%d", id, warn, errAt)
+	return fmt.Sprintf(">%d", v)
 }
 
 // metricIDs is the stable order for the limits section.
