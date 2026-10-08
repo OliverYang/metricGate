@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"metricgate/internal/arch"
 	"metricgate/internal/clones"
 	"metricgate/internal/config"
 	"metricgate/internal/diff"
@@ -240,6 +241,7 @@ func cmdCheck(args []string) {
 	scorecardMode := set.Bool("scorecard", false, "with -diff, print a deterministic change scorecard for the diff (report-only)")
 	impactMode := set.Bool("impact-scope", false, "with -diff, gate the blast radius of changed symbols against the policy cap (LC-403, error)")
 	testsMode := set.Bool("tests-touched", false, "with -diff, flag logic changes that touch no test file (LC-404, warning)")
+	archBase := set.String("arch-base", "", "snapshot file from `arch snapshot`; diff the current dependency shape against it and gate drift (error by default, works without -diff)")
 	format := set.String("format", "text", "console output format: text|json")
 	preview := set.Bool("preview", false, "show path selection decisions without parsing or running checks")
 	maxCognitive := set.Int("max-cognitive", 0, "override the cognitive-complexity error threshold for every language")
@@ -280,6 +282,9 @@ func cmdCheck(args []string) {
 		summary = runDiffMode(cfg, root, *base, diffExtrasOpts{base: *base, wantRegress: *regressMode, wantScorecard: *scorecardMode, wantImpact: *impactMode, wantTests: *testsMode, jsonMode: *format == "json"}, summary, human)
 	} else if *regressMode || *scorecardMode || *impactMode || *testsMode {
 		fail(fmt.Errorf("-regress/-scorecard/-impact-scope/-tests-touched need -diff: they describe the working tree against -base"))
+	}
+	if *archBase != "" {
+		applyArchDrift(cfg, *archBase, root, summary, human)
 	}
 	emitReports(summary, cfg, reportFlags{format: *format, sarif: *sarifOut}, eng, human)
 	enforceGate(summary, cfg, human)
@@ -371,6 +376,36 @@ func applyGateChecks(cfg *config.Config, root string, summary *model.RunSummary,
 	}
 	fmt.Fprintf(human, "gate-checks: impact-scope %d over cap, tests-touched %d\n\n", nImpact, nTests)
 	return nil
+}
+
+// applyArchDrift runs the arch-drift gate check: re-captures the working
+// tree's dependency shape, diffs it against the blessed snapshot, and appends
+// one finding per drift item so enforceGate blocks until a human re-blesses
+// or reverts. It runs on the WHOLE summary (not diff-scoped): a shape change
+// is repo-wide by definition. Severity follows the go policy section's
+// rules.arch-drift.severity when set (error by default).
+func applyArchDrift(cfg *config.Config, baseFile, root string, summary *model.RunSummary, human io.Writer) {
+	oldSnap, err := arch.LoadSnapshot(baseFile)
+	if err != nil {
+		fail(err)
+	}
+	list, err := facts.Collect(root)
+	if err != nil {
+		fail(err)
+	}
+	d := arch.Compare(oldSnap, arch.Capture(arch.Build(archFiles(list))))
+	sev := model.SevError
+	if s := cfg.RuleSeverity("go", gatecheck.RuleIDArchDrift); s != "" {
+		sev = model.Severity(s)
+	}
+	findings := gatecheck.ArchDriftCheck(d, sev)
+	if len(findings) == 0 {
+		fmt.Fprintln(human, "arch-drift: no architecture drift")
+		return
+	}
+	summary.Findings = append(summary.Findings, findings...)
+	model.SortFindings(summary.Findings)
+	fmt.Fprintf(human, "arch-drift: %d shape change(s) vs %s\n\n", len(findings), baseFile)
 }
 
 // applyThresholdOverrides overrides the error threshold of the cognitive and

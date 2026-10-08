@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"metricgate/internal/arch"
 	"metricgate/internal/config"
 	"metricgate/internal/diff"
 	"metricgate/internal/impact"
@@ -255,4 +256,52 @@ func toInt(v any) (int, bool) {
 		return int(n), true
 	}
 	return 0, false
+}
+
+// RuleIDArchDrift is the third gate-ized check: the working tree's package
+// dependency shape (arch snapshot) differs from the blessed snapshot. Unlike
+// impact-scope/tests-touched it is not diff-scoped — a shape change is
+// repo-wide by definition.
+const RuleIDArchDrift = "arch-drift"
+
+// DefaultArchSeverity is deliberately error: the whole point of wiring
+// arch diff into the gate is that drift blocks until a human re-blesses
+// (`arch snapshot`) or reverts. Policy may relevel to warning for an
+// observation period.
+const DefaultArchSeverity = model.SevError
+
+// ArchDriftCheck turns a snapshot diff into gate findings — one per drift
+// item, so the repair channel sees exactly which directions/packages moved.
+// severity is resolved by the caller (policy may relevel).
+func ArchDriftCheck(d arch.Diff, sev model.Severity) []model.Finding {
+	if sev == "" {
+		sev = DefaultArchSeverity
+	}
+	items := len(d.Added) + len(d.Removed) + len(d.PkgsNew) + len(d.PkgsGone)
+	if items == 0 {
+		return nil
+	}
+	finding := func(msg string) model.Finding {
+		return model.Finding{
+			RuleID:   RuleIDArchDrift,
+			Severity: sev,
+			Source:   model.SrcRule,
+			File:     "(architecture)", // repo-level: no single file owns a shape change
+			Message:  msg,
+		}
+	}
+	var out []model.Finding
+	for _, e := range d.Added {
+		out = append(out, finding(fmt.Sprintf("architecture drift: new dependency direction %s -> %s; if intended, re-bless with `metricgate arch snapshot`, otherwise revert", e.From, e.To)))
+	}
+	for _, e := range d.Removed {
+		out = append(out, finding(fmt.Sprintf("architecture drift: dependency direction removed %s -> %s; if intended (decoupling), re-bless with `metricgate arch snapshot`", e.From, e.To)))
+	}
+	for _, p := range d.PkgsNew {
+		out = append(out, finding(fmt.Sprintf("architecture drift: new package %s is not in the blessed shape; declare it in policy layers or re-bless", p)))
+	}
+	for _, p := range d.PkgsGone {
+		out = append(out, finding(fmt.Sprintf("architecture drift: package %s disappeared from the blessed shape; re-bless if the removal is intended", p)))
+	}
+	return out
 }

@@ -53,7 +53,7 @@
     {
       "from": "cmd/metricgate",
       "to": "internal/arch",
-      "count": 1
+      "count": 2
     },
     {
       "from": "cmd/metricgate",
@@ -504,6 +504,11 @@
       "from": "internal/facts",
       "to": "internal/symbols",
       "count": 2
+    },
+    {
+      "from": "internal/gatecheck",
+      "to": "internal/arch",
+      "count": 1
     },
     {
       "from": "internal/gatecheck",
