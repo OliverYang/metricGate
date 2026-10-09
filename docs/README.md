@@ -74,6 +74,8 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [evaluation-m2b-paper-metrics-protocol.md](evaluations/evaluation-m2b-paper-metrics-protocol.md) | **M2-B 协议（预注册，已执行）**：论文指标阈值（npath/fan-out/boolean-params 等）对 LLM 代码的净效应三臂实验 + 人类代码分布基线 |
 | [evaluation-m2b-taskset-paper-metrics.md](evaluations/evaluation-m2b-taskset-paper-metrics.md) | **M2-B 任务集（预注册附件，已验证触发）**：10 任务落包 + 坏形状参考实现（npath/fan-out/boolean-params/test-no-assert/layer-violation 全部引擎实测 fire）+ 沙箱泄露点补充清单 + 三臂 prompt 模板 |
 | [evaluation-m2b-results.md](evaluations/evaluation-m2b-results.md) | **M2-B 执行报告（实测，30 run）**：H1 证伪（新阈值行注入净效应 0→digest 维持 curated）、H2 未触发、H3 部分成立（boolean-params 超阈率 90× 人类 = 模型特有；npath/fan-out 为通用门禁）；U04 未复现归因（包内先例救了 V1/V2）+ V3 L1 参数注入防住 B 类 |
+| [evaluation-m2-arch-protocol.md](evaluations/evaluation-m2-arch-protocol.md) | **M2 主协议（B 类，预注册）**：5 个架构诱导任务 × L0/L1 两臂，判定 digest 惯用法/先例注入能否把 B 类预防拉到 ≥3/5（claims #18 判定实验） |
+| [evaluation-m2-arch-results.md](evaluations/evaluation-m2-arch-results.md) | **M2 主协议执行报告（实测，10 run）**：H1-B 证实——3/3 有效对全部防住（最严口径 3/5 达线）；L1 agent 自发写 port+组装根注入（机制证据逐字）；claims #18 ⏳→⚠️ |
 | [ab-experiment.md](evaluations/ab-experiment.md) | LLM 约束效果 A/B 实验设计（下一步核心验证） |
 
 ## [research/](research/) — 调研笔记
