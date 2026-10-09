@@ -77,6 +77,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [evaluation-m2-arch-protocol.md](evaluations/evaluation-m2-arch-protocol.md) | **M2 主协议（B 类，预注册）**：5 个架构诱导任务 × L0/L1 两臂，判定 digest 惯用法/先例注入能否把 B 类预防拉到 ≥3/5（claims #18 判定实验） |
 | [evaluation-m2-arch-results.md](evaluations/evaluation-m2-arch-results.md) | **M2 主协议执行报告（实测，10 run）**：H1-B 证实——3/3 有效对全部防住（最严口径 3/5 达线）；L1 agent 自发写 port+组装根注入（机制证据逐字）；claims #18 ⏳→⚠️ |
 | [evaluation-commit-replay-protocol.md](evaluations/evaluation-commit-replay-protocol.md) | **提交级研判协议（预注册）**：真实 LLM 生成开源仓库（dev-cockpit Go + ace-ts TS）commit 级检出 + 挑拣纠正重放 + 误伤对照（H0），判定线 H2 ≥6/10 一轮收敛 |
+| [evaluation-commit-replay-results.md](evaluations/evaluation-commit-replay-results.md) | **提交级研判执行报告（实测，dev-cockpit 289 commits）**：0/289 零检出 commit；error 清零 5/5；一轮收敛 1/5 证伪（真实仓库比合成任务难）；副作用 2 warning/0 error；test-no-assert 215/289（真实仓库大规模存在） |
 | [ab-experiment.md](evaluations/ab-experiment.md) | LLM 约束效果 A/B 实验设计（下一步核心验证） |
 
 ## [research/](research/) — 调研笔记
