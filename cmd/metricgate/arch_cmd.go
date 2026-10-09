@@ -31,12 +31,13 @@ func cmdArch(args []string) {
 func cmdArchSnapshot(args []string) {
 	set := flag.NewFlagSet("arch snapshot", flag.ExitOnError)
 	out := set.String("out", "arch.json", "snapshot file to write")
+	config := set.String("config", "", "policy file (applies excludes to the capture)")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {
 		root = set.Arg(0)
 	}
-	list, err := facts.Collect(root)
+	list, err := collectForArch(root, *config)
 	if err != nil {
 		fail(err)
 	}
@@ -50,6 +51,7 @@ func cmdArchSnapshot(args []string) {
 func cmdArchDiff(args []string) {
 	set := flag.NewFlagSet("arch diff", flag.ExitOnError)
 	base := set.String("base", "arch.json", "snapshot to diff against")
+	config := set.String("config", "", "policy file (applies excludes to the capture)")
 	format := set.String("format", "text", "output format: text|json")
 	parseArgs(set, args)
 	root := "."
@@ -60,7 +62,7 @@ func cmdArchDiff(args []string) {
 	if err != nil {
 		fail(err)
 	}
-	list, err := facts.Collect(root)
+	list, err := collectForArch(root, *config)
 	if err != nil {
 		fail(err)
 	}
@@ -70,6 +72,20 @@ func cmdArchDiff(args []string) {
 		fmt.Fprintf(os.Stderr, "arch: the dependency shape drifted; re-run arch snapshot to bless it, or revert\n")
 		os.Exit(1)
 	}
+}
+
+// collectForArch loads the policy (when given) and collects with its excludes;
+// without -config it falls back to the unfiltered facts.Collect so bare
+// invocations keep their old semantics.
+func collectForArch(root, cfgFile string) ([]*facts.FileFacts, error) {
+	if cfgFile == "" {
+		return facts.Collect(root)
+	}
+	cfg, err := loadPolicy(cfgFile)
+	if err != nil {
+		return nil, err
+	}
+	return facts.CollectSelected(root, cfg)
 }
 
 // archFiles converts collected facts into the graph's file view. It lives in

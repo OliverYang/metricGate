@@ -389,7 +389,7 @@ func applyArchDrift(cfg *config.Config, baseFile, root string, summary *model.Ru
 	if err != nil {
 		fail(err)
 	}
-	list, err := facts.Collect(root)
+	list, err := facts.CollectSelected(root, cfg)
 	if err != nil {
 		fail(err)
 	}

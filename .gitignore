@@ -5,3 +5,4 @@
 *.db
 .pi/
 .workbuddy-ai/
+.data/

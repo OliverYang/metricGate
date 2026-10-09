@@ -5,7 +5,7 @@ version: 1
 gate:
   fail_on: error
 
-exclude: [".git", "vendor", "node_modules", "testdata"]
+exclude: [".git", "vendor", "node_modules", "testdata", ".data"]
 
 languages:
   go:
