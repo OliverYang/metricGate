@@ -1,0 +1,28 @@
+# Task 1: Add Tab Groups to Editor
+
+## Original Commit
+- SHA: e24c6e7
+- Subject: Add tab groups to the editor
+- Description: Keep layout per device, show one strip of tabs on small screens
+
+## Spec v1 Clauses to Test
+- LC-201 (Cognitive Complexity): New tab grouping logic should keep CC ≤15
+- LC-301 (API Stability): Public API for tab management should be stable and documented
+- LC-401 (Dependency Management): No new external dependencies introduced
+
+## Acceptance Criteria
+✅ Zero error-level findings after implementation
+✅ Cyclomatic complexity ≤15 for new functions
+✅ All public methods have documentation
+✅ No new imports beyond stdlib + existing deps
+✅ Scorecard shows structureViolations=0, dependencyViolations=0
+
+## Agent Instructions
+"Implement tab groups feature with device-responsive layout. Follow metricGate constraints:
+- Keep cognitive complexity low by splitting complex logic
+- Document all public APIs
+- Reuse existing tab rendering components where possible"
+
+## Expected Findings (Baseline L0)
+- Potential violations: function-length, params-count if not split properly
+- Architecture: ensure no layer violations in UI code

@@ -1,0 +1,27 @@
+# Task 5: Add Ollama Launcher for Claude
+
+## Original Commit
+- SHA: 2626fe4
+- Subject: Add Ollama launcher for Claude
+- Description: Needs ollama installed and signed in for cloud models
+
+## Spec v1 Clauses to Test
+- LC-103 (Environment Setup): Detect Ollama installation status
+- LC-402 (Tool Integration): Launch external process safely
+- LC-204 (Configuration): User preferences for launcher behavior
+
+## Acceptance Criteria
+✅ Detect Ollama installation before launch
+✅ Handle missing Ollama gracefully
+✅ Pass correct arguments to Ollama
+✅ Clean up child processes on exit
+
+## Agent Instructions
+"Add Ollama launcher integration:
+- Check if Ollama is installed (PATH + binary check)
+- Launch Ollama as subprocess with proper args
+- Monitor process health and restart if needed"
+
+## Expected Findings (Baseline L0)
+- banned-os-exec: improper use without whitelist
+- silent-catch: error handling gaps

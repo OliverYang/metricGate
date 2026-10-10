@@ -1,0 +1,27 @@
+# Task 2: Add Worktree Post Scripts
+
+## Original Commit
+- SHA: 76fd7c3
+- Subject: Add worktree post scripts and assistant commands
+- Description: Edit script under Settings, Projects, Worktrees; notify when fails
+
+## Spec v1 Clauses to Test
+- LC-101 (Repository Knowledge): Script must understand project structure
+- LC-401 (Dependency Management): Post scripts should not introduce unsafe deps
+- LC-202 (Error Handling): Failure notifications must be robust
+
+## Acceptance Criteria
+✅ Error handling for script failures
+✅ Clear notification mechanism
+✅ No security vulnerabilities (no shell injection)
+✅ Configurable script paths with validation
+
+## Agent Instructions
+"Implement worktree post-script system with:
+- Safe script execution (validate paths, sandbox execution)
+- Failure notification via UI + logs
+- Configuration stored in project settings"
+
+## Expected Findings (Baseline L0)
+- banned-api: os/exec usage without proper sanitization
+- cognitive-complexity: error handling branches

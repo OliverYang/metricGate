@@ -1,0 +1,27 @@
+# Task 7: Add Model Choice for Assistants and Coders
+
+## Original Commit
+- SHA: a4aaa7f
+- Subject: Add model choice for assistants and coders
+- Description: Picks at the ring, on triggers and at coder start
+
+## Spec v1 Clauses to Test
+- LC-204 (Configuration): Model selection UI/UX
+- LC-305 (Version Compatibility): Support multiple model versions
+- LC-404 (Cross-module References): Share model config across modules
+
+## Acceptance Criteria
+✅ Model selection persists across sessions
+✅ Default model fallback works correctly
+✅ No race conditions when switching models
+✅ Configuration validation (model exists)
+
+## Agent Instructions
+"Implement model choice feature:
+- Add dropdown selector in settings
+- Validate model availability before selection
+- Propagate choice to all assistant/coder instances"
+
+## Expected Findings (Baseline L0)
+- unknown-dependency: new model registry package
+- layer-violation: config accessed from wrong layer

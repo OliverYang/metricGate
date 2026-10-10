@@ -1,0 +1,27 @@
+# Task 10: Polish Cost Page
+
+## Original Commit
+- SHA: 63a861d
+- Subject: Polish the cost page
+- Description: Stack without gaps, fold small series into Other
+
+## Spec v1 Clauses to Test
+- LC-206 (Performance): Chart rendering performance
+- LC-306 (Visual Feedback): User experience improvements
+- LC-405 (Accessibility): Color contrast, keyboard navigation
+
+## Acceptance Criteria
+✅ Chart renders smoothly (60fps)
+✅ Small values folded correctly (<3px threshold)
+✅ Accessible color scheme (WCAG AA compliant)
+✅ Responsive design works on all screen sizes
+
+## Agent Instructions
+"Polish cost statistics page:
+- Optimize chart rendering (virtualize large datasets)
+- Implement series folding for small values
+- Ensure accessibility compliance"
+
+## Expected Findings (Baseline L0)
+- function-length: chart rendering logic too long
+- nesting-depth: nested callbacks in chart config

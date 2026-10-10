@@ -1,0 +1,27 @@
+# Task 6: Add Assistants to Ctrl+Ctrl Menu
+
+## Original Commit
+- SHA: 2530cae
+- Subject: Add each assistant to Ctrl+Ctrl menu
+- Description: Apply stored tree width, add copy mode to shells
+
+## Spec v1 Clauses to Test
+- LC-203 (UI Consistency): Menu items follow keyboard shortcut conventions
+- LC-304 (User Experience): Menu performance (no lag when adding items)
+- LC-403 (Flexibility): Configurable menu organization
+
+## Acceptance Criteria
+✅ All assistants appear in menu without duplication
+✅ Keyboard shortcuts don't conflict
+✅ Menu loads quickly (<100ms)
+✅ Persistent state across sessions
+
+## Agent Instructions
+"Integrate all assistants into Ctrl+Ctrl menu:
+- Query assistant registry dynamically
+- Cache menu items for performance
+- Handle async loading gracefully"
+
+## Expected Findings (Baseline L0)
+- params-count: too many menu configuration options
+- cognitive-complexity: menu rendering logic

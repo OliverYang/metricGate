@@ -1,0 +1,27 @@
+# Task 4: Add Cost Statistics
+
+## Original Commit
+- SHA: cbfb2d0
+- Subject: Add cost statistics
+- Description: Book spend of Claude models from transcripts at API list price
+
+## Spec v1 Clauses to Test
+- LC-102 (Data Integrity): Financial data must be accurate and auditable
+- LC-303 (External API Usage): Proper error handling for API calls
+- LC-203 (UI Consistency): Statistics display follows design system
+
+## Acceptance Criteria
+✅ Accurate cost calculation (no floating point errors)
+✅ Data persistence with transaction safety
+✅ Performance: load time <500ms for 1 year of data
+✅ Clear visualization of cost trends
+
+## Agent Instructions
+"Implement cost statistics dashboard:
+- Aggregate transcript costs by model/time period
+- Store in database with proper transactions
+- Display charts with date range filtering"
+
+## Expected Findings (Baseline L0)
+- function-length: aggregation logic may exceed limits
+- cyclomatic-complexity: multiple chart types

@@ -1,0 +1,27 @@
+# Task 8: Fix Editor Tests
+
+## Original Commit
+- SHA: ed338b2
+- Subject: Fix editor tests
+- Description: Make e2e green and fix races it found
+
+## Spec v1 Clauses to Test
+- LC-104 (Test Coverage): New tests for edge cases
+- LC-305 (Regression Prevention): Fixes don't break existing functionality
+- LC-205 (Code Quality): Test code follows same standards as production
+
+## Acceptance Criteria
+✅ All e2e tests pass consistently (no flaky tests)
+✅ Race conditions eliminated (go test -race clean)
+✅ Test coverage maintained or improved
+✅ Clear test documentation
+
+## Agent Instructions
+"Fix failing editor tests:
+- Identify root causes of race conditions
+- Add synchronization where needed
+- Update test assertions for new behavior"
+
+## Expected Findings (Baseline L0)
+- test-no-assert: missing assertions in new tests
+- empty-block: catch blocks without handling

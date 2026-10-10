@@ -1,0 +1,27 @@
+# Task 9: Link File Paths in Terminals
+
+## Original Commit
+- SHA: a935e02
+- Subject: Link file paths in terminals to the project editor
+- Description: Mark like program's own links, jump to line/column after path
+
+## Spec v1 Clauses to Test
+- LC-205 (Navigation): Path detection and navigation logic
+- LC-404 (Cross-module References): Terminal ↔ Editor integration
+- LC-306 (Visual Feedback): Link styling consistent with app design
+
+## Acceptance Criteria
+✅ Correct path parsing (absolute + relative)
+✅ Line/column extraction from error messages
+✅ Smooth navigation (no flicker/flash)
+✅ Performance: minimal CPU usage while typing
+
+## Agent Instructions
+"Add clickable file path links in terminal:
+- Regex match common path patterns
+- Extract line/column numbers from context
+- Open editor at correct location on click"
+
+## Expected Findings (Baseline L0)
+- regex-complexity: overly complex path matching
+- cognitive-complexity: multiple path format handling

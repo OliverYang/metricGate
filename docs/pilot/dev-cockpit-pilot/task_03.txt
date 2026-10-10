@@ -1,0 +1,27 @@
+# Task 3: Force Update Check from Cockpit Tab
+
+## Original Commit
+- SHA: e641454
+- Subject: Force an update check from the Cockpit tab
+- Description: Manual trigger for checking available updates
+
+## Spec v1 Clauses to Test
+- LC-202 (Error Handling): Network failures must be handled gracefully
+- LC-302 (Version Compatibility): Check logic must handle version schema changes
+- LC-402 (Tool Integration): External update service integration
+
+## Acceptance Criteria
+✅ Graceful handling of network errors
+✅ User-friendly error messages
+✅ No blocking UI during check
+✅ Version comparison logic is correct
+
+## Agent Instructions
+"Add manual update check button to Cockpit tab:
+- Implement non-blocking async check
+- Handle network errors without crashing
+- Show clear status (checking/available/not available/error)"
+
+## Expected Findings (Baseline L0)
+- unknown-dependency: if new HTTP client used
+- cyclomatic-complexity: error path branching
