@@ -72,3 +72,25 @@ git clone https://github.com/marein/dev-cockpit /tmp/corpus/dev-cockpit
 ```
 
 原始数据：检出矩阵 289 JSON + 5 任务重放（agent log/session JSONL/前后 check JSON/zz_replay_track.md）→ `.data/commit-replay/`。
+
+## 8. 指标修复的工程价值与文献依据（2026-10-10 补）
+
+「按指标修复有什么实际意义」的回答分三层，正反证据都列：
+
+### 8.1 传统证据（有共识但带争议）
+
+- **支持**：NIST SP 500-235《Structured Testing》(Watson & McCabe)——圈复杂度是测试路径数下界（CC=N ⇒ 至少 N 条独立测试路径），CC≤10 建议的官方出处；「修复杂度=降低测试成本」是最硬的机制论证。SonarSource Cognitive Complexity (Campbell, TechDebt 2018) 修正 CC 对嵌套的钝感，工业界（SonarQube）全面采用。Alves et al.《Deriving Metric Thresholds from Benchmark Data》确立「阈值=基准分布分位」方法论——本项目 trend DB 人类基线（npath p50=4/p90=48）同思路。
+- **反对/边界**：Shepperd 1988《A critique of cyclomatic complexity as a software metric》(SEJ)——CC 理论基础与可靠性关联均被质疑，四十年未停。EMSE 2022《What really changes when developers intend to improve》——重构意图与指标变化常脱节。结论：传统场景下「指标修复=更好软件」只有相关性证据，且修复占人力，批评成立。
+
+### 8.2 LLM 场景价值换了地基（本实验的意义所在）
+
+1. **超阈形态是生成惯性不是设计权衡**：dev-cockpit 的 npath 218160 loadTranscript 无人「设计」过——拆它没有破坏设计意图的风险，Shepperd 式批评的主要前提消失。
+2. **修复零人力边际成本**：本实验 5 任务 10 轮 ≈2.5M token 无人值守 error 清零 5/5——指标维护从「资深工程师的时间税」变成「循环内一次工具调用」，修复经济学被改写。
+3. **修复实验为预防实验定价**：本实验测的是兜底成本（有效但贵，1/5 一轮收敛）；R3 测的是事前注入（同款信息 ~441 token 防住 C 类 5/5）。合起来：预防 441 tok vs 修复数十万 tok，这正是 digest 注入的经济依据。
+4. **同类研究佐证**：arxiv 2508.00700 (ESEM 2025)——LLM 代码 bug 更少但难题上「引入人类代码中不存在的结构性问题」（本语料 npath 极值即实例）；VibeTensor (2601.16238)「Frankenstein Effect」——组件各自正确、组合后全局次优，全局层检查（分层/耦合）不可替代的直接文献例证。
+
+### 8.3 本实验数据特有增量
+
+- 0/289 零检出 + 线性累积无消亡：无门禁 LLM 仓库质量债单调增长的 commit 级实测（公开文献未见同粒度）。
+- test-no-assert 215/289：伪绿测试直接攻击「测试即验收」假设——比复杂度更独特的 LLM 信号。
+- 副作用率 2 warning / 0 error：修复闭环安全性首次量化。
