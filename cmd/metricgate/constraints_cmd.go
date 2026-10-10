@@ -401,12 +401,14 @@ func cmdConstraintsDigest(args []string) {
 	set.StringVar(&in.lang, "lang", "", "go|java (default: auto from target package files, fallback go)")
 	set.IntVar(&in.maxSymbols, "max-symbols", 30, "cap on the reuse-symbol list")
 	set.BoolVar(&in.noReuse, "no-reuse", false, "skip the reuse-symbols section (saves a repo walk)")
+	set.StringVar(&in.task, "task", "", "task text: conditionally filter the banned-API section to task-relevant bans (deterministic keyword matcher; empty = full list)")
 	parseArgs(set, args)
 	cfg, err := loadPolicy(in.configPath)
 	if err != nil {
 		fail(err)
 	}
 	opts := collectWalk(cfg, in)
+	opts.Task = in.task
 	res := digest.Build(cfg, opts)
 	renderDigest(res, in.format)
 }
@@ -416,6 +418,7 @@ type digestFlags struct {
 	configPath, pkg, format, lang string
 	maxSymbols                    int
 	noReuse                       bool
+	task                          string
 }
 
 // collectWalk runs the single facts walk feeding language detection, the

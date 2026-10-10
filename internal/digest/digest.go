@@ -32,7 +32,15 @@ type Options struct {
 	// Java package). Empty means "repo-wide": include constraints that are not
 	// package-scoped (bans, thresholds, deps) and say so.
 	Package string
-	Lang    string // "go" or "java"; empty resolves to "go"
+	// Task is the task text for conditional injection (AutoGuide-mapped,
+	// deterministic matcher — see docs/research/digest-open-questions-research.md
+	// 问题一). When non-empty, the 禁用 API/导入 section keeps only bans whose
+	// identifier segments appear in the task text (plus generic bans with no
+	// scoping vocabulary, e.g. `panic`); a note line records the filtering and
+	// how to get the full list. Empty (default) = full list, byte-identical to
+	// previous behavior.
+	Task string
+	Lang string // "go" or "java"; empty resolves to "go"
 	// MaxSymbols caps the reuse-symbol list. 0 → default 30.
 	MaxSymbols int
 	// Index is the prebuilt symbol index for reuse guidance. Nil → section omitted.
@@ -143,7 +151,7 @@ func buildWarnings(cfg *config.Config, lang string, opts Options) []string {
 		w = append(w, fmt.Sprintf(
 			"目标包 %s 在仓库中不存在或不含受支持源文件：digest 按未匹配包降级（分层契约注明未覆盖）", opts.Package))
 	}
-	if _, _, warn := banSection(cfg, lang, opts.Package); warn != "" {
+	if _, _, warn := banSection(cfg, lang, opts.Package, opts.Task); warn != "" {
 		w = append(w, warn)
 	}
 	return w
@@ -158,7 +166,7 @@ func buildWarnings(cfg *config.Config, lang string, opts Options) []string {
 // cheapest compliance injection — V1/V2 agents imitated them and never
 // reached across layers).
 func buildSections(cfg *config.Config, lang string, opts Options, maxSym int) []Section {
-	banLines, banSrcs, _ := banSection(cfg, lang, opts.Package)
+	banLines, banSrcs, _ := banSection(cfg, lang, opts.Package, opts.Task)
 	builders := []sectionBuilder{
 		func() (Section, bool) {
 			lines, srcs := layerSection(cfg, opts.Package)
@@ -168,7 +176,13 @@ func buildSections(cfg *config.Config, lang string, opts Options, maxSym int) []
 			lines, srcs := idiomSection(cfg, opts.Package)
 			return wrap("跨层惯用法", lines, srcs)
 		},
-		func() (Section, bool) { return wrap("禁用 API/导入", banLines, banSrcs) },
+		func() (Section, bool) {
+			if opts.Task != "" {
+				lines := append([]string{"（禁用清单已按任务文本相关度筛选；完整清单见 constraints digest 不带 -task）"}, banLines...)
+				return wrap("禁用 API/导入", lines, banSrcs)
+			}
+			return wrap("禁用 API/导入", banLines, banSrcs)
+		},
 		func() (Section, bool) {
 			lines, srcs := depsSection(cfg)
 			return wrap("依赖白名单", lines, srcs)
@@ -355,14 +369,27 @@ func layerCovered(layers []arch.Layer, pkg string) bool {
 // target package. A ban the package is fully exempt from is omitted entirely
 // (anti-FP-fatigue): teaching the model about bans it may break erodes the
 // digest.
-func banSection(cfg *config.Config, lang, pkg string) ([]string, []string, string) {
+// banSection lists bans whose exemption status does not cover the
+// target package. A ban the package is fully exempt from is omitted entirely
+// (anti-FP-fatigue): teaching the model about bans it may break erodes the
+// digest. Task-based filtering is delegated to filterBans to keep complexity low.
+func banSection(cfg *config.Config, lang, pkg string, task string) ([]string, []string, string) {
 	bans := cfg.Bans(lang)
+	// Apply task filtering early, before building lines
+	var filteredBans []config.BanConfig
+	var notePrefix string
+	if task != "" {
+		taskToks := taskTokens(task)
+		filteredBans, notePrefix, _ = filterBans(bans, taskToks, task)
+	} else {
+		filteredBans = bans
+	}
 	var lines, srcs []string
 	warn := ""
 	if pkg == "" {
 		warn = "未指定目标包：禁用 API 清单按全仓适用列出"
 	}
-	for i, b := range bans {
+	for i, b := range filteredBans {
 		if pkg != "" && fullyExempt(b, pkg) {
 			continue
 		}
@@ -396,11 +423,16 @@ func banSection(cfg *config.Config, lang, pkg string) ([]string, []string, strin
 		if b.Use != "" {
 			line += "；替代写法：" + b.Use
 		}
+		if notePrefix != "" {
+			line = notePrefix + line
+			notePrefix = "" // only on first line
+		}
 		lines = append(lines, line)
 		srcs = append(srcs, fmt.Sprintf("policy#languages.%s.banned-api[%d]", lang, i))
 	}
 	return lines, srcs, warn
 }
+
 
 // fullyExempt reports whether every file of the target package is exempt
 // from the ban, so the digest line is omitted entirely (anti-FP-fatigue).
@@ -635,4 +667,69 @@ func sigLine(sig string) string {
 		r = append(r[:sigCap-1], '…')
 	}
 	return string(r)
+}
+
+// taskTokens splits the task text into lowercase alphanumeric segments.
+// Deterministic by construction: tokenization is plain ASCII segmentation,
+// no stemming, no stopwords — the same task text always yields the same
+// token set (claims #10 discipline).
+func taskTokens(task string) []string {
+	fields := strings.FieldsFunc(strings.ToLower(task), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r >= 0x80)
+	})
+	return fields
+}
+
+// banRelevant decides whether one ban stays in a task-filtered digest. A ban
+// is relevant when any of its scoping identifier segments (≥3 chars) appears
+// in the task tokens. Bans whose match has no such segment (e.g. `panic`) —
+// vocabulary too generic to ever appear in a task description — are kept:
+// when in doubt, the constraint stays (fail-closed; a dropped constraint is
+// a prevention hole, a kept one costs one digest line).
+func banRelevant(b config.BanConfig, taskToks []string, taskRaw string) bool {
+	m := strings.ToLower(strings.TrimSuffix(b.Match, "*"))
+	segs := strings.FieldsFunc(m, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r >= 0x80)
+	})
+	namespaced := strings.ContainsAny(m, "./")
+	lower := strings.ToLower(taskRaw)
+	for _, seg := range segs {
+		if len(seg) < 3 {
+			continue
+		}
+		for _, tok := range taskToks {
+			if tok == seg {
+				return true
+			}
+		}
+		if strings.Contains(lower, seg) {
+			return true
+		}
+	}
+	// Bare language-level idioms (panic, no namespace) carry no scoping
+	// vocabulary a task description could echo — they stay unconditionally.
+	return !namespaced
+}
+
+// filterBans applies task-based filtering to a list of bans. Returns filtered
+// bans, a note prefix (if anything was filtered), and a boolean indicating
+// whether filtering occurred. Empty task → no filtering, full list returned.
+func filterBans(bans []config.BanConfig, taskToks []string, taskRaw string) ([]config.BanConfig, string, bool) {
+	if taskToks == nil {
+		return bans, "", false
+	}
+	var out []config.BanConfig
+	dropped := false
+	for _, b := range bans {
+		if !banRelevant(b, taskToks, taskRaw) {
+			dropped = true
+			continue
+		}
+		out = append(out, b)
+	}
+	var note string
+	if dropped {
+		note = "（禁用清单已按任务文本相关度筛选；完整清单见 constraints digest 不带 -task）\n"
+	}
+	return out, note, dropped
 }

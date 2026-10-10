@@ -51,6 +51,7 @@ var commands = map[string]func([]string){
 	"explain":     cmdExplain,
 	"api":         cmdAPI,
 	"arch":        cmdArch,
+	"rank":        cmdRank,
 	"nearclones":  cmdNearClones,
 	"clonedrift":  cmdClonedrift,
 	"hotspots":    cmdHotspots,
@@ -118,6 +119,8 @@ usage:
   metricgate arch snapshot -out F     capture the package dependency shape
   metricgate arch diff -base F [path] shape-drift gate against a snapshot
                                       (any added/removed edge exits 1)
+  metricgate rank F1 F2 [...]         order candidate implementations by findings
+                                      (deterministic best-of-N discriminator)
   metricgate nearclones [path]        functions sharing >=80%% of their normalised
                                       tokens (copy+rename+small edit)
   metricgate hotspots [path]          churn × maintainability-debt hotspots

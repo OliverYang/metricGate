@@ -363,3 +363,45 @@ func TestBuildDependencyPrecedent(t *testing.T) {
 	repo := Build(cfg, Options{Lang: "go", Imports: []string{"metricgate/internal/model"}})
 	assertDigestNotContains(t, repo.Rendered, "包内依赖先例", "repo-wide digest has no precedent section")
 }
+
+func TestBuildTaskFilteredBans(t *testing.T) {
+	cfg := testConfig(t, fullPolicy)
+	// task mentioning fmt: fmt ban kept, unrelated namespaced bans (crypto/md5) dropped
+	withTask := Build(cfg, Options{Package: "internal/engine", Lang: "go", Task: "调用 fmt.Println 输出调试信息"})
+	var got []string
+	for _, s := range withTask.Sections {
+		if s.Name == "禁用 API/导入" {
+			got = s.Lines
+		}
+	}
+	foundNote, foundFmt, foundMD5 := false, false, false
+	for _, l := range got {
+		switch {
+		case strings.Contains(l, "已按任务文本相关度筛选"):
+			foundNote = true
+		case strings.Contains(l, "fmt.Print*"):
+			foundFmt = true
+		case strings.Contains(l, "crypto/md5"):
+			foundMD5 = true
+		}
+	}
+	if !foundNote || !foundFmt {
+		t.Errorf("task-filtered digest: note=%v fmt=%v lines=%v", foundNote, foundFmt, got)
+	}
+	if foundMD5 {
+		t.Errorf("namespaced bans unrelated to task must be filtered, lines=%v", got)
+	}
+	// empty task = full list, no note
+	plain := Build(cfg, Options{Package: "internal/engine", Lang: "go"})
+	var plainLines []string
+	for _, s := range plain.Sections {
+		if s.Name == "禁用 API/导入" {
+			plainLines = s.Lines
+		}
+	}
+	for _, l := range plainLines {
+		if strings.Contains(l, "已按任务文本相关度筛选") {
+			t.Errorf("unfiltered digest must not carry the filtering note")
+		}
+	}
+}
