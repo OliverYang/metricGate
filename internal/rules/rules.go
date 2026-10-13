@@ -75,6 +75,22 @@ type Rule struct {
 	// rule callbacks stay focused on the match decision.
 	AnchorCapture string
 	OnMatch       func(ctx *MatchCtx) *model.Finding
+	// Alternate is a second query for the same ban, for languages that can
+	// spell one construct two ways (a C++ call is either "foo(...)" or
+	// "std::foo(...)"). It is compiled and run alongside Query and reports
+	// the same RuleID; matches that land on the same node are collapsed, so
+	// a rule still yields one finding per occurrence.
+	Alternate *Rule
+}
+
+// queries returns the rule's own query plus any alternates, so the runner can
+// treat a multi-shaped rule as one rule with several patterns.
+func (r *Rule) queries() []string {
+	out := []string{r.Query}
+	for alt := r.Alternate; alt != nil; alt = alt.Alternate {
+		out = append(out, alt.Query)
+	}
+	return out
 }
 
 // Policy resolves per-rule configuration overrides. Implemented by the engine.
@@ -87,12 +103,19 @@ type Policy interface {
 	RuleOptions(lang, ruleID string) map[string]any
 }
 
-// compiledRule pairs a rule with its pre-compiled query and capture indexes.
-type compiledRule struct {
-	rule   *Rule
+// compiledPattern is one query of a rule with the capture names of that
+// query. The names are per query, not per rule: a rule's alternate shape may
+// capture a different set (a receiver, say, that the bare shape has no node
+// for), and reusing the first query's names would silently rename the rest.
+type compiledPattern struct {
 	query  *sitter.Query
-	names  map[string]uint
-	capIdx []string // capture name by index, for building the map fast
+	capIdx []string
+}
+
+// compiledRule pairs a rule with its pre-compiled patterns.
+type compiledRule struct {
+	rule     *Rule
+	patterns []compiledPattern
 }
 
 // Runner executes the rules of one language over parsed files.
@@ -106,14 +129,13 @@ type Runner struct {
 func NewRunner(lang string, langPtr *sitter.Language, all []*Rule) (*Runner, error) {
 	r := &Runner{lang: lang}
 	for _, rule := range all {
-		q, err := sitter.NewQuery(langPtr, rule.Query)
-		if err != nil {
-			return nil, err
-		}
-		cr := &compiledRule{rule: rule, query: q, names: map[string]uint{}}
-		for i, name := range q.CaptureNames() {
-			cr.names[name] = uint(i)
-			cr.capIdx = append(cr.capIdx, name)
+		cr := &compiledRule{rule: rule}
+		for _, pattern := range rule.queries() {
+			q, err := sitter.NewQuery(langPtr, pattern)
+			if err != nil {
+				return nil, err
+			}
+			cr.patterns = append(cr.patterns, compiledPattern{query: q, capIdx: q.CaptureNames()})
 		}
 		r.compiled = append(r.compiled, cr)
 	}
@@ -123,7 +145,9 @@ func NewRunner(lang string, langPtr *sitter.Language, all []*Rule) (*Runner, err
 // Close releases compiled queries.
 func (r *Runner) Close() {
 	for _, cr := range r.compiled {
-		cr.query.Close()
+		for _, p := range cr.patterns {
+			p.query.Close()
+		}
 	}
 }
 
@@ -171,19 +195,47 @@ func (r *Runner) Run(file string, src []byte, tree *sitter.Tree, p Policy) []mod
 	return findings
 }
 
+// dedupeSpans collapses findings that cover the same node, which happens when
+// two of a rule's queries both match one construct. Findings of a rule are
+// already distinguishable by span, so this never hides a real second hit.
+func dedupeSpans(in []model.Finding) []model.Finding {
+	if len(in) < 2 {
+		return in
+	}
+	seen := make(map[[2]int]bool, len(in))
+	out := in[:0]
+	for _, f := range in {
+		key := [2]int{f.StartLine, f.StartCol}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, f)
+	}
+	return out
+}
+
 // runOneRule drives the tree-sitter cursor for one compiled rule and
 // collects the findings produced. Cursor lifetime is owned here so the
 // caller never has to remember to Close it.
 func runOneRule(rule *Rule, cr *compiledRule, root *sitter.Node, src []byte, file string, sev model.Severity, opts map[string]any) []model.Finding {
 	var out []model.Finding
+	for _, p := range cr.patterns {
+		out = append(out, runOneQuery(rule, p, root, src, file, sev, opts)...)
+	}
+	return dedupeSpans(out)
+}
+
+func runOneQuery(rule *Rule, p compiledPattern, root *sitter.Node, src []byte, file string, sev model.Severity, opts map[string]any) []model.Finding {
+	var out []model.Finding
 	cursor := sitter.NewQueryCursor()
-	matches := cursor.Matches(cr.query, root, src)
+	matches := cursor.Matches(p.query, root, src)
 	for {
 		m := matches.Next()
 		if m == nil {
 			break
 		}
-		caps := collectCaps(m, cr.capIdx)
+		caps := collectCaps(m, p.capIdx)
 		ctx := &MatchCtx{File: file, Src: src, Severity: sev, Options: opts, Captures: caps}
 		if f := rule.OnMatch(ctx); f != nil {
 			f.RuleID = rule.ID
@@ -262,6 +314,20 @@ func ForLanguage(id parser.LanguageID) []*Rule {
 		return GoRules()
 	case parser.LangJava:
 		return JavaRules()
+	case parser.LangTS, parser.LangTSX:
+		return TSRules()
+	case parser.LangJS:
+		return JSRules()
+	case parser.LangPy:
+		return PyRules()
+	case parser.LangC:
+		return CRules()
+	case parser.LangCpp:
+		return CppRules()
+	case parser.LangCS:
+		return CSRules()
+	case parser.LangRust:
+		return RustRules()
 	default:
 		return nil
 	}

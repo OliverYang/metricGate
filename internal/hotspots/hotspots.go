@@ -16,10 +16,10 @@ package hotspots
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 	"strconv"
-	"strings"
+
+	"metricgate/internal/git"
 )
 
 // FileHotspot is one ranked file.
@@ -41,48 +41,25 @@ type Options struct {
 	// with the file; it does not change the churn-based ordering.
 	Risk map[string]float64
 	Max  int // report top N (0 = 10)
+	// AllowShallow opts in to reporting churn from a shallow clone. Without
+	// it a shallow clone is refused: its truncated history makes every churn
+	// number silently too small, and a quietly undercounted ranking is worse
+	// than no ranking.
+	AllowShallow bool
 }
 
-// gitLog runs `git log --numstat --since` and returns its output.
-func gitLog(opts Options) (string, error) {
-	args := []string{"log", "--numstat", "--no-renames", "--format=%x01"}
-	if opts.Since != "" {
-		args = append(args, "--since", opts.Since)
-	}
-	cmd := exec.Command("git", args...)
-	if opts.Root != "" {
-		cmd.Dir = opts.Root
-	}
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git log: %w (is this a git repository?)", err)
-	}
-	return string(out), nil
-}
-
-// parseNumstat folds --numstat output into per-file churn. Commits are
-// separated by the %x01 record separator; each stat line is
-// "added\tdeleted\tpath". Binary files report "-" and are skipped.
-func parseNumstat(out string) map[string]int {
+// churnOf folds per-commit file stats into per-file churn. Binary files carry
+// no line counts and are skipped, exactly as the raw numstat line would have
+// been.
+func churnOf(commits []git.Commit) map[string]int {
 	churn := map[string]int{}
-	for _, line := range strings.Split(out, "\n") {
-		if line == "" || line == "\x01" || strings.HasPrefix(line, "\x01") {
-			continue
+	for _, c := range commits {
+		for _, f := range c.Files {
+			if f.Binary || f.Path == "" {
+				continue
+			}
+			churn[f.Path] += f.Added + f.Deleted
 		}
-		parts := strings.Split(line, "\t")
-		if len(parts) < 3 {
-			continue
-		}
-		added, errA := strconv.Atoi(parts[0])
-		deleted, errD := strconv.Atoi(parts[1])
-		if errA != nil || errD != nil {
-			continue // binary ("-") or rename line
-		}
-		path := parts[len(parts)-1]
-		if path == "" {
-			continue
-		}
-		churn[path] += added + deleted
 	}
 	return churn
 }
@@ -92,11 +69,14 @@ func parseNumstat(out string) map[string]int {
 // debt capped at the worst case (100), which keeps new, unmeasured files
 // visible without inventing a measurement.
 func Compute(opts Options) ([]FileHotspot, error) {
-	out, err := gitLog(opts)
+	if !opts.AllowShallow && git.IsShallow(opts.Root) {
+		return nil, fmt.Errorf("shallow clone: git history is truncated, so churn would be undercounted (clone with full history, or pass -allow-shallow to report the partial numbers)")
+	}
+	commits, err := git.History(opts.Root, opts.Since)
 	if err != nil {
 		return nil, err
 	}
-	return scoreFiles(parseNumstat(out), opts.MIs, opts.Risk, opts.Max), nil
+	return scoreFiles(churnOf(commits), opts.MIs, opts.Risk, opts.Max), nil
 }
 
 // scoreFiles is the pure scoring half of Compute, factored so the exact

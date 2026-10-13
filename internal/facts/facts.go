@@ -17,6 +17,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
+	"metricgate/internal/arch"
 	"metricgate/internal/clones"
 	"metricgate/internal/config"
 	"metricgate/internal/parser"
@@ -57,8 +58,29 @@ func Extract(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID)
 		extractGo(f, src, root)
 	case parser.LangJava:
 		extractJava(f, src, root)
+	default:
+		// Every other supported language is table-driven (see lang.go).
+		extractTable(f, src, root, lang)
+		extractArchFacts(f, src, root, lang)
 	}
 	return f
+}
+
+// extractArchFacts fills the package and import fields for the languages whose
+// symbol extraction is table-driven, by reusing the architecture extractor.
+//
+// It is the same question ("what does this file depend on?") and it must have
+// the same answer: the dependency graph, the in-package precedent hints and
+// the constraints digest all read these fields, and a language missing here
+// looked like a file with no dependencies at all.
+func extractArchFacts(f *FileFacts, src []byte, root *sitter.Node, lang parser.LanguageID) {
+	raw := arch.Extract(lang, src, root)
+	if f.Package == "" {
+		f.Package = raw.Package
+	}
+	for _, imp := range raw.Imports {
+		f.Imports = append(f.Imports, imp.Path)
+	}
 }
 
 // Collect walks root (file or directory) and returns the fact sheets of

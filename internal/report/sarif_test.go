@@ -4,9 +4,20 @@ import (
 	"strings"
 	"testing"
 
+	"metricgate/internal/config"
 	"metricgate/internal/model"
 	"metricgate/internal/rules"
 )
+
+// testPolicy is the minimal policy the SARIF run properties are stamped from.
+func testPolicy(t *testing.T) *config.Config {
+	t.Helper()
+	cfg, err := config.Load([]byte("gate:\n  fail_on: error\n"))
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	return cfg
+}
 
 func TestSARIFShape(t *testing.T) {
 	s := &model.RunSummary{
@@ -16,7 +27,7 @@ func TestSARIFShape(t *testing.T) {
 			File: "a.go", StartLine: 2, EndLine: 2, Message: "msg",
 		}},
 	}
-	data, err := SARIF(s, "test", []rules.Meta{{ID: "no-fmt-print", Title: "Direct fmt.Print* call"}})
+	data, err := SARIF(s, "test", []rules.Meta{{ID: "no-fmt-print", Title: "Direct fmt.Print* call"}}, testPolicy(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +60,7 @@ func TestSARIFCarriesEvidenceInProperties(t *testing.T) {
 			},
 		}},
 	}
-	data, err := SARIF(s, "test", []rules.Meta{{ID: "empty-block", Title: "Empty block"}})
+	data, err := SARIF(s, "test", []rules.Meta{{ID: "empty-block", Title: "Empty block"}}, testPolicy(t))
 	if err != nil {
 		t.Fatal(err)
 	}

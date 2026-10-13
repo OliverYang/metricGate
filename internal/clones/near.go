@@ -291,44 +291,10 @@ func parseWith(parsers map[parser.LanguageID]*parser.Parser, lang parser.Languag
 func fileShingles(lang parser.LanguageID, path string, src []byte, tree *sitter.Tree, cfg NearConfig) []NearFunc {
 	var out []NearFunc
 	for _, f := range Extract(lang, path, src, tree, Config{MinLines: cfg.MinLines, MinTokens: cfg.MinTokens}) {
-		body := findBody(tree.RootNode(), src, f)
-		if body == nil {
+		if f.body == nil {
 			continue
 		}
-		out = append(out, NearFunc{Func: f, Shingles: FingerprintShingles(src, body)})
+		out = append(out, NearFunc{Func: f, Shingles: FingerprintShingles(src, f.body)})
 	}
 	return out
-}
-
-// findBody locates the body node of a previously extracted declaration
-// (Extract returns values, not nodes, so the declaration is re-located by
-// name and start line).
-func findBody(root *sitter.Node, src []byte, f Func) *sitter.Node {
-	var body *sitter.Node
-	var find func(n *sitter.Node)
-	find = func(n *sitter.Node) {
-		if n == nil || body != nil {
-			return
-		}
-		if isDeclKind(n) && int(n.StartPosition().Row)+1 == f.StartLine {
-			if name := nodeText(src, n.ChildByFieldName("name")); name == f.Name {
-				body = n.ChildByFieldName("body")
-				return
-			}
-		}
-		for i := uint(0); i < n.ChildCount(); i++ {
-			find(n.Child(i))
-		}
-	}
-	find(root)
-	return body
-}
-
-// isDeclKind reports whether a node is a function-like declaration.
-func isDeclKind(n *sitter.Node) bool {
-	switch n.Kind() {
-	case "function_declaration", "method_declaration", "constructor_declaration":
-		return true
-	}
-	return false
 }

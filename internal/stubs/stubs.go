@@ -49,6 +49,16 @@ func Detect(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID) 
 		items = detectGo(file, src, root)
 	case parser.LangJava:
 		items = detectJava(file, src, root)
+	case parser.LangTS, parser.LangTSX, parser.LangJS:
+		items = detectJS(file, src, root)
+	case parser.LangPy:
+		items = detectPy(file, src, root)
+	case parser.LangC, parser.LangCpp:
+		items = detectCLike(file, src, root)
+	case parser.LangCS:
+		items = detectCS(file, src, root)
+	case parser.LangRust:
+		items = detectRust(file, src, root)
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Line < items[j].Line })
 	return items
@@ -232,6 +242,243 @@ func detectJava(file string, src []byte, root *sitter.Node) []Item {
 			case compact(bt) == "{}":
 				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindEmpty})
 			case strings.Contains(bt, "UnsupportedOperationException"):
+				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindUnsupported})
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return items
+}
+
+func detectJS(file string, src []byte, root *sitter.Node) []Item {
+	var items []Item
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		switch n.Kind() {
+		case "function_declaration", "generator_function_declaration", "method_definition":
+			sym := text(src, n.ChildByFieldName("name"))
+			body := n.ChildByFieldName("body")
+			if body == nil {
+				return
+			}
+			bt := text(src, body)
+			if compact(bt) == "{}" {
+				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindEmpty})
+			}
+		case "throw_statement":
+			// `throw new Error('not implemented')` is the JS placeholder idiom.
+			if msg := jsThrowStubMessage(src, n); msg != "" {
+				items = append(items, Item{File: file, Line: line(n), Kind: KindUnsupported, Detail: msg})
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return items
+}
+
+// jsThrowStubMessage returns the thrown message when a throw statement
+// throws an Error whose message marks it as a placeholder.
+func jsThrowStubMessage(src []byte, n *sitter.Node) string {
+	// new_expression carries no message field; scan its string children.
+	var msg string
+	var walk func(*sitter.Node)
+	walk = func(cur *sitter.Node) {
+		if msg != "" {
+			return
+		}
+		if cur.Kind() == "string" {
+			s := strings.ToLower(strings.Trim(text(src, cur), "\"'`"))
+			for _, phrase := range stubPhrases {
+				if strings.Contains(s, phrase) {
+					msg = strings.TrimSpace(text(src, cur))
+					return
+				}
+			}
+		}
+		for i := uint(0); i < cur.ChildCount(); i++ {
+			walk(cur.Child(i))
+		}
+	}
+	walk(n)
+	return msg
+}
+
+// detectPy is the Python arm: a definition whose body holds only pass or
+// Ellipsis (...) is an empty stub, and `raise NotImplementedError` is the
+// Python placeholder idiom.
+func detectPy(file string, src []byte, root *sitter.Node) []Item {
+	var items []Item
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		walkPyNode(file, src, n, &items)
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return items
+}
+
+// walkPyNode appends the stub items one Python CST node contributes.
+func walkPyNode(file string, src []byte, n *sitter.Node, items *[]Item) {
+	switch n.Kind() {
+	case "function_definition":
+		sym := text(src, n.ChildByFieldName("name"))
+		body := n.ChildByFieldName("body")
+		if body != nil && pyBodyIsPlaceholder(src, body) {
+			*items = append(*items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindEmpty})
+		}
+	case "raise_statement":
+		if pyRaiseStubMessage(src, n) {
+			*items = append(*items, Item{File: file, Line: line(n), Kind: KindUnsupported, Detail: "NotImplementedError"})
+		}
+	}
+}
+
+// pyBodyIsPlaceholder reports whether a block body is only pass/Ellipsis
+// statements (plus docstrings, which carry no behavior either).
+func pyBodyIsPlaceholder(src []byte, body *sitter.Node) bool {
+	any := false
+	for i := uint(0); i < body.NamedChildCount(); i++ {
+		c := body.NamedChild(i)
+		switch c.Kind() {
+		case "pass_statement", "expression_statement":
+			if t := strings.TrimSpace(text(src, c)); t == "pass" || t == "..." {
+				any = true
+				continue
+			}
+			// A docstring is a bare string expression statement.
+			if c.NamedChildCount() == 1 && c.NamedChild(0).Kind() == "string" {
+				any = true
+				continue
+			}
+			return false
+		default:
+			return false
+		}
+	}
+	return any
+}
+
+// pyRaiseStubMessage reports whether a raise statement raises
+// NotImplementedError (the Python placeholder idiom).
+func pyRaiseStubMessage(src []byte, n *sitter.Node) bool {
+	found := false
+	var walk func(*sitter.Node)
+	walk = func(cur *sitter.Node) {
+		if found {
+			return
+		}
+		if cur.Kind() == "identifier" && text(src, cur) == "NotImplementedError" {
+			found = true
+			return
+		}
+		for i := uint(0); i < cur.ChildCount(); i++ {
+			walk(cur.Child(i))
+		}
+	}
+	walk(n)
+	return found
+}
+
+// detectCLike is the C/C++ arm: a definition whose compound body is empty
+// `{}` is an empty stub, and a body returning a sentinel (NULL/-1) is left
+// alone — C has no throw idiom, so only the empty-body shape is detected.
+func detectCLike(file string, src []byte, root *sitter.Node) []Item {
+	var items []Item
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		switch n.Kind() {
+		case "function_definition":
+			sym := cSymbolName(src, n)
+			body := n.ChildByFieldName("body")
+			if body == nil {
+				return
+			}
+			if compact(text(src, body)) == "{}" {
+				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindEmpty})
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return items
+}
+
+// cSymbolName names a C function definition via its declarator chain
+// (function_definition has no name field; the identifier sits inside the
+// function_declarator).
+func cSymbolName(src []byte, fn *sitter.Node) string {
+	decl := fn.ChildByFieldName("declarator")
+	for decl != nil && decl.Kind() == "pointer_declarator" {
+		decl = decl.NamedChild(0)
+	}
+	if decl == nil || decl.Kind() != "function_declarator" {
+		return ""
+	}
+	if name := decl.ChildByFieldName("declarator"); name != nil {
+		return text(src, name)
+	}
+	return ""
+}
+
+// detectCS is the C# arm: a method whose block body is empty is an empty
+// stub, and a body throwing NotImplementedException is the C# placeholder
+// idiom.
+func detectCS(file string, src []byte, root *sitter.Node) []Item {
+	var items []Item
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		switch n.Kind() {
+		case "method_declaration", "constructor_declaration", "local_function_statement":
+			sym := text(src, n.ChildByFieldName("name"))
+			body := n.ChildByFieldName("body")
+			if body == nil {
+				return
+			}
+			bt := text(src, body)
+			switch {
+			case compact(bt) == "{}":
+				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindEmpty})
+			case strings.Contains(bt, "NotImplementedException"):
+				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindUnsupported})
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return items
+}
+
+// detectRust is the Rust arm: a function whose block body is empty is an
+// empty stub, and a body with an unimplemented!/todo! macro is the Rust
+// placeholder idiom.
+func detectRust(file string, src []byte, root *sitter.Node) []Item {
+	var items []Item
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		switch n.Kind() {
+		case "function_item":
+			sym := text(src, n.ChildByFieldName("name"))
+			body := n.ChildByFieldName("body")
+			if body == nil {
+				return
+			}
+			bt := text(src, body)
+			switch {
+			case compact(bt) == "{}":
+				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindEmpty})
+			case strings.Contains(bt, "unimplemented!") || strings.Contains(bt, "todo!"):
 				items = append(items, Item{File: file, Line: line(body), Symbol: sym, Kind: KindUnsupported})
 			}
 		}

@@ -40,7 +40,7 @@ type FileStats struct {
 	File      string
 	Lines     int
 	Functions []FuncStats
-	Classes   []ClassStats // Java only (CK family); empty for Go
+	Classes   []ClassStats // CK family; empty for a language without classes
 	MI        float64      // worst function MI, 0 when no functions (see mi.go)
 	MIScope   string       // the function that scored the MI
 	MILine    int          // its declaration line
@@ -64,7 +64,8 @@ const (
 	// states the caller must reason about.
 	MetricBoolParams = "boolean-params"
 
-	// Class-level (CK family, Java only).
+	// Class-level (CK family; see classes_lang.go for which languages
+	// declare classes).
 	MetricWMC  = "wmc"
 	MetricNOM  = "nom"
 	MetricLCOM = "lcom"
@@ -72,16 +73,17 @@ const (
 	MetricDIT  = "dit"
 )
 
-// sharedMetrics are the identifiers every language produces. The CK family is
-// Java-only and appended by IDsFor.
+// sharedMetrics are the identifiers every language produces. The CK family
+// is appended by IDsFor for the languages that declare classes.
 var sharedMetrics = []string{
 	MetricCyclomatic, MetricCognitive, MetricFuncLength,
 	MetricFileLength, MetricNesting, MetricParams, MetricNPath,
 	MetricFanOut, MetricBoolParams, MetricMaintainability,
 }
 
-// javaOnlyMetrics are the CK class metrics, produced only for Java.
-var javaOnlyMetrics = []string{MetricWMC, MetricNOM, MetricLCOM, MetricCBO, MetricDIT}
+// classMetrics are the CK class metrics, produced by every language with a
+// class spelling and by no other.
+var classMetrics = []string{MetricWMC, MetricNOM, MetricLCOM, MetricCBO, MetricDIT}
 
 // IDsFor returns the metric identifiers a language produces, in a stable
 // order.
@@ -93,8 +95,8 @@ var javaOnlyMetrics = []string{MetricWMC, MetricNOM, MetricLCOM, MetricCBO, Metr
 // TestCatalogCoversEveryMeasuredMetric holds it to what a real run emits.
 func IDsFor(lang string) []string {
 	out := append([]string{}, sharedMetrics...)
-	if lang == string(parser.LangJava) {
-		out = append(out, javaOnlyMetrics...)
+	if HasClasses(lang) {
+		out = append(out, classMetrics...)
 	}
 	return out
 }
@@ -144,8 +146,9 @@ var DefaultThresholds = map[string]struct {
 	// doubles the hidden states of the call; two bools are already four.
 	MetricBoolParams: {2, 4},
 
-	// CK family, Java only. LCOM is advisory by default (the original CK
-	// definition flags real designs often); WMC/NOM/CBO/DIT warn high.
+	// CK family, produced for every language that declares classes. LCOM is
+	// advisory by default (the original CK definition flags real designs
+	// often); WMC/NOM/CBO/DIT warn high.
 	MetricWMC:  {40, 60},
 	MetricNOM:  {20, 30},
 	MetricLCOM: {20, 40},
@@ -236,54 +239,139 @@ func measureFunc(lang parser.LanguageID, prof *LangProfile, src []byte, fn *sitt
 		EndLine:   int(fn.EndPosition().Row) + 1,
 	}
 	st.Length = st.EndLine - st.StartLine + 1
-	if params := fn.ChildByFieldName("parameters"); params != nil {
+	if params := paramsNode(lang, fn); params != nil {
 		st.Params = countParams(lang, params)
 		st.BoolParams = countBoolParams(lang, src, params)
 	}
-	if body := fn.ChildByFieldName("body"); body != nil {
-		st.Body = body
-		st.FanOut = fanOut(lang, src, body)
-		st.Cyclomatic, st.Cognitive, st.MaxNesting = irScore(lang, src, fn)
-		st.NPath = irNPath(lang, src, fn)
-	}
+	fillBodyMetrics(&st, lang, src, fn)
 	return st
+}
+
+// fillBodyMetrics records the measures that need the function body: the
+// callee count and the four control-flow scores. A declaration without a
+// body (an interface method, a C prototype) contributes none of them.
+func fillBodyMetrics(st *FuncStats, lang parser.LanguageID, src []byte, fn *sitter.Node) {
+	body := fn.ChildByFieldName("body")
+	if body == nil {
+		return
+	}
+	st.Body = body
+	st.FanOut = fanOut(lang, src, body)
+	st.Cyclomatic, st.Cognitive, st.MaxNesting = irScore(lang, src, fn)
+	st.NPath = irNPath(lang, src, fn)
+}
+
+// paramsNode resolves the parameter list of a function declaration. C/C++
+// keep it inside the declarator chain, not on the function_definition itself.
+func paramsNode(lang parser.LanguageID, fn *sitter.Node) *sitter.Node {
+	if params := fn.ChildByFieldName("parameters"); params != nil {
+		return params
+	}
+	if lang == parser.LangC || lang == parser.LangCpp {
+		return cParamsNode(fn)
+	}
+	return nil
 }
 
 func funcName(src []byte, fn *sitter.Node) string {
 	name := text(src, fn.ChildByFieldName("name"))
 	if name == "" {
+		// C/C++ function_definition has no name field: the name sits in the
+		// declarator chain (cFuncName in c_adapter.go).
+		name = cFuncName(fn, src)
+	}
+	if name == "" {
 		return "<anonymous>"
 	}
-	// Go methods: receiver "(t *T)" → "T.Name".
-	if recv := fn.ChildByFieldName("receiver"); recv != nil {
-		r := strings.TrimSpace(text(src, recv))
-		r = strings.TrimPrefix(r, "(")
-		r = strings.TrimSuffix(r, ")")
-		if fields := strings.Fields(r); len(fields) > 0 {
-			r = fields[len(fields)-1]
-		}
-		r = strings.TrimPrefix(r, "*")
-		if r != "" {
-			return fmt.Sprintf("%s.%s", r, name)
-		}
+	return goReceiverName(src, fn, name)
+}
+
+// goReceiverName formats a Go method name as "T.Name" from the receiver
+// field; other grammars have no receiver field and return the name as-is.
+func goReceiverName(src []byte, fn *sitter.Node, name string) string {
+	recv := fn.ChildByFieldName("receiver")
+	if recv == nil {
+		return name
+	}
+	r := strings.TrimSpace(text(src, recv))
+	r = strings.TrimPrefix(r, "(")
+	r = strings.TrimSuffix(r, ")")
+	if fields := strings.Fields(r); len(fields) > 0 {
+		r = fields[len(fields)-1]
+	}
+	r = strings.TrimPrefix(r, "*")
+	if r != "" {
+		return fmt.Sprintf("%s.%s", r, name)
 	}
 	return name
+}
+
+// cParamsNode finds the parameter_list of a C/C++ function_definition by
+// walking its declarator chain to the function_declarator.
+func cParamsNode(fn *sitter.Node) *sitter.Node {
+	for d := fn.ChildByFieldName("declarator"); d != nil; {
+		if d.Kind() == "function_declarator" {
+			return d.ChildByFieldName("parameters")
+		}
+		d = d.ChildByFieldName("declarator")
+	}
+	return nil
 }
 
 // countParams counts declared parameters.
 // Go: "a, b int" is two parameters, an unnamed "(int)" is one, a variadic
 // declaration is one. Java: every formal_parameter / spread_parameter is one.
 func countParams(lang parser.LanguageID, list *sitter.Node) int {
-	if lang == parser.LangJava {
-		n := 0
-		for i := uint(0); i < list.NamedChildCount(); i++ {
-			switch list.NamedChild(i).Kind() {
-			case "formal_parameter", "spread_parameter":
-				n++
-			}
-		}
-		return n
+	// Whole-list grammars: every named child of the list is one parameter.
+	switch lang {
+	case parser.LangTS, parser.LangTSX, parser.LangJS:
+		// JS/TS: identifier, required/optional_parameter, rest_pattern, ...
+		return int(list.NamedChildCount())
+	case parser.LangPy:
+		// identifier, default_parameter, typed_parameter, splats, ...
+		return int(list.NamedChildCount())
+	case parser.LangRust:
+		return countParamsRust(list)
+	case parser.LangCS:
+		// parameter, params-array parameter, arg-list ...
+		return int(list.NamedChildCount())
+	case parser.LangC, parser.LangCpp:
+		// a parameter_declaration with one identifier is one parameter; an
+		// abstract declaration (type only, unnamed) is one.
+		return int(list.NamedChildCount())
+	case parser.LangJava:
+		return countParamsJava(list)
 	}
+	return countParamsGo(list)
+}
+
+// countParamsJava counts Java formal_parameter / spread_parameter children.
+func countParamsJava(list *sitter.Node) int {
+	n := 0
+	for i := uint(0); i < list.NamedChildCount(); i++ {
+		switch list.NamedChild(i).Kind() {
+		case "formal_parameter", "spread_parameter":
+			n++
+		}
+	}
+	return n
+}
+
+// countParamsRust counts parameter / self_parameter / variadic_parameter.
+func countParamsRust(list *sitter.Node) int {
+	n := 0
+	for i := uint(0); i < list.NamedChildCount(); i++ {
+		switch list.NamedChild(i).Kind() {
+		case "parameter", "self_parameter", "variadic_parameter":
+			n++
+		}
+	}
+	return n
+}
+
+// countParamsGo counts Go grouped declarations name-by-name: "a, b int" is
+// two parameters, an unnamed "(int)" is one, a variadic declaration is one.
+func countParamsGo(list *sitter.Node) int {
 	n := 0
 	for i := uint(0); i < list.NamedChildCount(); i++ {
 		decl := list.NamedChild(i)
@@ -312,54 +400,190 @@ func countParams(lang parser.LanguageID, list *sitter.Node) int {
 // Go grouped declarations count every name in the group: `a, b bool` is
 // two bool parameters, not one.
 func countBoolParams(lang parser.LanguageID, src []byte, list *sitter.Node) int {
-	boolKind := "type_identifier" // Go: bool is spelled as a type_identifier
-	if lang == parser.LangJava {
-		boolKind = "boolean_type"
+	// Untyped JavaScript has no boolean annotations; TypeScript and the
+	// Go/Java walk below each get their own counter (see countBoolParamsTS
+	// and countBoolParamsClassic).
+	switch lang {
+	case parser.LangJS, parser.LangPy, parser.LangC, parser.LangCpp:
+		// Untyped JavaScript and Python have no boolean annotations; C/C++
+		// spells bool via stdbool or _Bool but declarations are type-only
+		// positionally: count every parameter whose type is exactly bool.
+		if lang == parser.LangC || lang == parser.LangCpp {
+			return countBoolParamsC(src, list)
+		}
+		return 0
+	case parser.LangTS, parser.LangTSX:
+		return countBoolParamsTS(src, list)
+	case parser.LangRust:
+		return countBoolParamsRust(src, list)
+	case parser.LangCS:
+		return countBoolParamsCS(src, list)
+	default:
+		return countBoolParamsClassic(lang, src, list)
 	}
+}
+
+// countBoolParamsC is the C/C++ arm: a parameter_declaration is bool when
+// its type child (skipping const/volatile qualifiers) spells bool or
+// _Bool. A C++ parameter declared `bool b` is a parameter_declaration with
+// a primitive_type child "bool".
+func countBoolParamsC(src []byte, list *sitter.Node) int {
 	n := 0
-	isBool := func(node *sitter.Node) bool {
-		return node.Kind() == boolKind && (lang == parser.LangJava || text(src, node) == "bool")
-	}
-	countGroup := func(decl *sitter.Node) int {
-		// A bool-typed parameter_declaration contributes one per identifier
-		// (unnamed parameters contribute one, matching countParams).
-		ids := 0
-		for i := uint(0); i < decl.NamedChildCount(); i++ {
-			c := decl.NamedChild(i)
-			if c.Kind() == "identifier" {
-				ids++
-			}
-		}
-		if ids == 0 {
-			return 1
-		}
-		return ids
-	}
-	var walk func(node *sitter.Node)
-	walk = func(node *sitter.Node) {
-		if node.Kind() == "parameter_declaration" || node.Kind() == "formal_parameter" {
-			// Count the group iff its own type child is bool (do not descend:
-			// nested functions have their own parameter lists).
-			for i := uint(0); i < node.NamedChildCount(); i++ {
-				if isBool(node.NamedChild(i)) {
-					n += countGroup(node)
-					break
-				}
-			}
-			return
-		}
-		if node.Kind() == "spread_parameter" {
-			// Variadic bool stays uncounted (documented edge, same as before).
-			return
-		}
-		for i := uint(0); i < node.NamedChildCount(); i++ {
-			walk(node.NamedChild(i))
-		}
-	}
 	for i := uint(0); i < list.NamedChildCount(); i++ {
-		walk(list.NamedChild(i))
+		p := list.NamedChild(i)
+		if p.Kind() != "parameter_declaration" && p.Kind() != "optional_parameter_declaration" && p.Kind() != "variadic_parameter_declaration" {
+			continue
+		}
+		if cIsBoolType(src, p) {
+			n++
+		}
 	}
 	return n
+}
+
+// cIsBoolType reports whether the leading type of a C declaration node is
+// bool/_Bool, looking past qualifiers at named children that are types.
+func cIsBoolType(src []byte, decl *sitter.Node) bool {
+	for i := uint(0); i < decl.NamedChildCount(); i++ {
+		c := decl.NamedChild(i)
+		switch c.Kind() {
+		case "type_qualifier": // const/volatile: keep looking
+			continue
+		case "primitive_type":
+			t := text(src, c)
+			return t == "bool" || t == "_Bool"
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// countBoolParamsRust is the Rust arm: a parameter is bool when its type
+// field is the primitive_type "bool".
+func countBoolParamsRust(src []byte, list *sitter.Node) int {
+	return countBoolParamsTyped(src, list, "primitive_type", "bool")
+}
+
+// countBoolParamsCS is the C# arm: a parameter is bool when its type child
+// is the predefined_type "bool".
+func countBoolParamsCS(src []byte, list *sitter.Node) int {
+	return countBoolParamsTyped(src, list, "predefined_type", "bool")
+}
+
+// countBoolParamsTyped counts parameters whose type field is the named type
+// kind spelled as want. Rust and C# share the shape; only the kind of the
+// type node differs.
+func countBoolParamsTyped(src []byte, list *sitter.Node, kind, want string) int {
+	n := 0
+	for i := uint(0); i < list.NamedChildCount(); i++ {
+		p := list.NamedChild(i)
+		if p.Kind() != "parameter" {
+			continue
+		}
+		if t := p.ChildByFieldName("type"); t != nil && t.Kind() == kind && text(src, t) == want {
+			n++
+		}
+	}
+	return n
+}
+
+// countBoolParamsClassic is the Go/Java arm of the boolean-parameter count.
+func countBoolParamsClassic(lang parser.LanguageID, src []byte, list *sitter.Node) int {
+	n := 0
+	for i := uint(0); i < list.NamedChildCount(); i++ {
+		n += classicParamCount(lang, src, list.NamedChild(i))
+	}
+	return n
+}
+
+// classicParamCount counts the bool parameters one node of a Go/Java
+// parameter list declares, descending through grouping nodes.
+func classicParamCount(lang parser.LanguageID, src []byte, node *sitter.Node) int {
+	switch node.Kind() {
+	case "parameter_declaration", "formal_parameter":
+		if !classicBoolType(lang, src, node) {
+			return 0
+		}
+		return classicGroupSize(node)
+	case "spread_parameter":
+		// Variadic bool stays uncounted (documented edge, same as before).
+		return 0
+	}
+	n := 0
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		n += classicParamCount(lang, src, node.NamedChild(i))
+	}
+	return n
+}
+
+// classicBoolType reports whether a Go/Java parameter declaration is
+// bool-typed: Go spells it the type_identifier "bool", Java boolean_type.
+func classicBoolType(lang parser.LanguageID, src []byte, decl *sitter.Node) bool {
+	for i := uint(0); i < decl.NamedChildCount(); i++ {
+		c := decl.NamedChild(i)
+		if lang == parser.LangJava {
+			if c.Kind() == "boolean_type" {
+				return true
+			}
+			continue
+		}
+		if c.Kind() == "type_identifier" && text(src, c) == "bool" {
+			return true
+		}
+	}
+	return false
+}
+
+// classicGroupSize counts the names a bool-typed declaration introduces:
+// `a, b bool` is two bool parameters, not one. An unnamed parameter counts
+// once, matching countParams.
+func classicGroupSize(decl *sitter.Node) int {
+	ids := 0
+	for i := uint(0); i < decl.NamedChildCount(); i++ {
+		if decl.NamedChild(i).Kind() == "identifier" {
+			ids++
+		}
+	}
+	if ids == 0 {
+		return 1
+	}
+	return ids
+}
+
+// countBoolParamsTS is the TypeScript arm of the boolean-parameter count: the
+// annotation is a type_annotation child of the parameter; a parameter is bool
+// when that annotation is the type_identifier `boolean`.
+//
+// The annotation is read through its inner type node, not compared at the
+// annotation itself: `a: boolean` parses as type_annotation → predefined_type
+// → boolean, so a check for a `boolean` type_identifier never matched and every
+// TypeScript function reported zero boolean parameters.
+func countBoolParamsTS(src []byte, list *sitter.Node) int {
+	n := 0
+	for i := uint(0); i < list.NamedChildCount(); i++ {
+		if tsTypeName(src, list.NamedChild(i)) == "boolean" {
+			n++
+		}
+	}
+	return n
+}
+
+// tsTypeName returns the spelled type of one TypeScript parameter, or "" when
+// it has no annotation. The type field of a required/optional parameter is a
+// type_annotation wrapper, so the inner type node is what names the type.
+func tsTypeName(src []byte, param *sitter.Node) string {
+	ann := param.ChildByFieldName("type")
+	if ann == nil {
+		return ""
+	}
+	if ann.Kind() == "type_annotation" {
+		if inner := ann.NamedChild(0); inner != nil {
+			return text(src, inner)
+		}
+		return ""
+	}
+	return text(src, ann)
 }
 
 // fanOut counts the distinct callees invoked inside one function body —
@@ -371,16 +595,49 @@ func countBoolParams(lang parser.LanguageID, src []byte, list *sitter.Node) int 
 // Function-literal invocations (Go) and constructor calls (Java) are not
 // behavior-of-another-unit calls and are excluded.
 func fanOut(lang parser.LanguageID, src []byte, body *sitter.Node) int {
-	callKind, calleeField := "call_expression", "function"
-	if lang == parser.LangJava {
-		callKind, calleeField = "method_invocation", "name"
+	return len(callsOf(callSpellingFor(lang), src, body))
+}
+
+// callSpelling is how one grammar spells a call and a construction.
+type callSpelling struct {
+	callKind    string
+	calleeField string
+	newKind     string
+}
+
+// callSpellingFor resolves the node kinds a language uses for a call site and
+// for a constructor invocation. Go and Java construct through call sites
+// already covered, so newKind stays empty for them.
+func callSpellingFor(lang parser.LanguageID) callSpelling {
+	sp := callSpelling{callKind: "call_expression", calleeField: "function"}
+	switch lang {
+	case parser.LangJava:
+		sp.callKind, sp.calleeField = "method_invocation", "name"
+	case parser.LangCS:
+		sp.callKind, sp.calleeField, sp.newKind = "invocation_expression", "function", "object_creation_expression"
+	case parser.LangTS, parser.LangTSX, parser.LangJS:
+		sp.newKind = "new_expression" // `new Foo()` has constructor field, no function field
+	case parser.LangPy:
+		sp.newKind = "call" // Python constructs via `Foo(...)`: same call kind
 	}
+	return sp
+}
+
+// callsOf collects the distinct call targets of one body. Function-literal
+// invocations (Go) and constructor calls through a function field (Java) are
+// not behavior-of-another-unit calls and are excluded.
+func callsOf(sp callSpelling, src []byte, body *sitter.Node) map[string]bool {
 	seen := map[string]bool{}
 	var walk func(node *sitter.Node)
 	walk = func(node *sitter.Node) {
-		if node.Kind() == callKind {
-			if callee := node.ChildByFieldName(calleeField); callee != nil && callee.Kind() != "function_literal" {
+		if node.Kind() == sp.callKind {
+			if callee := node.ChildByFieldName(sp.calleeField); isCallTarget(callee) {
 				seen[flattenWS(text(src, callee))] = true
+			}
+		}
+		if sp.newKind != "" && node.Kind() == sp.newKind {
+			if ctor := node.ChildByFieldName("constructor"); ctor != nil {
+				seen[flattenWS("new "+text(src, ctor))] = true
 			}
 		}
 		for i := uint(0); i < node.NamedChildCount(); i++ {
@@ -388,7 +645,20 @@ func fanOut(lang parser.LanguageID, src []byte, body *sitter.Node) int {
 		}
 	}
 	walk(body)
-	return len(seen)
+	return seen
+}
+
+// isCallTarget reports whether a call's callee names another unit. A
+// function literal is the enclosing unit's own body, not a call to one.
+func isCallTarget(callee *sitter.Node) bool {
+	if callee == nil {
+		return false
+	}
+	switch callee.Kind() {
+	case "function_literal", "arrow_function", "function_expression":
+		return false
+	}
+	return true
 }
 
 // flattenWS removes all whitespace, so a folded multi-line call target
@@ -421,6 +691,20 @@ func lowererFor(lang parser.LanguageID) nodeLowerer {
 	switch lang {
 	case parser.LangJava:
 		return javaLowerer{}
+	case parser.LangTS, parser.LangTSX:
+		return jsLowerer{ts: true}
+	case parser.LangJS:
+		return jsLowerer{}
+	case parser.LangPy:
+		return pyLowerer{}
+	case parser.LangC:
+		return cLowerer{}
+	case parser.LangCpp:
+		return cLowerer{cpp: true}
+	case parser.LangCS:
+		return csLowerer{}
+	case parser.LangRust:
+		return rustLowerer{}
 	default:
 		return goLowerer{}
 	}

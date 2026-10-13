@@ -1,6 +1,10 @@
 package arch
 
-import "sort"
+import (
+	"path"
+	"sort"
+	"strings"
+)
 
 // Import is one import statement of a file, with its 1-based line so a
 // violation can be anchored where it was written.
@@ -9,14 +13,30 @@ type Import struct {
 	Line int
 }
 
+// Import styles: which end of an import path names the package. They are the
+// languages' own conventions, not a choice this tool gets to make.
+const (
+	// StyleGo matches on the trailing segments: the import IS the package path
+	// (Go, Python, TypeScript/JavaScript, C/C++), possibly with the imported
+	// file appended.
+	StyleGo = "go"
+	// StyleLead matches on the leading segments: the import names a type inside
+	// a package, so only the head of the path can be the package (Java, C#).
+	StyleLead = "lead"
+	// StyleRust matches on the leading segments but normalises the separators
+	// first: `crate::geo::shape` is a module path, not a filesystem path.
+	StyleRust = "rust"
+)
+
 // File is the dependency-relevant part of one source file: the package it
 // belongs to and what it imports.
 type File struct {
 	Name string // path, for reporting
 	Pkg  string // package the file belongs to
-	// Java marks a Java file: its imports name a type inside a package, so
-	// resolution runs on the leading segments instead of the trailing ones.
-	Java    bool
+	// Style is the import convention of the file's language (see the Style*
+	// constants). The empty value behaves as StyleGo, which keeps callers that
+	// predate the multi-language port working.
+	Style   string
 	Imports []Import
 }
 
@@ -47,7 +67,7 @@ func Build(files []File) *Graph {
 
 	for _, f := range files {
 		for _, imp := range f.Imports {
-			to := idx.resolve(imp.Path, f.Java)
+			to := idx.resolve(relativeImport(f.Pkg, imp.Path), f.Style)
 			if to == "" || to == f.Pkg {
 				continue
 			}
@@ -56,6 +76,21 @@ func Build(files []File) *Graph {
 	}
 	sortEdges(g.edges)
 	return g
+}
+
+// relativeImport resolves an import written relative to the importing file
+// ("./util", "../b/y") against that file's package directory. Languages that
+// name imports relative to the source file rather than to the import root —
+// TypeScript and JavaScript — are unresolvable without this, and an
+// unresolved import is an edge the graph silently never draws.
+//
+// An absolute import (Go, Python, Rust, C/C++, Java, C#) is returned as-is:
+// only a leading "." can mean "relative to me".
+func relativeImport(fromPkg, imp string) string {
+	if !strings.HasPrefix(imp, "./") && !strings.HasPrefix(imp, "../") {
+		return imp
+	}
+	return strings.TrimPrefix(path.Clean(path.Join(fromPkg, imp)), "./")
 }
 
 // pkgIndex buckets the known packages by first and last segment, so an import
@@ -85,14 +120,27 @@ func newPkgIndex(pkgs []string) *pkgIndex {
 	return ix
 }
 
+// leadStyle reports whether an import names the package at the head of the
+// path. The empty style is the pre-multi-language default and behaves as Go's.
+func leadStyle(style string) bool { return style == StyleLead || style == StyleRust }
+
+// normalizeImport rewrites an import path into the segment form the matcher
+// speaks. Rust is the only language whose module separator is not already "/".
+func normalizeImport(imp, style string) string {
+	if style == StyleRust {
+		return strings.ReplaceAll(imp, "::", "/")
+	}
+	return imp
+}
+
 // resolve returns the longest known package an import path points at, or "".
-func (ix *pkgIndex) resolve(imp string, java bool) string {
-	is := segments(imp)
+func (ix *pkgIndex) resolve(imp, style string) string {
+	is := segments(normalizeImport(imp, style))
 	if len(is) == 0 {
 		return ""
 	}
 	cands := ix.byLast[is[len(is)-1]]
-	if java {
+	if leadStyle(style) {
 		cands = ix.byFirst[is[0]]
 	}
 	best := ""
@@ -100,7 +148,7 @@ func (ix *pkgIndex) resolve(imp string, java bool) string {
 		if len(p) <= len(best) {
 			continue
 		}
-		if matchDir(is, ix.segs[p], java) {
+		if matchDir(is, ix.segs[p], style) {
 			best = p
 		}
 	}

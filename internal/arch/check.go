@@ -58,7 +58,7 @@ type Violation struct {
 // a large repository has orders of magnitude more edges than packages, and the
 // per-edge work is then two map lookups.
 func Check(g *Graph, p Policy) []Violation {
-	m := newMatcher(p, g.Packages())
+	m := newMatcher(p, g, g.Packages())
 	var out []Violation
 	for _, e := range g.Edges() {
 		if v, blocked := m.forbidden(e); blocked {
@@ -87,6 +87,7 @@ type matcher struct {
 	forbids []compiledForbid
 	layerOf map[string]Layer           // package → its layer (absent: unlayered)
 	allowed map[string]map[string]bool // layer name → packages it may depend on
+	fanIn   fanIn                      // reverse-dependency shape, for repair advice
 }
 
 type compiledForbid struct {
@@ -94,11 +95,13 @@ type compiledForbid struct {
 	reason   string
 }
 
-func newMatcher(p Policy, pkgs []string) matcher {
+func newMatcher(p Policy, g *Graph, pkgs []string) matcher {
+	layerOf := AssignLayers(p.Layers, pkgs)
 	m := matcher{
 		forbids: compileForbids(p.Forbids, pkgs),
-		layerOf: AssignLayers(p.Layers, pkgs),
+		layerOf: layerOf,
 		allowed: map[string]map[string]bool{},
+		fanIn:   computeFanIn(g, layerOf),
 	}
 	m.compileAllowed(p.Layers, pkgs)
 	return m
@@ -213,6 +216,9 @@ func (m matcher) layerViolation(e Edge) (Violation, bool) {
 	// code instead is the failure mode to name explicitly.
 	msg += " — fix: define a port (interface) in layer \"" + from.Name +
 		"\" and let layer \"" + to.Name + "\" implement it, injected at the composition root; do not copy code to bypass layering"
+	// Structural advice on top: the pilot's 77/132 root cause was misplaced
+	// packages, not wrong wiring — the fan-in shape tells the cases apart.
+	msg += "; " + m.suggestFix(e)
 	return atEdge(e, RuleLayerViolation, msg), true
 }
 

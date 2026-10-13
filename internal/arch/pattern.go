@@ -113,18 +113,19 @@ func MatchesAny(patterns []string, name string) bool {
 // Go import paths *are* package paths, and their final segment is the package
 // name, so the package is matched as a trailing sequence. A Java import names a
 // type inside a package ("com/foo/Bar") or a static member of one, so the
-// package is matched as a leading sequence instead.
-func resolves(imp, pkg string, java bool) bool {
-	return matchDir(segments(imp), segments(pkg), java)
+// package is matched as a leading sequence instead. C# and Rust are leading
+// too: C#'s using names a namespace prefix, Rust's use names a module path.
+func resolves(imp, pkg string, style string) bool {
+	return matchDir(segments(normalizeImport(imp, style)), segments(pkg), style)
 }
 
 // matchDir is resolves() on already-split segments: the one rule shared by the
 // indexed fast path in Build and the plain helper.
-func matchDir(imp, pkg []string, java bool) bool {
+func matchDir(imp, pkg []string, style string) bool {
 	if len(pkg) == 0 || len(imp) < len(pkg) {
 		return false
 	}
-	if java {
+	if leadStyle(style) {
 		return equalSegs(imp[:len(pkg)], pkg)
 	}
 	return equalSegs(imp[len(imp)-len(pkg):], pkg)

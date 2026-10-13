@@ -35,8 +35,41 @@ func Extract(lang parser.LanguageID, src []byte, root *sitter.Node) Raw {
 		return extractGo(src, root)
 	case parser.LangJava:
 		return extractJava(src, root)
+	case parser.LangTS, parser.LangTSX:
+		return extractTS(src, root)
+	case parser.LangJS:
+		return extractJS(src, root)
+	case parser.LangPy:
+		return extractPy(src, root)
+	case parser.LangC:
+		return extractC(src, root)
+	case parser.LangCpp:
+		return extractCpp(src, root)
+	case parser.LangCS:
+		return extractCS(src, root)
+	case parser.LangRust:
+		return extractRust(src, root)
 	default:
 		return Raw{}
+	}
+}
+
+// ImportStyle returns the import convention of a language: which end of an
+// import path names the package, and how the path is punctuated. It lives here
+// rather than at each call site so a new language cannot be added to the
+// extractor and forgotten by the graph.
+func ImportStyle(lang parser.LanguageID) string {
+	switch lang {
+	case parser.LangGo:
+		// Only Go's import path *is* the package path, so only Go matches on
+		// the tail. Everywhere else the import names something inside a
+		// package — a type (Java, C#), a module (Python, TypeScript), a
+		// header (C/C++) — so the package is the head of the path.
+		return StyleGo
+	case parser.LangRust:
+		return StyleRust
+	default:
+		return StyleLead
 	}
 }
 

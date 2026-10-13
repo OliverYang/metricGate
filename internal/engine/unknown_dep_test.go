@@ -77,6 +77,47 @@ var _ = dependency.Thing
 
 // The rule is a plain rule, so a policy can disable it and `metricgate: ignore`
 // can suppress it — the same escape hatches as every other rule.
+// A quoted include is a repository-local header, not an external dependency:
+// trimming the quotes away would turn "local.h" into a bare package name that
+// no manifest could ever declare, so it must never be flagged. A third-party
+// angle-bracket include is still a real dependency and must still be flagged.
+func TestUnknownDependencyQuotedIncludeIsRepoLocal(t *testing.T) {
+	src := `#include "local.h"
+#include <stdio.h>
+#include <openssl/ssl.h>
+
+int main(void) { return 0; }
+`
+	for _, tc := range []struct {
+		name string
+		lang string
+	}{
+		{"gen/main.c", "C"},
+		{"gen/main.cpp", "C++"},
+	} {
+		t.Run(tc.lang, func(t *testing.T) {
+			counts := checkWithAllow(t, nil, tc.name, src)
+			if counts["unknown-dependency"] != 1 {
+				t.Errorf("unknown-dependency = %d, want exactly 1 (only <openssl/ssl.h>): a quoted include is repo-local and <stdio.h> is the standard library\n%v",
+					counts["unknown-dependency"], counts)
+			}
+		})
+	}
+}
+
+// The exemption must not swallow the allowlist: a declared third-party angle
+// include stays quiet, an undeclared one is still reported.
+func TestUnknownDependencyAngleIncludeRespectsAllowlist(t *testing.T) {
+	src := `#include <real-lib/api.h>
+#include <other-lib/api.h>
+`
+	counts := checkWithAllow(t, []string{"real-lib"}, "gen/main.c", src)
+	if counts["unknown-dependency"] != 1 {
+		t.Errorf("unknown-dependency = %d, want exactly 1 (only <other-lib/api.h>)\n%v",
+			counts["unknown-dependency"], counts)
+	}
+}
+
 func TestUnknownDependencyCarriesEvidenceAnchor(t *testing.T) {
 	eng, err := New(testConfig(t))
 	if err != nil {

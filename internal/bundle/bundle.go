@@ -50,6 +50,12 @@ type RunInfo struct {
 	Base   string `json:"base,omitempty"`
 	Head   string `json:"head,omitempty"`
 	Commit string `json:"commit,omitempty"`
+	// TraceID is the ambient trace id ($METRICGATE_TRACE_ID), or empty when
+	// the operator set none. It is the key that ties this bundle to the runs
+	// and tool calls produced by the same unit of work, and an empty value is
+	// a legal state — "no trace" never means "no data", it means the host
+	// chose not to attribute this envelope.
+	TraceID string `json:"traceId,omitempty"`
 }
 
 type BudgetInfo struct {
@@ -199,7 +205,7 @@ func validate(opts BuildOptions) (Request, *config.Config, error) {
 func newBundle(req Request, cfg *config.Config) *Bundle {
 	b := &Bundle{
 		SchemaVersion: SchemaVersion,
-		Run:           RunInfo{Root: relativeRoot(req.Root), Mode: string(req.Mode), Base: req.From, Head: req.To, Commit: req.Commit},
+		Run:           RunInfo{Root: relativeRoot(req.Root), Mode: string(req.Mode), Base: req.From, Head: req.To, Commit: req.Commit, TraceID: traceID()},
 		Policy:        policyInfo(cfg),
 	}
 	b.Instructions = Instructions{FindingSchema: "metricgate.finding.v1", OnlyReportChangedCode: req.Mode != "directory"}
@@ -496,19 +502,66 @@ func dropOneOptional(files *[]File) bool {
 	return false
 }
 
-func policyInfo(cfg *config.Config) PolicyInfo {
+// PolicyDigest returns the fingerprint of the policy document actually in
+// force, as "sha256:<hex>". It is the one definition shared by the bundle
+// envelope, the run store and the machine-readable reports, so "which version
+// of the rules produced this verdict" can never have two answers.
+//
+// The digest covers the EFFECTIVE document, not its file: when a policy
+// extends another, the merged result is what ran, so that is what is hashed.
+// Digging the file instead would give a repository and its parent the same
+// fingerprint while they enforce different rules, and two different merging
+// repos different fingerprints while they enforce identical ones.
+//
+// A policy loaded from bytes rather than a file (the built-in default, a test,
+// a stdin policy) has no path to read, so the bytes it was given are digested.
+func PolicyDigest(cfg *config.Config) string {
 	data := []byte(config.DefaultYAML)
-	source := "builtin"
-	if cfg.SourcePath != "" {
+	switch {
+	case cfg == nil:
+		// keep the default
+	case cfg.PolicyDocument() != nil:
+		data = cfg.PolicyDocument()
+	case cfg.SourcePath != "":
 		if raw, err := os.ReadFile(cfg.SourcePath); err == nil {
 			data = raw
+		}
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// traceID returns the ambient trace id, or "" when the operator set none.
+//
+// It is read on every call rather than cached, because a bundle is built once
+// per request and a process may serve several requests under different traces
+// over its life. An empty value is the normal state for a hand-run check: the
+// key is only meaningful when a host attributes the work it is doing.
+func traceID() string {
+	return strings.TrimSpace(os.Getenv("METRICGATE_TRACE_ID"))
+}
+
+// policyInfo describes the policy for the envelope. The digest is the shared
+// PolicyDigest; Source keeps its own label logic (a basename for a file, the
+// source kind otherwise).
+func policyInfo(cfg *config.Config) PolicyInfo {
+	return PolicyInfo{Digest: PolicyDigest(cfg), Source: PolicySourceLabel(cfg)}
+}
+
+// PolicySourceLabel names where the policy in force came from, for the
+// human-facing half of the provenance pair: a file basename when a file was
+// read, the source kind otherwise. Exported because the SARIF writer stamps
+// the same pair, and two spellings of "which policy" would be worse than one.
+func PolicySourceLabel(cfg *config.Config) string {
+	source := "builtin"
+	if cfg.SourcePath != "" {
+		if _, err := os.ReadFile(cfg.SourcePath); err == nil {
 			source = filepath.Base(cfg.SourcePath)
 		}
 	} else if cfg.SourceKind != "" && cfg.SourceKind != "builtin" {
 		source = cfg.SourceKind
 	}
-	sum := sha256.Sum256(data)
-	return PolicyInfo{Digest: "sha256:" + hex.EncodeToString(sum[:]), Source: source}
+	return source
 }
 
 func renderDiff(c git.FileChange) string {

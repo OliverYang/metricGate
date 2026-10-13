@@ -103,11 +103,16 @@ func TestValidateVocabulary(t *testing.T) {
 		spec  string
 		badOK bool
 	}{
-		{`{"lang":"python","kind":"call","match":"x"}`, false},                  // unsupported lang
-		{`{"lang":"go","kind":"constructor","match":"X"}`, false},               // java-only kind
+		{`{"lang":"cobol","kind":"call","match":"x"}`, false},                   // unregistered language
+		{`{"lang":"go","kind":"constructor","match":"X"}`, false},               // kind Go cannot express
+		{`{"lang":"python","kind":"constructor","match":"X"}`, false},           // kind Python cannot express
 		{`{"lang":"java","kind":"call","match":""}`, false},                     // empty match
 		{`{"lang":"java","kind":"call","match":"x","severity":"fatal"}`, false}, // bad severity
 		{`{"lang":"java","kind":"constructor","match":"SimpleDateFormat"}`, true},
+		{`{"lang":"python","kind":"call","match":"requests.get"}`, true},
+		{`{"lang":"typescript","kind":"constructor","match":"Foo"}`, true},
+		{`{"lang":"rust","kind":"import","match":"openssl"}`, true},
+		{`{"lang":"csharp","kind":"call","match":"Console.WriteLine"}`, true},
 	}
 	for i, c := range cases {
 		err := Validate(mustSpec(t, c.spec))

@@ -70,15 +70,21 @@ func (b Ban) Title() string {
 }
 
 // RulesFor returns the full rule pack of a language: the built-in rules plus
-// the rules compiled from the policy's ban list. The engine and the context
-// generator both call it, so what a prompt promises and what the gate enforces
-// cannot drift apart.
-func RulesFor(id parser.LanguageID, cfg *config.Config) []*Rule {
+// the rules compiled from the policy's ban list and the project's custom
+// DSL assertions. The engine and the context generator both call it, so
+// what a prompt promises and what the gate enforces cannot drift apart.
+// langPtr is the grammar, needed to validate DSL node kinds; nil skips DSL
+// rules (callers that only enumerate rule metadata).
+func RulesFor(id parser.LanguageID, cfg *config.Config, langPtr *sitter.Language) []*Rule {
 	pack := append([]*Rule{}, ForLanguage(id)...)
 	if cfg == nil {
 		return pack
 	}
-	return append(pack, BannedRules(string(id), BansFromConfig(cfg.Bans(string(id))))...)
+	pack = append(pack, BannedRules(string(id), BansFromConfig(cfg.Bans(string(id))))...)
+	if langPtr != nil {
+		pack = append(pack, DslRules(string(id), langPtr, cfg.CustomRules(string(id)))...)
+	}
+	return pack
 }
 
 // BansFromConfig compiles policy entries, dropping the ones that cannot be
@@ -129,9 +135,14 @@ func banFromConfig(e config.BanConfig) (Ban, bool) {
 
 // banBuilders is the language registry for compiled bans: a language that
 // cannot express a shape contributes nothing for it.
-var banBuilders = map[string]map[BanKind]func(Ban) *Rule{
-	"go":   {BanCall: goCallBan, BanImport: goImportBan},
-	"java": {BanCall: javaCallBan, BanImport: javaImportBan, BanConstructor: javaConstructorBan},
+var banBuilders = langBanBuilders()
+
+// CanExpress reports whether a language has a builder for a ban kind. It is
+// the one place that answers "could this policy entry ever fire here?", which
+// the digest needs so it never advertises a constraint the gate cannot enforce
+// and a caller needs before writing a ban into a language section.
+func CanExpress(lang string, kind BanKind) bool {
+	return banBuilders[lang][kind] != nil
 }
 
 // BannedRules turns compiled bans into rules for one language.
@@ -399,21 +410,50 @@ func nameMatch(got, want string, prefix bool) bool {
 // excluded reports whether this file is outside the ban's reach, through the
 // ban's own except_files or through a per-rule allowed_files override.
 func excluded(ctx *MatchCtx, b Ban) bool {
-	for _, pat := range append(append([]string{}, b.Except...), ctx.OptStrings("allowed_files")...) {
-		if pat == "" {
-			continue
-		}
-		if strings.HasSuffix(ctx.File, pat) || strings.HasPrefix(ctx.File, pat) {
-			return true
-		}
-		if m, _ := filepath.Match(pat, filepath.Base(ctx.File)); m {
-			return true
-		}
-		if m, _ := filepath.Match(pat, ctx.File); m {
+	return fileMatches(append(append([]string{}, b.Except...), ctx.OptStrings("allowed_files")...), ctx.File)
+}
+
+// fileMatches reports whether a file is named by any of the patterns. It is
+// the one place that decides what a policy file pattern means, shared by a
+// ban's except_files/allowed_files and a DSL rule's files so a policy author
+// only has to learn the vocabulary once: an exact path, a path prefix
+// ("cmd/app/"), a suffix ("_test.go"), or a glob matched against either the
+// whole path or the base name.
+//
+// A leading "**/" means "at any depth" ("**/*_test.go" == every test file).
+// It has to be handled here rather than handed to filepath.Match, which does
+// not let a wildcard cross a separator: "**/*_test.go" would otherwise match
+// only files exactly one directory down and silently skip the rest. Deeper
+// "**" is left as an ordinary "*" (one path segment) on purpose — guessing
+// at partial glob dialects is how a pattern quietly stops meaning anything.
+func fileMatches(patterns []string, file string) bool {
+	for _, pat := range patterns {
+		if filePatternMatch(pat, file) {
 			return true
 		}
 	}
 	return false
+}
+
+// filePatternMatch reports whether one pattern names the file.
+func filePatternMatch(pat, file string) bool {
+	if pat == "" {
+		return false
+	}
+	if pat == "**" {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(pat, "**/"); ok {
+		return filePatternMatch(rest, file)
+	}
+	if strings.HasSuffix(file, pat) || strings.HasPrefix(file, pat) {
+		return true
+	}
+	if m, _ := filepath.Match(pat, filepath.Base(file)); m {
+		return true
+	}
+	m, _ := filepath.Match(pat, file)
+	return m
 }
 
 func banMessage(b Ban, seen string) string {

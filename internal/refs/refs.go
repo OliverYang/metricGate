@@ -50,6 +50,16 @@ func Extract(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID)
 		w.walkGo(tree.RootNode(), "")
 	case parser.LangJava:
 		w.walkJava(tree.RootNode(), "")
+	case parser.LangTS, parser.LangTSX, parser.LangJS:
+		w.walkJS(tree.RootNode(), "")
+	case parser.LangPy:
+		w.walkPy(tree.RootNode(), "")
+	case parser.LangC, parser.LangCpp:
+		w.walkC(tree.RootNode(), "")
+	case parser.LangCS:
+		w.walkCS(tree.RootNode(), "")
+	case parser.LangRust:
+		w.walkRust(tree.RootNode(), "")
 	}
 	return w.out
 }
@@ -92,6 +102,52 @@ func (w *walker) skipName(n *sitter.Node) {
 	if name := n.ChildByFieldName("name"); name != nil {
 		w.skip[name.StartByte()] = true
 	}
+}
+
+// heritageNameKinds are the node kinds that spell a heritage base as a plain
+// name *and* that no other branch of the walk already records. TypeScript's
+// `implements I` is deliberately absent: it uses `type_identifier`, which
+// walkJS already turns into a type reference, so listing it here would count
+// the same base twice. Anything not listed — a factory call
+// (`class A extends mixin(B)`), a computed expression, a keyword argument — is
+// skipped rather than guessed at, because a wrong base fabricates impact that
+// does not exist.
+var heritageNameKinds = map[string]bool{
+	"identifier":             true, // Python/JS/TS `extends X`
+	"attribute":              true, // Python: module.Class
+	"member_expression":      true, // JS/TS: module.Class
+	"scoped_type_identifier": true, // TS: Namespace.Class
+}
+
+// heritageRefs records one KindType reference per named base type of a class's
+// heritage clause. Inheriting from a type is a use of it, and it is the
+// coarsest edge an impact query can follow: changing a base class reaches
+// every subclass, which no call-site edge can express.
+//
+// The candidates are collected by the walker that knows its grammar's shape
+// (Python spells them as an argument_list, JS/TS as class_heritage) and are
+// filtered here, so all three languages share one definition of "a base that
+// can be followed".
+func (w *walker) heritageRefs(candidates []*sitter.Node, enclosing string) {
+	for _, base := range candidates {
+		if base == nil || !heritageNameKinds[base.Kind()] || w.skip[base.StartByte()] {
+			continue
+		}
+		name, recv := baseName(w.text(base))
+		w.add(name, KindType, recv, enclosing, base)
+	}
+}
+
+// baseName splits a heritage base into the name an index is keyed by and its
+// textual qualifier. `Base` yields (Base, ""); `mixins.Other` yields
+// (Other, mixins) so a qualified base is still findable under its own name,
+// matching how every other reference in this package is recorded.
+func baseName(text string) (name, recv string) {
+	text = oneline(text, 60)
+	if dot := strings.LastIndex(text, "."); dot >= 0 {
+		return text[dot+1:], text[:dot]
+	}
+	return text, ""
 }
 
 // Index maps symbol names to their use sites.

@@ -23,6 +23,7 @@ import (
 	"metricgate/internal/arch"
 	"metricgate/internal/config"
 	"metricgate/internal/engine"
+	"metricgate/internal/rules"
 	"metricgate/internal/symbols"
 )
 
@@ -40,7 +41,7 @@ type Options struct {
 	// how to get the full list. Empty (default) = full list, byte-identical to
 	// previous behavior.
 	Task string
-	Lang string // "go" or "java"; empty resolves to "go"
+	Lang string // a registered language id; empty resolves to "go"
 	// MaxSymbols caps the reuse-symbol list. 0 → default 30.
 	MaxSymbols int
 	// Index is the prebuilt symbol index for reuse guidance. Nil → section omitted.
@@ -407,8 +408,8 @@ func banSection(cfg *config.Config, lang, pkg string, task string) ([]string, []
 		case "import":
 			line = fmt.Sprintf("禁止 import %s（含其子包）", b.Match)
 		case "constructor":
-			if lang != "java" {
-				continue // Java-only primitive: never advertise what the gate cannot enforce
+			if !rules.CanExpress(lang, rules.BanConstructor) {
+				continue // never advertise what the gate cannot enforce
 			}
 			line = fmt.Sprintf("禁止 new %s", b.Match)
 			if len(b.ArgsBan) > 0 {
@@ -432,7 +433,6 @@ func banSection(cfg *config.Config, lang, pkg string, task string) ([]string, []
 	}
 	return lines, srcs, warn
 }
-
 
 // fullyExempt reports whether every file of the target package is exempt
 // from the ban, so the digest line is omitted entirely (anti-FP-fatigue).
@@ -500,11 +500,10 @@ func precedentSection(raw []string, pkg string, lang string, cfg *config.Config)
 	if pkg == "" || len(raw) == 0 {
 		return nil, nil
 	}
-	java := lang == "java"
 	var lines []string
 	seen := map[string]bool{}
 	for _, imp := range raw {
-		p := precedentPath(imp, java, cfg.Dependencies.Self)
+		p := precedentPath(imp, lang, cfg.Dependencies.Self)
 		if p == "" || seen[p] {
 			continue
 		}
@@ -527,36 +526,86 @@ func isInternalImport(p string) bool {
 	return strings.HasPrefix(p, "internal/") || strings.Contains(p, "/internal/")
 }
 
-// precedentPath normalises one raw import string to a bare precedent path,
-// or "" when the import is not a precedent: Go wants in-repo internal/
-// imports (alias prefix stripped); Java wants the statement text cleaned and
-// only imports inside the declared module self prefixes (no internal/
-// convention). lang selects the family; a Go-digest caller may still pass a
-// stray "import …" statement and it is cleaned anyway.
-func precedentPath(raw string, java bool, self []string) string {
-	p := raw
-	isJava := java || strings.HasPrefix(strings.TrimSpace(p), "import ")
-	if isJava {
-		// Java facts store the whole statement: import x.y.Z; / import static x.y.Z;
-		p = strings.TrimPrefix(p, "import ")
-		p = strings.TrimSuffix(strings.TrimSpace(p), ";")
-		if i := strings.LastIndex(p, " "); i >= 0 {
-			p = p[i+1:]
+// precedentPath normalises one raw import string to a bare precedent path, or
+// "" when the import is not an in-repo dependency. What counts as "ours" is
+// spelled differently in every language — a relative specifier anywhere, Go's
+// module prefix, Java's dotted self prefix, a quoted C include, Rust's crate
+// root — while an import that only reaches outside the repository is never an
+// architecture decision worth imitating.
+func precedentPath(raw, lang string, self []string) string {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return ""
+	}
+	// A relative specifier is inside the repository in every language that
+	// has one (TypeScript, JavaScript, Python, C/C++ includes).
+	if strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") {
+		return p
+	}
+	switch lang {
+	case "rust":
+		return rustPrecedent(p, self)
+	case "c", "cpp":
+		// A quoted include is a file in this repository; an angled one names
+		// a system or third-party header and is not an architecture decision.
+		if strings.HasPrefix(p, "\"") {
+			return strings.Trim(p, "\"")
 		}
-		p = strings.Trim(p, "\"")
+		return ""
+	case "java":
+		p = javaImportPath(p)
 		if !hasSelfPrefix(p, self) {
 			return ""
 		}
 		return p
 	}
+	// Go and the dotted languages (Python, C#, bare TS/JS specifiers): drop an
+	// alias prefix if present, then keep only what is inside the repository.
 	if i := strings.Index(p, " "); i >= 0 {
-		p = p[i+1:] // drop the Go alias prefix; the path is the last word
+		p = p[i+1:] // Go alias prefix: the path is the last word
 	}
-	p = strings.Trim(p, "\"")
-	if !isInternalImport(p) {
-		return ""
+	p = strings.Trim(p, "\"'")
+	if lang == "go" {
+		if !isInternalImport(p) {
+			return ""
+		}
+		return p
 	}
-	return p
+	if hasSelfPrefix(p, self) {
+		return p
+	}
+	return ""
+}
+
+// javaImportPath cleans a stored Java import statement down to its path.
+func javaImportPath(p string) string {
+	p = strings.TrimPrefix(p, "import ")
+	p = strings.TrimSuffix(strings.TrimSpace(p), ";")
+	if i := strings.LastIndex(p, " "); i >= 0 {
+		p = p[i+1:] // static import: the path is the last word
+	}
+	return strings.Trim(p, "\"")
+}
+
+// rustPrecedent reduces a Rust use path to a precedent, or "" when it points
+// outside the crate. "crate::" and "self::" are this crate by definition;
+// "super::" is a parent module, also inside. A bare first segment is another
+// crate unless the policy declares it as our own.
+func rustPrecedent(p string, self []string) string {
+	p = strings.TrimSuffix(strings.TrimSpace(p), ";")
+	path := strings.ReplaceAll(p, "::", "/")
+	root := path
+	if i := strings.Index(path, "/"); i >= 0 {
+		root = path[:i]
+	}
+	switch root {
+	case "crate", "self", "super":
+		return path
+	}
+	if hasSelfPrefix(root, self) || hasSelfPrefix(path, self) {
+		return path
+	}
+	return ""
 }
 
 // hasSelfPrefix reports whether p lives inside one of the declared module

@@ -3,43 +3,23 @@ package clones
 import (
 	"testing"
 
-	sitter "github.com/tree-sitter/go-tree-sitter"
-
 	"metricgate/internal/parser"
 	"metricgate/internal/parsetest"
 )
 
+// shingleOf returns one shingle candidate per extracted declaration, using the
+// body node Extract retained (no re-walk: re-locating by name breaks for
+// grammars whose declarations are unnamed).
 func shingleOf(t *testing.T, lang parser.LanguageID, path, src string) []NearFunc {
 	t.Helper()
 	tree, release := parsetest.Parse(t, lang, src)
 	defer release()
-	fns := Extract(lang, path, []byte(src), tree, Default)
 	var out []NearFunc
-	for _, f := range fns {
-		var body *sitter.Node
-		// Re-walk to find the body node (Extract does not retain it).
-		var find func(n *sitter.Node)
-		find = func(n *sitter.Node) {
-			if n == nil || body != nil {
-				return
-			}
-			if n.Kind() == "function_declaration" || n.Kind() == "method_declaration" {
-				name := ""
-				if nf := n.ChildByFieldName("name"); nf != nil {
-					name = nodeText([]byte(src), nf)
-				}
-				if name == f.Name {
-					body = n.ChildByFieldName("body")
-				}
-			}
-			for i := uint(0); i < n.ChildCount(); i++ {
-				find(n.Child(i))
-			}
+	for _, f := range Extract(lang, path, []byte(src), tree, Default) {
+		if f.body == nil {
+			continue
 		}
-		find(tree.RootNode())
-		if body != nil {
-			out = append(out, NearFunc{Func: f, Shingles: FingerprintShingles([]byte(src), body)})
-		}
+		out = append(out, NearFunc{Func: f, Shingles: FingerprintShingles([]byte(src), f.body)})
 	}
 	return out
 }

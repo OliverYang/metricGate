@@ -3,6 +3,7 @@ package impact
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"metricgate/internal/refs"
@@ -72,5 +73,153 @@ func TestComputeNotesWhatItCannotSee(t *testing.T) {
 	useOnly := Compute("Ext", symbols.Build(nil), refs.Build([]refs.Ref{{Name: "Ext", Kind: refs.KindCall, File: "a.go", Line: 2}}))
 	if useOnly.Note == "" || len(useOnly.Definitions) != 0 {
 		t.Errorf("external symbol: note=%q defs=%v", useOnly.Note, useOnly.Definitions)
+	}
+}
+
+// chainFixture models a three-link chain: main calls entry, entry calls leaf.
+// Reference sites carry Enclosing, which is what the second hop reads.
+func chainFixture() (*symbols.Index, *refs.Index) {
+	defs := symbols.Build([]symbols.Def{
+		{Name: "entry", Kind: "function", File: "a.go", Line: 5},
+	})
+	uses := refs.Build([]refs.Ref{
+		{Name: "entry", Kind: refs.KindCall, File: "a.go", Line: 12, Enclosing: "main"},
+		{Name: "leaf", Kind: refs.KindCall, File: "b.go", Line: 3, Enclosing: "entry"},
+		{Name: "main", Kind: refs.KindCall, File: "c.go", Line: 8, Enclosing: "boot"},
+	})
+	return defs, uses
+}
+
+func TestComputeDefaultDepthIsUnchanged(t *testing.T) {
+	defs, uses := chainFixture()
+
+	one := Compute("entry", defs, uses)
+	defaulted := ComputeWith("entry", defs, uses, Options{})
+	zeroed := ComputeWith("entry", defs, uses, Options{Depth: 1})
+
+	if !reflect.DeepEqual(one, defaulted) {
+		t.Error("the zero Options must reproduce Compute exactly")
+	}
+	if !reflect.DeepEqual(one, zeroed) {
+		t.Error("depth 1 must reproduce Compute exactly")
+	}
+	if one.Depth != 0 || len(one.Reach) != 0 {
+		t.Errorf("single hop must not carry transitive fields: depth=%d reach=%d", one.Depth, len(one.Reach))
+	}
+}
+
+func TestComputeWithDepthReachesCallersOfCallers(t *testing.T) {
+	defs, uses := chainFixture()
+	r := ComputeWith("entry", defs, uses, Options{Depth: 2})
+
+	// depth 2 sees entry's call site (in main) and therefore main's own call
+	// site (in boot), which the single hop structurally cannot express.
+	if len(r.Reach) != 1 || r.Reach[0].Name != "main" || r.Reach[0].Depth != 2 {
+		t.Fatalf("reach = %+v, want just main at depth 2", r.Reach)
+	}
+	want := []string{"a.go", "c.go"}
+	if !slices.Equal(r.AffectedFiles, want) {
+		t.Errorf("affectedFiles = %v, want %v (entry's file plus main's caller's file)", r.AffectedFiles, want)
+	}
+}
+
+// The reached name's Files are the files of ITS OWN use sites, not the walk so
+// far: a scope nothing calls (an entrypoint, a test that is run rather than
+// called) has no files, and reporting the accumulated set there would claim
+// the closure had stopped expanding when it had not.
+func TestComputeWithDepthReportsPerHopFiles(t *testing.T) {
+	defs := symbols.Build([]symbols.Def{
+		{Name: "seed", File: "a.go", Line: 1},
+		{Name: "mid", File: "a.go", Line: 2},
+		{Name: "top", File: "c.go", Line: 3},
+	})
+	uses := refs.Build([]refs.Ref{
+		// seed is called from mid, mid is called from top, top is called
+		// from nowhere: top's own hop has no use sites.
+		{Name: "seed", Kind: refs.KindCall, File: "a.go", Line: 5, Enclosing: "mid"},
+		{Name: "mid", Kind: refs.KindCall, File: "b.go", Line: 6, Enclosing: "top"},
+	})
+	r := ComputeWith("seed", defs, uses, Options{Depth: 3})
+
+	byName := map[string]Reach{}
+	for _, reach := range r.Reach {
+		byName[reach.Name] = reach
+	}
+	if got := byName["mid"].Files; !slices.Equal(got, []string{"b.go"}) {
+		t.Errorf("mid's files = %v, want its own caller's file b.go", got)
+	}
+	if got := byName["top"].Files; len(got) != 0 {
+		t.Errorf("top's files = %v, want empty (nothing calls top)", got)
+	}
+	// The walk itself did not stop: the accumulated answer still covers both.
+	if !slices.Equal(r.AffectedFiles, []string{"a.go", "b.go"}) {
+		t.Errorf("affectedFiles = %v, want [a.go b.go]", r.AffectedFiles)
+	}
+}
+
+func TestComputeWithDepthTiersEveryReachedName(t *testing.T) {
+	defs := symbols.Build([]symbols.Def{
+		{Name: "one", File: "a.go", Line: 1},
+		{Name: "two", File: "a.go", Line: 2},
+		{Name: "two", File: "b.go", Line: 2},
+	})
+	uses := refs.Build([]refs.Ref{
+		{Name: "seed", Kind: refs.KindCall, File: "a.go", Line: 2, Enclosing: "one"},
+		{Name: "seed", Kind: refs.KindCall, File: "b.go", Line: 4, Enclosing: "two"},
+		{Name: "seed", Kind: refs.KindCall, File: "c.go", Line: 6, Enclosing: "gone"},
+		{Name: "one", Kind: refs.KindCall, File: "z.go", Line: 1},
+	})
+	r := ComputeWith("seed", defs, uses, Options{Depth: 2})
+
+	got := map[string]string{}
+	for _, reach := range r.Reach {
+		got[reach.Name] = reach.Tier
+	}
+	want := map[string]string{"one": TierResolved, "two": TierAmbiguous, "gone": TierExternal}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tiers = %v, want %v (one def resolves, a name nobody defines is external)", got, want)
+	}
+}
+
+func TestComputeWithDepthStopsAtTheWidthCap(t *testing.T) {
+	defs, uses := chainFixture()
+	wide := ComputeWith("entry", defs, uses, Options{Depth: 4, MaxAffectedFiles: 1})
+	if len(wide.AffectedFiles) != 1 || wide.HiddenAffectedFiles == 0 {
+		t.Fatalf("cap 1: files=%v hidden=%d, want one kept and a stated remainder", wide.AffectedFiles, wide.HiddenAffectedFiles)
+	}
+	if wide.Note == "" {
+		t.Error("a truncated walk must say in the note that files were not expanded")
+	}
+
+	uncapped := ComputeWith("entry", defs, uses, Options{Depth: 4, MaxAffectedFiles: -1})
+	if uncapped.HiddenAffectedFiles != 0 {
+		t.Errorf("a negative cap disables the limit: hidden=%d", uncapped.HiddenAffectedFiles)
+	}
+	if len(uncapped.AffectedFiles) <= len(wide.AffectedFiles) {
+		t.Error("removing the cap must not shrink the answer")
+	}
+
+	defaulted := ComputeWith("entry", defs, uses, Options{Depth: 4})
+	if defaulted.HiddenAffectedFiles != 0 {
+		t.Errorf("the default cap leaves a three-file chain untouched: hidden=%d", defaulted.HiddenAffectedFiles)
+	}
+}
+
+func TestComputeWithDepthLabelsAnAmbiguousSeed(t *testing.T) {
+	defs := symbols.Build([]symbols.Def{
+		{Name: "run", File: "a.go", Line: 1},
+		{Name: "run", File: "b.go", Line: 1},
+	})
+	uses := refs.Build([]refs.Ref{
+		{Name: "run", Kind: refs.KindCall, File: "c.go", Line: 1, Enclosing: "outer"},
+		{Name: "outer", Kind: refs.KindCall, File: "d.go", Line: 1, Enclosing: "boot"},
+	})
+	r := ComputeWith("run", defs, uses, Options{Depth: 2})
+
+	if r.Note == "" {
+		t.Fatal("a seed with two definitions must be labelled unreliable")
+	}
+	if !strings.Contains(r.Note, "2 definitions") {
+		t.Errorf("note = %q, want the definition count named", r.Note)
 	}
 }

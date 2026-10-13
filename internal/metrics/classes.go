@@ -1,7 +1,8 @@
 // Class-level object-oriented metrics (the Chidamber–Kemerer family).
-// Java only today — Go has no classes; a package-level aggregation is a
-// later extension. All measures are deliberately name-based ("lite"): no
-// type resolution, no symbol tables. Every deviation from the strict CK
+// Produced for every language that has a class-like declaration — the
+// per-grammar spellings live in classes_lang.go. Go has no classes and
+// contributes nothing. All measures are deliberately name-based ("lite"):
+// no type resolution, no symbol tables. Every deviation from the strict CK
 // definitions is documented in docs/metrics.md and is biased to be
 // conservative (under-report) rather than noisy.
 package metrics
@@ -15,7 +16,7 @@ import (
 // ClassStats carries every per-class measurement in one pass.
 type ClassStats struct {
 	Name      string
-	Kind      string // class | interface
+	Kind      string // class | interface | struct | trait | enum | record
 	StartLine int    // 1-based
 	EndLine   int    // 1-based inclusive
 	WMC       int    // sum of method cyclomatic complexity
@@ -26,34 +27,37 @@ type ClassStats struct {
 	DIT       int    // inheritance depth, same-file resolution
 }
 
-// javaPrimitives are the names that do not count as object coupling.
-var javaPrimitives = map[string]bool{
-	"int": true, "long": true, "short": true, "byte": true,
-	"char": true, "boolean": true, "float": true, "double": true,
-	"void": true, "var": true,
-}
-
 // classMeasurer holds the per-file state of the class pass.
 type classMeasurer struct {
+	lang     parser.LanguageID
+	spec     *classSpec
 	src      []byte
-	declared map[string]*sitter.Node // every type name declared in the file
+	declared map[string]*sitter.Node   // every type name declared in the file
+	impls    map[string][]*sitter.Node // Rust: methods indexed by owning type
 	ditMemo  map[string]int
 	ditBusy  map[string]bool // inheritance-cycle guard
 }
 
-// measureClasses fills fs.Classes for one parsed Java file. Other languages
-// contribute nothing: the class family is Java-only by design for now.
+// measureClasses fills fs.Classes for one parsed file. A language without a
+// class spelling (Go) contributes nothing.
 func measureClasses(lang parser.LanguageID, src []byte, root *sitter.Node, fs *FileStats) {
-	if lang != parser.LangJava {
+	spec := classSpecs[lang]
+	if spec == nil {
 		return
 	}
 	m := &classMeasurer{
+		lang:     lang,
+		spec:     spec,
 		src:      src,
 		declared: map[string]*sitter.Node{},
+		impls:    map[string][]*sitter.Node{},
 		ditMemo:  map[string]int{},
 		ditBusy:  map[string]bool{},
 	}
 	m.collectDeclared(root)
+	if spec.impls {
+		m.collectImpls(root)
+	}
 	m.walkClasses(root, fs)
 }
 
@@ -65,8 +69,7 @@ func (m *classMeasurer) collectDeclared(root *sitter.Node) {
 		if n == nil {
 			return
 		}
-		switch n.Kind() {
-		case "class_declaration", "interface_declaration":
+		if _, ok := m.spec.decls[n.Kind()]; ok {
 			name := text(m.src, n.ChildByFieldName("name"))
 			if name != "" && m.declared[name] == nil {
 				m.declared[name] = n
@@ -79,16 +82,42 @@ func (m *classMeasurer) collectDeclared(root *sitter.Node) {
 	walk(root)
 }
 
-// walkClasses measures every class and interface declaration exactly once.
-// Nested types are measured on their own; the outer class excludes them.
+// collectImpls indexes Rust impl blocks by the type they extend. Rust keeps
+// methods outside the type declaration, so `impl Svc { fn a() }` and
+// `impl Draw for Svc { fn b() }` both belong to Svc: the type, not the
+// trait, owns the method count. A trait's own default methods stay with the
+// trait, which the declaration walk measures.
+func (m *classMeasurer) collectImpls(root *sitter.Node) {
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		if n == nil {
+			return
+		}
+		if n.Kind() == "impl_item" {
+			name := lastDottedName(text(m.src, n.ChildByFieldName("type")))
+			if name != "" {
+				if body := n.ChildByFieldName("body"); body != nil {
+					_, methods := m.bodyMembers(body)
+					m.impls[name] = append(m.impls[name], methods...)
+				}
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+}
+
+// walkClasses measures every class-like declaration exactly once. Nested
+// types are measured on their own; the outer class excludes them.
 func (m *classMeasurer) walkClasses(root *sitter.Node, fs *FileStats) {
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {
 		if n == nil {
 			return
 		}
-		switch n.Kind() {
-		case "class_declaration", "interface_declaration":
+		if _, ok := m.spec.decls[n.Kind()]; ok {
 			fs.Classes = append(fs.Classes, m.measure(n))
 		}
 		for i := uint(0); i < n.ChildCount(); i++ {
@@ -98,17 +127,22 @@ func (m *classMeasurer) walkClasses(root *sitter.Node, fs *FileStats) {
 	walk(root)
 }
 
-// measure computes the whole CK family for one class or interface.
+// measure computes the whole CK family for one class-like declaration.
 func (m *classMeasurer) measure(n *sitter.Node) ClassStats {
 	c := ClassStats{
 		Name:      text(m.src, n.ChildByFieldName("name")),
-		Kind:      "class",
+		Kind:      m.spec.decls[n.Kind()],
 		StartLine: int(n.StartPosition().Row) + 1,
 		EndLine:   int(n.EndPosition().Row) + 1,
 	}
-	if n.Kind() == "interface_declaration" {
-		c.Kind = "interface"
-	}
+	m.score(n, &c)
+	return c
+}
+
+// score fills the five CK measures for one declaration. Kept apart from
+// measure so the counting is one readable block and neither function carries
+// the whole family in its callee list.
+func (m *classMeasurer) score(n *sitter.Node, c *ClassStats) {
 	fields, methods := m.members(n)
 	c.NOF = len(fields)
 	c.NOM = len(methods)
@@ -116,24 +150,38 @@ func (m *classMeasurer) measure(n *sitter.Node) ClassStats {
 	c.LCOM = lcom(m.src, fields, methods)
 	c.CBO = m.cbo(n, c.Name)
 	c.DIT = m.ditOf(n)
-	return c
 }
 
-// members lists the class's direct fields and methods; nested type
+// members lists the declaration's direct fields and methods. Nested type
 // declarations are boundaries — their members belong to them.
 func (m *classMeasurer) members(class *sitter.Node) (fields []string, methods []*sitter.Node) {
 	body := class.ChildByFieldName("body")
 	if body == nil {
 		return nil, nil
 	}
+	fields, methods = m.bodyMembers(body)
+	if name := text(m.src, class.ChildByFieldName("name")); name != "" {
+		methods = append(methods, m.impls[name]...)
+	}
+	return fields, methods
+}
+
+// bodyMembers reads one type body through the language's member table.
+// Kinds absent from the table are neither fields nor methods: access
+// specifiers, comments, and nested type declarations.
+func (m *classMeasurer) bodyMembers(body *sitter.Node) (fields []string, methods []*sitter.Node) {
 	for i := uint(0); i < body.NamedChildCount(); i++ {
 		member := body.NamedChild(i)
-		switch member.Kind() {
-		case "field_declaration":
-			fields = append(fields, declaratorNames(m.src, member)...)
-		case "method_declaration", "constructor_declaration":
-			methods = append(methods, member)
+		read, ok := m.spec.members[member.Kind()]
+		if !ok {
+			continue
 		}
+		names, isMethod := read(m.src, member)
+		if isMethod {
+			methods = append(methods, member)
+			continue
+		}
+		fields = append(fields, names...)
 	}
 	return fields, methods
 }
@@ -155,13 +203,13 @@ func declaratorNames(src []byte, fieldDecl *sitter.Node) []string {
 }
 
 // wmc sums method cyclomatic complexity. A bodyless (abstract/interface)
-// method contributes 1, the minimum — the class still pays for the
+// method contributes 1, the minimum — the type still pays for the
 // dispatch it promises.
 func (m *classMeasurer) wmc(methods []*sitter.Node) int {
 	total := 0
 	for _, md := range methods {
 		if body := md.ChildByFieldName("body"); body != nil {
-			cyc, _, _ := irScore(parser.LangJava, m.src, md)
+			cyc, _, _ := irScore(m.lang, m.src, md)
 			total += cyc
 			continue
 		}
@@ -216,7 +264,8 @@ func usedFieldNames(src []byte, method *sitter.Node, fields []string) map[string
 		if n == nil {
 			return
 		}
-		if n.Kind() == "identifier" {
+		if n.Kind() == "identifier" || n.Kind() == "field_identifier" ||
+			n.Kind() == "property_identifier" || n.Kind() == "field_access" {
 			name := text(src, n)
 			if wanted[name] {
 				used[name] = true
@@ -239,10 +288,10 @@ func sharesAny(a, b map[string]bool) bool {
 	return false
 }
 
-// cbo counts the distinct type names the class references outside itself.
-// Name-based: JDK types count too (coupling to the platform is still
-// coupling); primitives and the class's own name do not. Nested types are
-// boundaries — their references are theirs.
+// cbo counts the distinct type names the declaration references outside
+// itself. Name-based: platform types count too (coupling to the standard
+// library is still coupling); primitives and the declaration's own name do
+// not. Nested types are boundaries — their references are theirs.
 func (m *classMeasurer) cbo(class *sitter.Node, own string) int {
 	refs := map[string]bool{}
 	m.collectTypeNames(class, refs, true)
@@ -250,26 +299,27 @@ func (m *classMeasurer) cbo(class *sitter.Node, own string) int {
 	return len(refs)
 }
 
-// collectTypeNames walks one class subtree gathering type_identifier texts.
-// rootClass marks the starting node: nested declarations below it stop the
-// walk because they are measured separately.
+// collectTypeNames walks one declaration subtree gathering type names via
+// the language's collector. rootClass marks the starting node: nested
+// declarations below it stop the walk because they are measured separately.
 func (m *classMeasurer) collectTypeNames(n *sitter.Node, refs map[string]bool, rootClass bool) {
+	m.collectTypeNamesFrom(nil, n, refs, rootClass)
+}
+
+// collectTypeNamesFrom carries the parent down so a collector can tell a type
+// position from a declaration name.
+func (m *classMeasurer) collectTypeNamesFrom(parent, n *sitter.Node, refs map[string]bool, rootClass bool) {
 	if n == nil {
 		return
 	}
-	if !rootClass {
-		switch n.Kind() {
-		case "class_declaration", "interface_declaration":
-			return
-		case "type_identifier":
-			name := text(m.src, n)
-			if !javaPrimitives[name] {
-				refs[name] = true
-			}
-		}
+	if !rootClass && classDeclKinds[n.Kind()] {
+		return
+	}
+	if m.spec.types != nil {
+		m.spec.types(m.src, n, parent, refs)
 	}
 	for i := uint(0); i < n.ChildCount(); i++ {
-		m.collectTypeNames(n.Child(i), refs, false)
+		m.collectTypeNamesFrom(n, n.Child(i), refs, false)
 	}
 }
 
@@ -277,7 +327,8 @@ func (m *classMeasurer) collectTypeNames(n *sitter.Node, refs map[string]bool, r
 // declared in the same file contributes its own depth + 1; any other
 // superclass counts as one level (cross-file resolution belongs to the
 // symbol index, not to the per-file pass). Implementing an interface does
-// not add depth; an interface extending one does.
+// not add depth; an interface extending one does. A language with no
+// inheritance (Rust, C) always reports 0.
 func (m *classMeasurer) ditOf(class *sitter.Node) int {
 	name := text(m.src, class.ChildByFieldName("name"))
 	if d, ok := m.ditMemo[name]; ok {
@@ -300,33 +351,12 @@ func (m *classMeasurer) ditOf(class *sitter.Node) int {
 	return d
 }
 
-// superName returns the single parent type of a declaration: the
-// superclass of a class, or the first extended interface of an interface.
+// superName returns the single parent type of a declaration, using the
+// grammar's inheritance position. "" means the language has no inheritance
+// or the declaration has no parent.
 func (m *classMeasurer) superName(class *sitter.Node) string {
-	if sc := class.ChildByFieldName("superclass"); sc != nil {
-		return firstTypeName(m.src, sc)
-	}
-	for i := uint(0); i < class.NamedChildCount(); i++ {
-		child := class.NamedChild(i)
-		if child.Kind() == "extends_interfaces" {
-			return firstTypeName(m.src, child)
-		}
-	}
-	return ""
-}
-
-// firstTypeName returns the first type_identifier inside a node.
-func firstTypeName(src []byte, n *sitter.Node) string {
-	if n == nil {
+	if m.spec.super == nil {
 		return ""
 	}
-	if n.Kind() == "type_identifier" {
-		return text(src, n)
-	}
-	for i := uint(0); i < n.ChildCount(); i++ {
-		if name := firstTypeName(src, n.Child(i)); name != "" {
-			return name
-		}
-	}
-	return ""
+	return m.spec.super(m.src, class)
 }

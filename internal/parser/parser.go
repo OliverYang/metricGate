@@ -10,8 +10,15 @@ import (
 	"unsafe"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
+	tree_sitter_csharp "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
+	tree_sitter_c "github.com/tree-sitter/tree-sitter-c/bindings/go"
+	tree_sitter_cpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
 	tree_sitter_go "github.com/tree-sitter/tree-sitter-go/bindings/go"
 	tree_sitter_java "github.com/tree-sitter/tree-sitter-java/bindings/go"
+	tree_sitter_javascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
+	tree_sitter_python "github.com/tree-sitter/tree-sitter-python/bindings/go"
+	tree_sitter_rust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
+	tree_sitter_typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 // LanguageID names a supported language.
@@ -20,6 +27,14 @@ type LanguageID string
 const (
 	LangGo   LanguageID = "go"
 	LangJava LanguageID = "java"
+	LangTS   LanguageID = "typescript"
+	LangTSX  LanguageID = "tsx"
+	LangJS   LanguageID = "javascript"
+	LangPy   LanguageID = "python"
+	LangC    LanguageID = "c"
+	LangCpp  LanguageID = "cpp"
+	LangCS   LanguageID = "csharp"
+	LangRust LanguageID = "rust"
 )
 
 // grammars is the language registry: adding a language is one entry here
@@ -27,11 +42,49 @@ const (
 var grammars = map[LanguageID]func() unsafe.Pointer{
 	LangGo:   tree_sitter_go.Language,
 	LangJava: tree_sitter_java.Language,
+	LangTS:   tree_sitter_typescript.LanguageTypescript,
+	LangTSX:  tree_sitter_typescript.LanguageTSX,
+	LangJS:   tree_sitter_javascript.Language,
+	LangPy:   tree_sitter_python.Language,
+	LangC:    tree_sitter_c.Language,
+	LangCpp:  tree_sitter_cpp.Language,
+	LangCS:   tree_sitter_csharp.Language,
+	LangRust: tree_sitter_rust.Language,
 }
 
 // Supported lists the registered languages in stable order.
 func Supported() []LanguageID {
-	return []LanguageID{LangGo, LangJava}
+	return []LanguageID{LangGo, LangJava, LangTS, LangTSX, LangJS, LangPy, LangC, LangCpp, LangCS, LangRust}
+}
+
+// extensions is the canonical extension per language, the inverse of
+// LanguageForFile for the cases that need to name a file rather than read
+// one (fixture staging, generated examples). A language is written with one
+// spelling here even when it can be read from several: ".ts" not ".mts",
+// because this direction produces a file a human will look at.
+var extensions = map[LanguageID]string{
+	LangGo:   ".go",
+	LangJava: ".java",
+	LangTS:   ".ts",
+	LangTSX:  ".tsx",
+	LangJS:   ".js",
+	LangPy:   ".py",
+	LangC:    ".c",
+	LangCpp:  ".cpp",
+	LangCS:   ".cs",
+	LangRust: ".rs",
+}
+
+// Extension returns the canonical file extension of a language, or "" when
+// the language is not registered.
+func Extension(id LanguageID) string {
+	return extensions[id]
+}
+
+// IsSupported reports whether a language is registered.
+func IsSupported(id LanguageID) bool {
+	_, ok := grammars[id]
+	return ok
 }
 
 // Parser parses source files into tree-sitter trees for one language.
@@ -78,6 +131,22 @@ func LanguageForFile(name string) (LanguageID, bool) {
 		return LangGo, true
 	case ".java":
 		return LangJava, true
+	case ".ts", ".mts", ".cts":
+		return LangTS, true
+	case ".tsx":
+		return LangTSX, true
+	case ".js", ".mjs", ".cjs", ".jsx":
+		return LangJS, true
+	case ".py":
+		return LangPy, true
+	case ".c", ".h":
+		return LangC, true
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".cc.in":
+		return LangCpp, true
+	case ".cs":
+		return LangCS, true
+	case ".rs":
+		return LangRust, true
 	default:
 		return "", false
 	}
@@ -89,9 +158,30 @@ var (
 	TsGo *sitter.Language
 	// TsJava is the tree-sitter-java language instance, exported for metrics profile use.
 	TsJava *sitter.Language
+	// TsTypescript is the tree-sitter-typescript language instance, exported for metrics profile use.
+	TsTypescript *sitter.Language
+	// TsTsx is the tree-sitter tsx grammar (TypeScript plus JSX).
+	TsTsx *sitter.Language
+	// TsJavascript is the tree-sitter-javascript language instance, exported for metrics profile use.
+	TsJavascript *sitter.Language
+	// TsPython is the tree-sitter-python language instance, exported for metrics profile use.
+	TsPython *sitter.Language
+	// TsC, TsCpp, TsCSharp, TsRust are instances for the newer grammars.
+	TsC      *sitter.Language
+	TsCpp    *sitter.Language
+	TsCSharp *sitter.Language
+	TsRust   *sitter.Language
 )
 
 func init() {
 	TsGo = sitter.NewLanguage(tree_sitter_go.Language())
 	TsJava = sitter.NewLanguage(tree_sitter_java.Language())
+	TsTypescript = sitter.NewLanguage(tree_sitter_typescript.LanguageTypescript())
+	TsTsx = sitter.NewLanguage(tree_sitter_typescript.LanguageTSX())
+	TsJavascript = sitter.NewLanguage(tree_sitter_javascript.Language())
+	TsPython = sitter.NewLanguage(tree_sitter_python.Language())
+	TsC = sitter.NewLanguage(tree_sitter_c.Language())
+	TsCpp = sitter.NewLanguage(tree_sitter_cpp.Language())
+	TsCSharp = sitter.NewLanguage(tree_sitter_csharp.Language())
+	TsRust = sitter.NewLanguage(tree_sitter_rust.Language())
 }

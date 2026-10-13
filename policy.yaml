@@ -9,6 +9,27 @@ exclude: [".git", "vendor", "node_modules", "testdata", ".data"]
 
 languages:
   go:
+    # Custom rule DSL (iteration 2): project naming assertions the built-in
+    # packs don't carry. Test helpers must declare what they stub, and Go
+    # test entrypoints must stay TestXxx/BenchmarkXxx/FuzzXxx/ExampleXxx.
+    #
+    # files: the same pattern vocabulary as a ban's except_files/allowed_files.
+    # Without it the rule also read testConfig/testInput helpers in _test.go
+    # files and TestsTouchedCheck in production code.
+    #
+    # The match reads the whole declaration rather than field: name, because
+    # "is this an entrypoint" is not a property of the name alone — a helper
+    # named testConfig is fine, testConfig(t *testing.T) is a test Go will run
+    # and fail to name-check. Requiring the signature pins "entrypoint" to what
+    # `go test` actually requires, so the rule stops firing on helpers.
+    custom_rules:
+      - id: go-test-func-naming
+        node: function_declaration
+        files: ["**/*_test.go"]
+        match_regex: '^func\s+(?i:test|benchmark|fuzz|example)[A-Za-z0-9_]*\s*\((?:[^()]|\([^()]*\))*\)\s*\{'
+        exclude_regex: '^func\s+(Test|Benchmark|Fuzz|Example)[A-Z_]'
+        severity: warning
+        reason: "Go test entrypoints must be TestXxx/BenchmarkXxx/FuzzXxx/ExampleXxx (capitalized after the prefix)"
     rules:
       banned-fmt-Print*:
         # The CLI is the one place where direct printing is the job.
@@ -35,6 +56,13 @@ languages:
       # error off so nothing blocks until the first findings pass review —
       # then set a real error line (previously a magic 5000 above the repo max).
       npath-complexity:      { warn: 200, error: off }
+      # Test files get their own baselines (iteration 5): test constructs
+      # legitimately wire many tool arguments at once, so fan-out up to 15
+      # is expected in _test.go. This replaces the two per-line accept-ledger
+      # concessions on calllog_test.go:43/:176 with a policy-expressed rule —
+      # production code keeps the regular warn 10.
+    test_metrics:
+      fan-out:             { warn: 15, error: off }
     # each entry into the same deterministic rule pipeline (same findings, same
     # severities, same `metricgate: ignore` suppression).
     banned-api:

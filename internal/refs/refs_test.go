@@ -129,7 +129,80 @@ func TestIndexLookupAndDeterminism(t *testing.T) {
 func TestExtractIgnoresUnsupportedLanguage(t *testing.T) {
 	tree, release := parsetest.Parse(t, parser.LangGo, goSample)
 	defer release()
-	if rs := Extract("x", []byte(goSample), tree, parser.LanguageID("rust")); len(rs) != 0 {
+	if rs := Extract("x", []byte(goSample), tree, parser.LanguageID("fortran")); len(rs) != 0 {
 		t.Errorf("unsupported language must yield no refs, got %+v", rs)
+	}
+}
+
+// TestPythonHeritageIsATypeReference pins the edge this package used to miss
+// entirely: a subclass names its bases, and a base is a use of the base type.
+// Without it `impact` on a Python repo reported the base class and none of the
+// subclasses that would break if it changed.
+func TestPythonHeritageIsATypeReference(t *testing.T) {
+	src := "class Sub(Base, mixins.Other, metaclass=Meta):\n    pass\n"
+	rs := extract(t, parser.LangPy, src)
+
+	bases := find(rs, "Base", KindType)
+	if len(bases) != 1 || bases[0].Line != 1 {
+		t.Fatalf("Base = %+v, want one type reference on line 1", bases)
+	}
+	if bases[0].Enclosing != "Sub" {
+		t.Errorf("enclosing = %q, want Sub", bases[0].Enclosing)
+	}
+
+	// A dotted base is keyed by its own name with the qualifier as receiver,
+	// so a lookup by "Other" finds it — matching every other ref in this file.
+	other := find(rs, "Other", KindType)
+	if len(other) != 1 || other[0].Receiver != "mixins" {
+		t.Fatalf("Other = %+v, want one with receiver mixins", other)
+	}
+
+	// `metaclass=Meta` is a keyword argument, not a base.
+	if got := find(rs, "Meta", KindType); len(got) != 0 {
+		t.Errorf("keyword argument counted as a base: %+v", got)
+	}
+	// The class's own name is a definition, not a use.
+	if got := find(rs, "Sub", KindType); len(got) != 0 {
+		t.Errorf("class name counted as a reference: %+v", got)
+	}
+}
+
+func TestTSHeritageCoversExtendsAndImplements(t *testing.T) {
+	src := "class Sub extends Base implements IFoo, IBar {}\n"
+	rs := extract(t, parser.LangTS, src)
+
+	for _, want := range []string{"Base", "IFoo", "IBar"} {
+		got := find(rs, want, KindType)
+		if len(got) != 1 || got[0].Line != 1 {
+			t.Errorf("%s = %+v, want one type reference on line 1", want, got)
+		}
+	}
+	if got := find(rs, "Sub", KindType); len(got) != 0 {
+		t.Errorf("class name counted as a reference: %+v", got)
+	}
+}
+
+func TestJSHeritageIsATypeReference(t *testing.T) {
+	src := "class Sub extends Base {}\n"
+	rs := extract(t, parser.LangJS, src)
+
+	got := find(rs, "Base", KindType)
+	if len(got) != 1 || got[0].Line != 1 {
+		t.Fatalf("Base = %+v, want one type reference on line 1", got)
+	}
+	if got := find(rs, "Sub", KindType); len(got) != 0 {
+		t.Errorf("class name counted as a reference: %+v", got)
+	}
+}
+
+// TestHeritageSkipsComputedBases guards the other half of the contract: a base
+// that is not a plain name must be skipped rather than guessed at, because a
+// wrong base fabricates impact that does not exist.
+func TestHeritageSkipsComputedBases(t *testing.T) {
+	rs := extract(t, parser.LangPy, "class Sub(make_base()):\n    pass\n")
+	for _, r := range rs {
+		if r.Kind == KindType {
+			t.Errorf("computed base produced a type reference: %+v", r)
+		}
 	}
 }

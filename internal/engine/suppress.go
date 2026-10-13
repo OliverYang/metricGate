@@ -21,22 +21,32 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"metricgate/internal/model"
-	"metricgate/internal/parser"
 )
 
-// suppression is one active directive region.
+// suppression is one active directive region. The reason is kept so the
+// policy audit can list each site with the words its author wrote, rather
+// than only a count: a suppression nobody can read is indistinguishable from
+// a bug.
 type suppression struct {
 	start, end int      // inclusive 1-based lines
 	rules      []string // empty means every rule
+	reason     string
 }
 
 var directiveRe = regexp.MustCompile(`(?i)metricgate:\s*ignore(-begin|-end)?\b\s*(.*)`)
 
-// commentKinds lists comment node kinds per language.
-var commentKinds = map[parser.LanguageID][]string{
-	parser.LangGo:   {"comment"},
-	parser.LangJava: {"line_comment", "block_comment"},
-}
+// isCommentKind reports whether a node kind is a comment in some grammar.
+//
+// It matches by name instead of consulting a per-language table on purpose. A
+// table has to be extended by hand for every new language, and the failure mode
+// of forgetting is invisible: directives are simply never seen, so a silenced
+// rule stays loud and nothing says why. That is exactly what happened — the
+// table covered Go and Java, so `metricgate: ignore` did nothing in the other
+// seven languages. Every grammar in use spells its comment kinds with the word
+// "comment" (comment, line_comment, block_comment, doc_comment), and a kind
+// that merely resembles it can only cause a second, identical region, which
+// suppress() treats as one.
+func isCommentKind(kind string) bool { return strings.Contains(kind, "comment") }
 
 // text returns the source slice covered by a node.
 func text(src []byte, n *sitter.Node) string {
@@ -47,76 +57,94 @@ func text(src []byte, n *sitter.Node) string {
 }
 
 // buildSuppressions walks the tree and collects all suppression regions.
-func buildSuppressions(lang parser.LanguageID, src []byte, root *sitter.Node) []suppression {
-	kinds, ok := commentKinds[lang]
-	if !ok {
-		return nil
-	}
-	isComment := map[string]bool{}
-	for _, k := range kinds {
-		isComment[k] = true
-	}
-	lines := strings.Split(string(src), "\n")
-
-	var out []suppression
-	var openStart, openEnd int
-	var openRules []string
-	var walk func(n *sitter.Node)
-	walk = func(n *sitter.Node) {
-		if !isComment[n.Kind()] {
-			for i := uint(0); i < n.ChildCount(); i++ {
-				walk(n.Child(i))
-			}
-			return
-		}
-		line := int(n.StartPosition().Row) + 1
-		m := directiveRe.FindStringSubmatch(text(src, n))
-		if m == nil {
-			return
-		}
-		kind, rest := m[1], strings.TrimSpace(m[2])
-		switch kind {
-		case "-begin":
-			if openStart == 0 {
-				openStart, openRules, openEnd = line, parseRuleList(rest), 0
-			}
-		case "-end":
-			if openStart != 0 && openEnd == 0 {
-				openEnd = line
-				out = append(out, suppression{start: openStart, end: openEnd, rules: openRules})
-			}
-		default:
-			out = append(out, lineSuppression(lines, n, line, parseRuleList(rest)))
-		}
-
-	}
-	walk(root)
-	if openStart != 0 && openEnd == 0 {
-		// Unmatched begin stays open until EOF.
-		out = append(out, suppression{start: openStart, end: int(root.EndPosition().Row) + 1, rules: openRules})
-	}
-	return out
+func buildSuppressions(src []byte, root *sitter.Node) []suppression {
+	b := &suppressionBuilder{lines: strings.Split(string(src), "\n"), src: src}
+	b.walk(root)
+	b.closeOpen(int(root.EndPosition().Row) + 1)
+	return b.out
 }
 
-// parseRuleList splits the comma-separated rule field; empty or "all" means
-// every rule. Anything after the first whitespace group is a reason.
-func parseRuleList(rest string) []string {
+// suppressionBuilder accumulates directive regions while walking the tree.
+type suppressionBuilder struct {
+	src   []byte
+	lines []string
+	out   []suppression
+
+	openStart  int
+	openEnd    int
+	openRules  []string
+	openReason string
+}
+
+func (b *suppressionBuilder) walk(n *sitter.Node) {
+	if !isCommentKind(n.Kind()) {
+		b.descend(n)
+		return
+	}
+	b.onComment(n)
+}
+
+func (b *suppressionBuilder) descend(n *sitter.Node) {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		b.walk(n.Child(i))
+	}
+}
+
+// onComment parses one comment node and applies its directive, if any.
+func (b *suppressionBuilder) onComment(n *sitter.Node) {
+	m := directiveRe.FindStringSubmatch(text(b.src, n))
+	if m == nil {
+		return
+	}
+	b.directive(m[1], strings.TrimSpace(m[2]), int(n.StartPosition().Row)+1, n)
+}
+
+// directive applies one parsed directive. Anything after the rule list is a
+// free-form reason.
+func (b *suppressionBuilder) directive(kind, rest string, line int, n *sitter.Node) {
+	rules, reason := parseRuleList(rest)
+	switch kind {
+	case "-begin":
+		if b.openStart == 0 {
+			b.openStart, b.openRules, b.openEnd, b.openReason = line, rules, 0, reason
+		}
+	case "-end":
+		if b.openStart != 0 && b.openEnd == 0 {
+			b.openEnd = line
+			b.out = append(b.out, suppression{start: b.openStart, end: b.openEnd, rules: b.openRules, reason: b.openReason})
+		}
+	default:
+		b.out = append(b.out, lineSuppression(b.lines, n, line, rules, reason))
+	}
+}
+
+// closeOpen emits a begin region that never saw its end: it stays open until
+// the end of the file.
+func (b *suppressionBuilder) closeOpen(eof int) {
+	if b.openStart != 0 && b.openEnd == 0 {
+		b.out = append(b.out, suppression{start: b.openStart, end: eof, rules: b.openRules, reason: b.openReason})
+	}
+}
+
+// parseRuleList splits the comma-separated rule field from the reason that
+// follows it. Empty or "all" means every rule; everything after the first
+// whitespace group is the author's free-form justification.
+func parseRuleList(rest string) (rules []string, reason string) {
 	if rest == "" {
-		return nil // all
+		return nil, "" // all rules, no reason
 	}
 	field := rest
 	if i := strings.IndexAny(rest, " \t"); i >= 0 {
-		field = rest[:i]
+		field, reason = rest[:i], strings.TrimSpace(rest[i+1:])
 	}
-	var rules []string
 	for _, r := range strings.Split(field, ",") {
 		r = strings.TrimSpace(r)
 		if r == "" || strings.EqualFold(r, "all") {
-			return nil
+			return nil, reason
 		}
 		rules = append(rules, r)
 	}
-	return rules
+	return rules, reason
 }
 
 // lineStartBlank reports whether the comment begins its line (nothing but
@@ -205,12 +233,37 @@ func suppress(findings []model.Finding, sups []suppression) (kept []model.Findin
 // lineSuppression builds the line-scope suppression for a directive comment:
 // its own line, plus the next non-blank line when the comment starts its
 // own line (put it directly above a declaration to cover its verdicts).
-func lineSuppression(lines []string, n *sitter.Node, line int, rules []string) suppression {
+func lineSuppression(lines []string, n *sitter.Node, line int, rules []string, reason string) suppression {
 	start, end := line, line
 	if lineStartBlank(lines, n) {
 		if nl := nextNonBlankLine(lines, line); nl > line {
 			end = nl
 		}
 	}
-	return suppression{start: start, end: end, rules: rules}
+	return suppression{start: start, end: end, rules: rules, reason: reason}
+}
+
+// Directive is one suppression directive as a reader sees it: where it was
+// written, what it silences, and why. It is the per-site form of the
+// summary's IgnoredByRule counts, so a team can audit the words behind the
+// numbers — the ledger's owner/reason/expiry discipline applied to inline
+// suppressions, which are otherwise anonymous.
+type Directive struct {
+	File   string   `json:"file"`
+	Start  int      `json:"start"`
+	End    int      `json:"end"`
+	Rules  []string `json:"rules,omitempty"` // empty means every rule
+	Reason string   `json:"reason,omitempty"`
+}
+
+// Directives lists every suppression directive in one file's source. The
+// engine applies the same parse it applies while filtering, so a directive
+// the gate honoured is a directive this reports — they cannot drift.
+func Directives(src []byte, root *sitter.Node) []Directive {
+	sups := buildSuppressions(src, root)
+	out := make([]Directive, 0, len(sups))
+	for _, s := range sups {
+		out = append(out, Directive{File: "", Start: s.start, End: s.end, Rules: s.rules, Reason: s.reason})
+	}
+	return out
 }

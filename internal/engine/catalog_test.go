@@ -30,6 +30,7 @@ func TestCatalogCoversEveryMeasuredMetric(t *testing.T) {
 	}{
 		{"testdata/arch", string(parser.LangGo)},
 		{"testdata/ck", string(parser.LangJava)},
+		{"testdata/ckts", string(parser.LangTS)},
 	}
 	for _, c := range cases {
 		assertMeasuredMetricsAreCatalogued(t, cfg, c.dir, c.lang)
@@ -74,21 +75,27 @@ func assertMeasuredMetricsAreCatalogued(t *testing.T, cfg *config.Config, dir, l
 
 func TestCatalogListsMetricRulesPerLanguage(t *testing.T) {
 	cfg := testConfig(t)
-	var goMetas, javaMetas []string
+	var goMetas, javaMetas, tsMetas []string
 	for _, m := range Catalog(cfg) {
 		switch m.Language {
 		case string(parser.LangGo):
 			goMetas = append(goMetas, m.ID)
 		case string(parser.LangJava):
 			javaMetas = append(javaMetas, m.ID)
+		case string(parser.LangTS):
+			tsMetas = append(tsMetas, m.ID)
 		}
 	}
 	assertContains(t, goMetas, metrics.MetricCyclomatic)
 	assertContains(t, javaMetas, metrics.MetricCyclomatic)
-	// The CK family exists only for Java; listing it for Go would tell a Go
-	// project it has rules it can never fire.
+	assertContains(t, tsMetas, metrics.MetricCyclomatic)
+	// The CK family exists for every language that declares classes, and for no
+	// other: listing it for Go would tell a Go project it has rules it can
+	// never fire.
 	assertMissing(t, goMetas, metrics.MetricWMC)
 	assertContains(t, javaMetas, metrics.MetricWMC)
+	assertContains(t, tsMetas, metrics.MetricWMC)
+	assertContains(t, tsMetas, metrics.MetricDIT)
 }
 
 func TestCatalogStampsLanguageOnEveryEntry(t *testing.T) {

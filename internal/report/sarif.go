@@ -5,7 +5,10 @@ package report
 
 import (
 	"encoding/json"
+	"strings"
 
+	"metricgate/internal/bundle"
+	"metricgate/internal/config"
 	"metricgate/internal/model"
 	"metricgate/internal/rules"
 )
@@ -19,6 +22,28 @@ type sarifLog struct {
 type sarifRun struct {
 	Tool    sarifTool     `json:"tool"`
 	Results []sarifResult `json:"results"`
+	// Properties carries the run-level provenance that made the document
+	// auditable after the fact: which policy version produced these verdicts.
+	// Without it, two uploads of an old and a new commit are indistinguishable,
+	// so a dismissal on one says nothing about the other.
+	Properties *sarifRunProps `json:"properties,omitempty"`
+}
+
+type sarifRunProps struct {
+	PolicyDigest string `json:"policyDigest,omitempty"`
+	PolicySource string `json:"policySource,omitempty"`
+	// TraceID is the ambient trace, the key that ties this upload to the tool
+	// calls and runs the same unit of work produced. It is empty for a
+	// hand-run check, which is a legal state rather than missing data.
+	TraceID string `json:"traceId,omitempty"`
+	// RunID is the row this run occupies in the history store, so an uploaded
+	// SARIF can be traced back to the run that produced it without a second
+	// lookup. Empty when the store is disabled, which is a legal state.
+	RunID string `json:"runId,omitempty"`
+	// Extends names the parent documents the policy inherited from, so a
+	// reader of the upload can tell an inherited threshold from a repository's
+	// own. Comma-separated, nearest parent first.
+	Extends string `json:"extends,omitempty"`
 }
 
 type sarifTool struct {
@@ -77,8 +102,19 @@ type sarifRegion struct {
 	EndColumn   int `json:"endColumn"`
 }
 
-// SARIF renders the summary as a SARIF 2.1.0 document.
-func SARIF(s *model.RunSummary, toolVersion string, ruleMetas []rules.Meta) ([]byte, error) {
+// SARIF renders the summary as a SARIF 2.1.0 document. cfg is optional:
+// passing nil omits the run properties rather than emitting an empty object.
+func SARIF(s *model.RunSummary, toolVersion string, ruleMetas []rules.Meta, cfg *config.Config) ([]byte, error) {
+	return SARIFWithRun(s, toolVersion, ruleMetas, cfg, "")
+}
+
+// SARIFWithRun is SARIF with the run id stamped on.
+//
+// The run id is the one provenance field the report layer cannot know on its
+// own — the store assigns it while writing the row this document describes —
+// so it arrives as an argument, and an empty one means "this document is not
+// tied to a stored run", which is a legal state rather than missing data.
+func SARIFWithRun(s *model.RunSummary, toolVersion string, ruleMetas []rules.Meta, cfg *config.Config, runID string) ([]byte, error) {
 	metas := map[string]string{}
 	for _, m := range ruleMetas {
 		metas[m.ID] = m.Title
@@ -133,8 +169,27 @@ func SARIF(s *model.RunSummary, toolVersion string, ruleMetas []rules.Meta) ([]b
 				InformationURI: "https://github.com/metricgate/metricgate",
 				Rules:          ruleList,
 			}},
-			Results: results,
+			Results:    results,
+			Properties: sarifRunProperties(cfg, runID),
 		}},
 	}
 	return json.MarshalIndent(log, "", "  ")
+}
+
+// sarifRunProperties stamps the policy and run provenance onto the run. GitHub
+// code scanning and IDEs keep run-level properties per upload, which is what
+// makes "this finding was dismissed under policy X" a fact rather than a
+// memory, and what lets an uploaded document be traced back to the run and
+// the unit of work that produced it without a second lookup.
+func sarifRunProperties(cfg *config.Config, runID string) *sarifRunProps {
+	if cfg == nil {
+		return nil
+	}
+	return &sarifRunProps{
+		PolicyDigest: bundle.PolicyDigest(cfg),
+		PolicySource: bundle.PolicySourceLabel(cfg),
+		TraceID:      traceID(),
+		RunID:        runID,
+		Extends:      strings.Join(extendsPaths(cfg), ","),
+	}
 }

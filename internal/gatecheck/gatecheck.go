@@ -6,7 +6,6 @@ package gatecheck
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -16,6 +15,7 @@ import (
 	"metricgate/internal/impact"
 	"metricgate/internal/model"
 	"metricgate/internal/refs"
+	"metricgate/internal/sources"
 	"metricgate/internal/symbols"
 )
 
@@ -179,40 +179,55 @@ func sortedChangedLogic(changed map[string][]diff.Range) []string {
 	return out
 }
 
-// isTestPath is the same cross-language heuristic as scorecard: Go's
-// _test.go suffix, a /test/ path segment, or a Test.java suffix.
+// isTestPath delegates to the shared heuristic so the gate's test-coverage
+// checks and the engine's test baselines can never disagree.
 func isTestPath(path string) bool {
-	base := filepath.Base(path)
-	if strings.HasSuffix(base, "_test.go") || strings.HasSuffix(base, "Test.java") {
-		return true
-	}
-	for _, seg := range strings.Split(filepath.ToSlash(path), "/") {
-		if seg == "test" || seg == "tests" {
-			return true
-		}
-	}
-	return false
+	return sources.IsTestPath(path)
 }
 
 // Resolve reads the two rules' policy knobs: veto state, the impact cap
 // (languages.<lang>.rules.impact-scope.options.max_affected_files) and the
 // severities. The CLI flags decide activation; policy can only refine or
-// veto (explicit enabled:false). Both gates are repo-wide, so the first
-// configured language wins.
+// veto (explicit enabled:false). Both gates are repo-wide, so one language's
+// section wins.
+//
+// The winner used to be hardcoded to go/java, which meant the section of a
+// Python, TypeScript, C# or Rust repository was never read and its
+// enabled:false had no effect. Any configured language now counts; go and
+// java keep their precedence so a repository that already relied on it does
+// not change meaning.
 func Resolve(c *config.Config) (opts Options) {
 	opts.MaxAffectedFiles = 0 // 0 = default inside the checks
 	opts.WantImpact = true
 	opts.WantTests = true
-	for _, lang := range []string{"go", "java"} {
-		sec, ok := c.Languages[lang]
-		if !ok {
-			continue
-		}
+	for _, lang := range candidateLangs(c) {
+		sec := c.Languages[lang]
 		resolveImpact(sec, c, lang, &opts)
 		resolveTests(sec, c, lang, &opts)
 		return opts
 	}
 	return opts
+}
+
+// candidateLangs returns the configured languages in a deterministic order,
+// with go and java first (their historical precedence) and the rest sorted so
+// the choice cannot depend on map iteration order.
+func candidateLangs(c *config.Config) []string {
+	var rest []string
+	for lang := range c.Languages {
+		if lang == "go" || lang == "java" {
+			continue
+		}
+		rest = append(rest, lang)
+	}
+	sort.Strings(rest)
+	out := make([]string, 0, len(rest)+2)
+	for _, lang := range []string{"go", "java"} {
+		if _, ok := c.Languages[lang]; ok {
+			out = append(out, lang)
+		}
+	}
+	return append(out, rest...)
 }
 
 // resolveImpact reads impact-scope policy knobs into opts.

@@ -164,3 +164,81 @@ func TestResolve(t *testing.T) {
 		t.Errorf("silent config vetoed: %+v", opts)
 	}
 }
+
+// A repository whose policy configures only a non-Go/Java language must still
+// have its impact-scope knobs read. Previously Resolve scanned a hardcoded
+// go/java slice and silently returned defaults for every other language, so
+// an explicit enabled:false in a Python section did nothing.
+func TestResolveReadsNonGoJavaLanguageSection(t *testing.T) {
+	cfg, err := config.Load([]byte(`
+version: 1
+languages:
+  python:
+    rules:
+      impact-scope:
+        enabled: false
+        options:
+          max_affected_files: 3
+      tests-touched:
+        enabled: false
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Resolve(cfg)
+	if opts.WantImpact {
+		t.Error("WantImpact = true, want false (python section vetoes it)")
+	}
+	if opts.WantTests {
+		t.Error("WantTests = true, want false (python section vetoes it)")
+	}
+}
+
+// Go and Java keep their historical precedence when several languages are
+// configured, and the fallback order is deterministic (not map order).
+func TestResolvePrefersGoThenJavaThenSorted(t *testing.T) {
+	cfg, err := config.Load([]byte(`
+version: 1
+languages:
+  rust:
+    rules:
+      impact-scope:
+        enabled: false
+  go:
+    rules:
+      impact-scope:
+        options:
+          max_affected_files: 7
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Resolve(cfg)
+	if !opts.WantImpact {
+		t.Error("WantImpact = false, want true (go wins over rust)")
+	}
+	if opts.MaxAffectedFiles != 7 {
+		t.Errorf("MaxAffectedFiles = %d, want 7 (read from the go section)", opts.MaxAffectedFiles)
+	}
+}
+
+// A language with no impact-scope entry at all must not stop the scan: the
+// section is found by presence in languages:, and absence of a rule inside it
+// simply leaves the defaults.
+func TestResolveSkipsLanguageWithoutTheRules(t *testing.T) {
+	cfg, err := config.Load([]byte(`
+version: 1
+languages:
+  python:
+    metrics:
+      cyclomatic-complexity:
+        warn: 5
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Resolve(cfg)
+	if !opts.WantImpact || !opts.WantTests {
+		t.Errorf("opts = %+v, want both gates enabled (defaults)", opts)
+	}
+}

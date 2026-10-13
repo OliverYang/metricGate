@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 
+	"metricgate/internal/config"
 	"metricgate/internal/refs"
 	"metricgate/internal/symbols"
 )
@@ -79,6 +80,18 @@ func RefIndex(files []*FileFacts) *refs.Index {
 // indexes in one walk, so the impact command parses each file exactly once.
 func CollectWithRefs(root string) ([]*FileFacts, *symbols.Index, *refs.Index, error) {
 	files, err := Collect(root)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return files, Index(files), RefIndex(files), nil
+}
+
+// CollectSelectedWithRefs is CollectSelected plus both indexes: the
+// policy-aware report verbs (impact, reachability) use it so their answer
+// covers the same files the gate checks. CollectWithRefs stays for callers
+// that deliberately want every supported file regardless of policy.
+func CollectSelectedWithRefs(root string, cfg *config.Config) ([]*FileFacts, *symbols.Index, *refs.Index, error) {
+	files, err := CollectSelected(root, cfg)
 	if err != nil {
 		return nil, nil, nil, err
 	}

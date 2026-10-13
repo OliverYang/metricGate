@@ -22,14 +22,15 @@ import (
 	"metricgate/internal/config"
 	"metricgate/internal/engine"
 	"metricgate/internal/model"
+	"metricgate/internal/parser"
 )
 
 // Spec is the input contract: one ban rule described in policy vocabulary.
 // The JSON keys mirror policy.yaml field names on purpose — an LLM that can
 // read the policy vocabulary can emit a valid spec.
 type Spec struct {
-	Lang        string   `json:"lang"`                   // go | java
-	Kind        string   `json:"kind"`                   // call | import | constructor (java only)
+	Lang        string   `json:"lang"`                   // any registered language id (go, java, python, typescript, csharp, rust, ...)
+	Kind        string   `json:"kind"`                   // call | import | constructor (not every language can express every kind)
 	Match       string   `json:"match"`                  // ban pattern; trailing * = prefix match
 	ArgsBan     []string `json:"args_ban,omitempty"`     // fire only when a string-literal argument equals one of these
 	Reason      string   `json:"reason,omitempty"`       // why it is banned (rendered in findings + digests)
@@ -79,9 +80,44 @@ type VerifyResult struct {
 	Notes        []string      `json:"notes,omitempty"`
 }
 
+// allowedKinds is the ban vocabulary each language can express. It mirrors
+// the engine's ban builders: a kind listed here has a query that can see it,
+// and a kind absent here would compile into a rule that can never match.
 var allowedKinds = map[string][]string{
-	"go":   {"call", "import"},
-	"java": {"call", "import", "constructor"},
+	"go":         {"call", "import"},
+	"java":       {"call", "import", "constructor"},
+	"typescript": {"call", "import", "constructor"},
+	"tsx":        {"call", "import", "constructor"},
+	"javascript": {"call", "import", "constructor"},
+	"python":     {"call", "import"},
+	"c":          {"call", "import"},
+	"cpp":        {"call", "import", "constructor"},
+	"csharp":     {"call", "import", "constructor"},
+	"rust":       {"call", "import"},
+}
+
+// langAliases maps the spellings a spec may use onto the engine's language id,
+// so a caller writing "ts" or "c#" gets the right section instead of a
+// rejection. The canonical ids are the ones in allowedKinds.
+var langAliases = map[string]string{
+	"ts":     "typescript",
+	"tsx":    "tsx",
+	"js":     "javascript",
+	"py":     "python",
+	"c++":    "cpp",
+	"c#":     "csharp",
+	"cs":     "csharp",
+	"rs":     "rust",
+	"golang": "go",
+}
+
+// CanonicalLang resolves a spec's language spelling to the engine's id.
+func CanonicalLang(lang string) string {
+	l := strings.ToLower(strings.TrimSpace(lang))
+	if alias, ok := langAliases[l]; ok {
+		return alias
+	}
+	return l
 }
 
 // RuleID derives the stable finding id of the ban the same way the engine
@@ -96,8 +132,9 @@ func RuleID(match string) string {
 // rejects belongs on the gap ledger, not in a policy.
 func Validate(s *Spec) error {
 	var probs []string
-	if s.Lang != "go" && s.Lang != "java" {
-		probs = append(probs, fmt.Sprintf("lang %q 不支持（可用 go/java）", s.Lang))
+	if _, ok := allowedKinds[s.Lang]; !ok {
+		probs = append(probs, fmt.Sprintf("lang %q 不支持（可用 %s）",
+			s.Lang, strings.Join(supportedLangNames(), "/")))
 	} else if !kindAllowed(s.Lang, s.Kind) {
 		probs = append(probs, fmt.Sprintf("kind %q 在 %s 上不支持（可用 %s；Go 工厂函数走 call）",
 			s.Kind, s.Lang, strings.Join(allowedKinds[s.Lang], "/")))
@@ -116,6 +153,18 @@ func Validate(s *Spec) error {
 	return errors.New("spec 校验失败: " + strings.Join(probs, "; "))
 }
 
+// supportedLangNames lists the accepted language ids in a stable order for
+// error messages.
+func supportedLangNames() []string {
+	names := make([]string, 0, len(allowedKinds))
+	for _, id := range parser.Supported() {
+		if _, ok := allowedKinds[string(id)]; ok {
+			names = append(names, string(id))
+		}
+	}
+	return names
+}
+
 func kindAllowed(lang, kind string) bool {
 	for _, k := range allowedKinds[lang] {
 		if k == kind {
@@ -130,14 +179,8 @@ func kindAllowed(lang, kind string) bool {
 // and grade every fixture case by whether the rule under test behaved as
 // specified. Everything the run touched stays inspectable on the result.
 func Verify(specBytes []byte, bad, good []FixtureInput, base *config.Config) (*VerifyResult, error) {
-	if !json.Valid(specBytes) {
-		return nil, errors.New("spec 不是合法 JSON")
-	}
-	var s Spec
-	if err := json.Unmarshal(specBytes, &s); err != nil {
-		return nil, fmt.Errorf("spec: %w", err)
-	}
-	if err := Validate(&s); err != nil {
+	s, err := parseSpec(specBytes)
+	if err != nil {
 		return nil, err
 	}
 	if len(bad) == 0 {
@@ -147,16 +190,43 @@ func Verify(specBytes []byte, bad, good []FixtureInput, base *config.Config) (*V
 	res := &VerifyResult{RuleID: RuleID(s.Match), Spec: &s}
 	res.YAML = entryYAML(&s)
 	res.PolicyYAML = policyYAML(&s)
-	if base != nil && dedupHit(base, &s) {
-		res.Existing = true
-		res.Notes = append(res.Notes,
-			fmt.Sprintf("base policy 已存在同 kind+match 禁令（%s/%s）——查重命中，合并前先确认语义是否叠加", s.Kind, s.Match))
-	}
+	noteExisting(res, base, s)
 	if err := verifyOnDisk(res, s, bad, good); err != nil {
 		res.CompileError = err.Error()
 	}
 	res.Pass = res.Compiled && allPassed(res.Fixtures)
 	return res, nil
+}
+
+// noteExisting records that the base policy already carries a ban of the same
+// kind and match. The verdict still runs — a duplicate is a warning for the
+// reviewer, not a rejection.
+func noteExisting(res *VerifyResult, base *config.Config, s Spec) {
+	if base == nil || !dedupHit(base, &s) {
+		return
+	}
+	res.Existing = true
+	res.Notes = append(res.Notes,
+		fmt.Sprintf("base policy 已存在同 kind+match 禁令（%s/%s）——查重命中，合并前先确认语义是否叠加", s.Kind, s.Match))
+}
+
+// parseSpec decodes and validates one rule spec. A caller may spell the
+// language the way its own ecosystem does ("ts", "c#", "py"), so the id is
+// normalised before anything reads it: the policy section and the fixture
+// extension must always use the engine's id.
+func parseSpec(specBytes []byte) (Spec, error) {
+	if !json.Valid(specBytes) {
+		return Spec{}, errors.New("spec 不是合法 JSON")
+	}
+	var s Spec
+	if err := json.Unmarshal(specBytes, &s); err != nil {
+		return Spec{}, fmt.Errorf("spec: %w", err)
+	}
+	s.Lang = CanonicalLang(s.Lang)
+	if err := Validate(&s); err != nil {
+		return Spec{}, err
+	}
+	return s, nil
 }
 
 func allPassed(fcs []FixtureCase) bool {
@@ -210,7 +280,7 @@ func verifyOnDisk(res *VerifyResult, s Spec, bad, good []FixtureInput) error {
 // stageFixtures writes one expect-class of fixture inputs into the run root
 // and appends their case nodes, carrying any staging notes onto the result.
 func (res *VerifyResult) stageFixtures(root string, s Spec, ins []FixtureInput, expect string) {
-	ext := "." + s.Lang
+	ext := parser.Extension(parser.LanguageID(s.Lang))
 	for i, in := range ins {
 		fc, note := stageFixture(root, in, fmt.Sprintf("%s-%d%s", expect, i+1, ext), expect, s.Lang)
 		res.Fixtures = append(res.Fixtures, fc)
@@ -282,69 +352,4 @@ func dedupHit(base *config.Config, s *Spec) bool {
 		}
 	}
 	return false
-}
-
-// banEntryYAML renders one BanConfig as a banned-api list entry with
-// double-quoted scalars so CJK/colons survive the round trip.
-func banEntryYAML(s *Spec) string {
-	var b strings.Builder
-	b.WriteString("      - kind: " + s.Kind + "\n")
-	fmt.Fprintf(&b, "        match: %s\n", yamlStr(s.Match))
-	if s.Reason != "" {
-		fmt.Fprintf(&b, "        reason: %s\n", yamlStr(s.Reason))
-	}
-	if s.Use != "" {
-		fmt.Fprintf(&b, "        use: %s\n", yamlStr(s.Use))
-	}
-	if len(s.ArgsBan) > 0 {
-		quoted := make([]string, len(s.ArgsBan))
-		for i, a := range s.ArgsBan {
-			quoted[i] = yamlStr(a)
-		}
-		fmt.Fprintf(&b, "        args_ban: [%s]\n", strings.Join(quoted, ", "))
-	}
-	if len(s.ExceptFiles) > 0 {
-		quoted := make([]string, len(s.ExceptFiles))
-		for i, e := range s.ExceptFiles {
-			quoted[i] = yamlStr(e)
-		}
-		fmt.Fprintf(&b, "        except_files: [%s]\n", strings.Join(quoted, ", "))
-	}
-	return b.String()
-}
-
-// entryYAML renders the merge-ready policy fragment: the banned-api key plus
-// its first entry at list-item indent, dropped straight under an existing
-// languages.<lang>: section (list items at 6 spaces, fields at 8).
-func entryYAML(s *Spec) string {
-	var b strings.Builder
-	b.WriteString("    banned-api:\n")
-	b.WriteString(banEntryYAML(s))
-	return b.String()
-}
-
-// policyYAML renders the full minimal policy the verification runs against:
-// the rule under test plus an unknown-dependency veto so fixture imports do
-// not drown the verdict in unrelated dependency noise, and a warning-level
-// fail_on so severity behaviour is exercised the same way gates enforce it.
-func policyYAML(s *Spec) string {
-	var b strings.Builder
-	b.WriteString("gate:\n  fail_on: warning\nstore:\n  enabled: false\nlanguages:\n")
-	fmt.Fprintf(&b, "  %s:\n", s.Lang)
-	b.WriteString("    banned-api:\n")
-	b.WriteString(banEntryYAML(s))
-	b.WriteString("    rules:\n")
-	fmt.Fprintf(&b, "      unknown-dependency:\n        enabled: false\n")
-	sev := s.Severity
-	if sev == "" {
-		sev = "warning"
-	}
-	fmt.Fprintf(&b, "      %s:\n        severity: %s\n", RuleID(s.Match), sev)
-	return b.String()
-}
-
-// yamlStr double-quotes a scalar, escaping backslashes and quotes.
-func yamlStr(s string) string {
-	q := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
-	return `"` + q + `"`
 }

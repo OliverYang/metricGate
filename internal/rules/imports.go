@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"metricgate/internal/model"
+	"metricgate/internal/parser"
 )
 
 // RuleUnknownDependency is the stable finding id of the import allowlist check.
@@ -48,11 +49,21 @@ func unknownDepRule(query string, extract func(string) string, isStdlib func(str
 		Query:           query,
 		AnchorCapture:   "path",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
-			path := extract(ctx.Text(ctx.Captures["path"]))
+			anchor := ctx.Captures["path"]
+			if anchor == nil {
+				return nil
+			}
+			// The anchor is the include/using node; the path text may carry
+			// brackets/quotes the extract function must trim first.
+			path := extract(ctx.Text(anchor))
 			if path == "" || isStdlib(path) || allowedImport(path, ctx.OptStrings("allow")) {
 				return nil
 			}
-			return at(ctx, "path", unknownDepMessage(path))
+			return &model.Finding{
+				StartLine: int(anchor.StartPosition().Row) + 1,
+				EndLine:   int(anchor.EndPosition().Row) + 1,
+				Message:   unknownDepMessage(path),
+			}
 		},
 	}
 }
@@ -98,4 +109,47 @@ func javaJDKImport(path string) bool {
 func unknownDepMessage(path string) string {
 	return "import " + path + " is not a declared dependency of this repository; " +
 		"if it is not a typo, declare it in the build manifest or add it to the policy's dependencies.allow first"
+}
+
+// IsStdlib reports whether an import path belongs to the language's platform
+// (standard library / JDK / BCL / system headers / node builtins) and so is
+// never a declared dependency. It reuses the unknown-dependency rule's
+// predicates so the scan's draft and the checker's verdicts agree. C/C++
+// system includes are detected by their angle brackets, so callers pass the
+// raw include text for those languages.
+func IsStdlib(lang parser.LanguageID, path string) bool {
+	switch lang {
+	case parser.LangC:
+		// Quoted includes are repo-local files (structure, not
+		// dependencies); angle-bracketed ones go through the system
+		// header set — a third-party <openssl/ssl.h> must still be
+		// drafted.
+		return !strings.HasPrefix(path, "<") || cSystemInclude(strings.Trim(path, "<>"))
+	case parser.LangCpp:
+		return !strings.HasPrefix(path, "<") || cppSystemInclude(strings.Trim(path, "<>"))
+	default:
+		// Every other predicate expects the trimmed path (the checker
+		// extracts and trims before calling them); quotes would defeat
+		// the node: prefix test and similar.
+		return isStdlibTrimmed(lang, strings.Trim(path, "\"'`"))
+	}
+}
+
+// isStdlibTrimmed dispatches the bracket-free languages.
+func isStdlibTrimmed(lang parser.LanguageID, path string) bool {
+	switch lang {
+	case parser.LangGo:
+		return goStdlibImport(path)
+	case parser.LangJava:
+		return javaJDKImport(path)
+	case parser.LangTS, parser.LangTSX, parser.LangJS:
+		return jsBuiltinImport(path)
+	case parser.LangPy:
+		return pyStdlibImport(path)
+	case parser.LangCS:
+		return csBCLNamespace(path)
+	case parser.LangRust:
+		return rustStdlibImport(path)
+	}
+	return false
 }

@@ -55,6 +55,17 @@ var (
 	// knowledge lives in exactly one place.
 	goFuncKinds   = NewKindSet(parser.TsGo, "function_declaration", "method_declaration")
 	javaFuncKinds = NewKindSet(parser.TsJava, "method_declaration", "constructor_declaration")
+	// tsFuncKinds serves both the .ts and .tsx grammars: TSX is TypeScript
+	// with JSX elements added, and the constructs a class declares are the
+	// same. The two grammars only differ where a JSX node can appear.
+	tsFuncKinds   = NewKindSet(parser.TsTypescript, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration", "abstract_class_declaration")
+	tsxFuncKinds  = NewKindSet(parser.TsTsx, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration", "abstract_class_declaration")
+	jsFuncKinds   = NewKindSet(parser.TsJavascript, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration")
+	pyFuncKinds   = NewKindSet(parser.TsPython, "function_definition", "class_definition")
+	cFuncKinds    = NewKindSet(parser.TsC, "function_definition")
+	cppFuncKinds  = NewKindSet(parser.TsCpp, "function_definition")
+	csFuncKinds   = NewKindSet(parser.TsCSharp, "method_declaration", "constructor_declaration", "destructor_declaration", "operator_declaration", "local_function_statement")
+	rustFuncKinds = NewKindSet(parser.TsRust, "function_item")
 )
 
 // LangProfile holds the node kinds a language measures functions on.
@@ -70,6 +81,38 @@ var (
 	javaProfile = &LangProfile{
 		FuncKinds: javaFuncKinds,
 	}
+
+	tsProfile = &LangProfile{
+		FuncKinds: tsFuncKinds,
+	}
+
+	tsxProfile = &LangProfile{
+		FuncKinds: tsxFuncKinds,
+	}
+
+	jsProfile = &LangProfile{
+		FuncKinds: jsFuncKinds,
+	}
+
+	pyProfile = &LangProfile{
+		FuncKinds: pyFuncKinds,
+	}
+
+	cProfile = &LangProfile{
+		FuncKinds: cFuncKinds,
+	}
+
+	cppProfile = &LangProfile{
+		FuncKinds: cppFuncKinds,
+	}
+
+	csProfile = &LangProfile{
+		FuncKinds: csFuncKinds,
+	}
+
+	rustProfile = &LangProfile{
+		FuncKinds: rustFuncKinds,
+	}
 )
 
 // ProfileFor returns the language-specific node kind sets.
@@ -80,6 +123,22 @@ func ProfileFor(lang parser.LanguageID) *LangProfile {
 		return goProfile
 	case parser.LangJava:
 		return javaProfile
+	case parser.LangTS:
+		return tsProfile
+	case parser.LangTSX:
+		return tsxProfile
+	case parser.LangJS:
+		return jsProfile
+	case parser.LangPy:
+		return pyProfile
+	case parser.LangC:
+		return cProfile
+	case parser.LangCpp:
+		return cppProfile
+	case parser.LangCS:
+		return csProfile
+	case parser.LangRust:
+		return rustProfile
 	default:
 		return goProfile // fallback
 	}

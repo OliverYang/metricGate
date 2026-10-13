@@ -45,6 +45,11 @@ type Func struct {
 	EndLine   int // 1-based inclusive
 	Hash      uint64
 	Tokens    int // normalised token count of the body
+
+	// body is the AST node this fingerprint was taken from. It is unexported
+	// because it is only valid while the tree is alive; the near-clone pass
+	// uses it instead of re-locating the declaration in the tree.
+	body *sitter.Node
 }
 
 // Group is one clone class: functions whose normalised bodies hashed to the
@@ -59,10 +64,30 @@ type Group struct {
 // declKinds are the function-like declaration node kinds per language.
 // Bodies (not whole declarations) are fingerprinted, so renaming a
 // parameter does not hide a clone — only changing the logic does.
+//
+// The kinds double as the source of truth for the shared declaration walker
+// (internal/facts/lang.go indexes symbols off the same table), so a language
+// cannot be covered by one pass and invisible to the other.
+//
+// C/C++ keep only function_definition: nested declarator forms (pointer,
+// parenthesised) are still function_definition, so no extra kind is needed.
 var declKinds = map[parser.LanguageID][]string{
 	parser.LangGo:   {"function_declaration", "method_declaration"},
 	parser.LangJava: {"method_declaration", "constructor_declaration"},
+	parser.LangTS:   {"function_declaration", "generator_function_declaration", "method_definition"},
+	parser.LangTSX:  {"function_declaration", "generator_function_declaration", "method_definition"},
+	parser.LangJS:   {"function_declaration", "generator_function_declaration", "method_definition"},
+	parser.LangPy:   {"function_definition"},
+	parser.LangC:    {"function_definition"},
+	parser.LangCpp:  {"function_definition"},
+	parser.LangCS:   {"method_declaration", "constructor_declaration", "destructor_declaration", "local_function_statement", "operator_declaration"},
+	parser.LangRust: {"function_item"},
 }
+
+// DeclKinds returns the function-like declaration node kinds of a language,
+// or nil when the language has none. Other packages use it instead of keeping
+// a second list that could drift out of step.
+func DeclKinds(lang parser.LanguageID) []string { return declKinds[lang] }
 
 // Enabled reports whether the config extracts anything at all; the zero
 // Config is the documented "off" switch.
@@ -70,9 +95,14 @@ func (c Config) Enabled() bool { return c.MinLines > 0 && c.MinTokens > 0 }
 
 // Extract collects the clone candidates of one parsed file. It runs in the
 // parse workers, on a tree the metrics pass also walks.
+//
+// Each candidate carries the AST body node it was fingerprinted from, so the
+// near-clone pass reuses the same node instead of re-locating the declaration
+// by name and line — a lookup that silently fails for grammars whose
+// declarations are unnamed (C/C++ declarator chains, C# fields).
 func Extract(lang parser.LanguageID, path string, src []byte, tree *sitter.Tree, cfg Config) []Func {
-	kinds, ok := declKinds[lang]
-	if !ok || !cfg.Enabled() {
+	kinds := declKinds[lang]
+	if len(kinds) == 0 || !cfg.Enabled() {
 		return nil
 	}
 	isDecl := map[string]bool{}
@@ -96,6 +126,7 @@ func Extract(lang parser.LanguageID, path string, src []byte, tree *sitter.Tree,
 					EndLine:   int(n.EndPosition().Row) + 1,
 					Hash:      hash,
 					Tokens:    tokens,
+					body:      body,
 				})
 			}
 			return // nested function literals stay out: declarations only

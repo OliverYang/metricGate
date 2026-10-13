@@ -6,13 +6,25 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"metricgate/internal/git"
 )
 
-func TestParseNumstat(t *testing.T) {
-	got := parseNumstat("\x01\n10\t2\tinternal/a.go\n-\t-\timage.png\n3\t4\tinternal/a.go\n0\t8\tinternal/b.go\n")
+func TestChurnOfFoldsCommitStats(t *testing.T) {
+	commits := []git.Commit{
+		{Files: []git.FileStat{
+			{Path: "internal/a.go", Added: 10, Deleted: 2},
+			{Path: "image.png", Binary: true},
+		}},
+		{Files: []git.FileStat{
+			{Path: "internal/a.go", Added: 3, Deleted: 4},
+			{Path: "internal/b.go", Deleted: 8},
+		}},
+	}
+	got := churnOf(commits)
 	want := map[string]int{"internal/a.go": 19, "internal/b.go": 8}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parseNumstat = %v, want %v", got, want)
+		t.Errorf("churnOf = %v, want %v", got, want)
 	}
 }
 

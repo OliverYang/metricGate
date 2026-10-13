@@ -21,6 +21,8 @@ import (
 	"metricgate/internal/parser"
 	"metricgate/internal/regress"
 	"metricgate/internal/rules"
+	"metricgate/internal/selection"
+	"metricgate/internal/sources"
 )
 
 // Engine runs the checker over a directory tree, with one rule runner per
@@ -48,7 +50,7 @@ func New(cfg *config.Config) (*Engine, error) {
 			e.Close()
 			return nil, err
 		}
-		pack := rules.RulesFor(id, cfg)
+		pack := rules.RulesFor(id, cfg, p.Lang)
 		runner, err := rules.NewRunner(string(id), p.Lang, pack)
 		if err != nil {
 			p.Close()
@@ -115,13 +117,21 @@ func (e *Engine) Rules() []rules.Meta { return Catalog(e.cfg) }
 func Catalog(cfg *config.Config) []rules.Meta {
 	var out []rules.Meta
 	for _, id := range parser.Supported() {
-		for _, m := range rules.Metas(rules.RulesFor(id, cfg)) {
+		// DSL validation needs the grammar; a failed parser build skips
+		// custom rules here (the engine run reports the real problem).
+		var langPtr *sitter.Language
+		if p, err := parser.New(id); err == nil {
+			langPtr = p.Lang
+			defer p.Close()
+		}
+		for _, m := range rules.Metas(rules.RulesFor(id, cfg, langPtr)) {
 			m.Language = string(id)
 			out = append(out, m)
 		}
 		out = append(out, metricMetas(string(id))...)
 	}
 	out = append(out, archRuleMetas(cfg)...)
+	out = append(out, couplingRuleMeta(cfg)...)
 	out = append(out, cloneRuleMeta(cfg))
 	out = append(out, regress.Meta())
 	return out
@@ -172,13 +182,25 @@ func (e *Engine) Run(root string) (*model.RunSummary, error) {
 func (e *Engine) RunDetailed(root string) (*RunResult, error) {
 	start := time.Now()
 	e.depAllow = deps.ForRoot(root, e.cfg).Prefixes()
-	files, err := e.collect(root)
+	// Workers and the report path normalizer both need a root the file paths
+	// can be made relative to. A relative root other than "." (e.g.
+	// `check internal/refs`) produced cwd-relative paths like
+	// "internal/refs/a.go", which are not relative to the root and so never
+	// matched the root-relative keys git reports for -diff. Absolutizing once
+	// here makes all four invocations equivalent; the selection policy still
+	// sees the same root-relative paths, because filepath.Rel(workRoot, p) is
+	// unchanged by the prefix.
+	workRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	files, err := e.collect(workRoot)
 	if err != nil {
 		return nil, err
 	}
 	summary := &model.RunSummary{Files: len(files)}
 
-	results := e.runWorkers(root, files)
+	results := e.runWorkers(workRoot, files)
 
 	var archFiles []arch.File
 	var cloneFns []clones.Func
@@ -245,7 +267,16 @@ func (e *Engine) collect(root string) ([]string, error) {
 // findings, which matters when checking freshly generated LLM output.
 func (e *Engine) checkFile(w *worker, root, path string) fileResult {
 	var res fileResult
-	res.path = path
+	// Everything downstream of here is a report artifact, so it uses the
+	// invocation-independent form of the path from the start. Deciding this at
+	// the top rather than rewriting findings at the exit is what keeps the
+	// pieces that must agree with each other agreeing: the arch graph keys
+	// suppressions by arch.File.Name, clone findings carry clones.Func.File,
+	// and a ban's allowed_files is matched against the file during rule
+	// execution. Rewriting only the final findings would leave those three
+	// reading an absolute path while the findings they filter carry a relative
+	// one.
+	res.path = selection.SanitizePath(root, path)
 	lang, ok := parser.LanguageForFile(filepath.Base(path))
 	if !ok {
 		return res
@@ -254,7 +285,7 @@ func (e *Engine) checkFile(w *worker, root, path string) fileResult {
 	if err != nil {
 		res.findings = append(res.findings, model.Finding{
 			RuleID: "read-error", Severity: model.SevWarning, Source: model.SrcRule,
-			File: path, StartLine: 1, EndLine: 1,
+			File: res.path, StartLine: 1, EndLine: 1,
 			Message: "could not read file: " + err.Error(),
 		})
 		return res
@@ -262,12 +293,12 @@ func (e *Engine) checkFile(w *worker, root, path string) fileResult {
 
 	pp, err := w.parserFor(lang)
 	if err != nil {
-		res.findings = append(res.findings, parseErrorFinding(path, err.Error()))
+		res.findings = append(res.findings, parseErrorFinding(res.path, err.Error()))
 		return res
 	}
 	tree, err := pp.Parse(src)
 	if err != nil {
-		res.findings = append(res.findings, parseErrorFinding(path, err.Error()))
+		res.findings = append(res.findings, parseErrorFinding(res.path, err.Error()))
 		return res
 	}
 	defer tree.Close()
@@ -276,12 +307,12 @@ func (e *Engine) checkFile(w *worker, root, path string) fileResult {
 		res.parseError = "file has syntax errors; results may be incomplete"
 	}
 
-	res.findings, res.metrics, res.ignored, res.ignoredByRule, res.sups = e.analyze(lang, path, src, tree)
+	res.findings, res.metrics, res.ignored, res.ignoredByRule, res.sups = e.analyze(lang, res.path, src, tree)
 	if res.parseError != "" {
-		res.findings = append(res.findings, parseErrorFinding(path, res.parseError))
+		res.findings = append(res.findings, parseErrorFinding(res.path, res.parseError))
 	}
-	res.archFile = archFileOf(lang, root, path, src, tree)
-	res.cloneFns = clones.Extract(lang, path, src, tree, e.cfg.ClonePolicy())
+	res.archFile = archFileOf(lang, root, res.path, src, tree)
+	res.cloneFns = clones.Extract(lang, res.path, src, tree, e.cfg.ClonePolicy())
 	res.types = typeCensus(lang, src, tree)
 	return res
 }
@@ -297,7 +328,7 @@ func (e *Engine) analyze(lang parser.LanguageID, name string, src []byte, tree *
 	mets = e.metricResults(lang, stats)
 	findings = append(findings, e.metricFindings(lang, stats)...)
 	findings = append(findings, e.runners[lang].Run(name, src, tree, e.policy())...)
-	sups = buildSuppressions(lang, src, tree.RootNode())
+	sups = buildSuppressions(src, tree.RootNode())
 	if len(sups) > 0 {
 		findings, ignored, ignoredByRule = suppress(findings, sups)
 	}
@@ -307,6 +338,30 @@ func (e *Engine) analyze(lang parser.LanguageID, name string, src []byte, tree *
 // thresholds resolves the effective warn/error thresholds for a metric.
 func (e *Engine) thresholds(lang parser.LanguageID, metricID string) (warn, errAt int) {
 	return EffectiveThresholds(e.cfg, string(lang), metricID)
+}
+
+// testThresholds resolves the effective warn/error thresholds for a metric
+// measured on a test file: each severity level takes the test_metrics
+// override when one is set, and falls back to the regular resolution
+// (default, then metrics override) when not. `off` is honored per level.
+func EffectiveTestThresholds(cfg *config.Config, lang, metricID string) (warn, errAt int) {
+	warn, errAt = EffectiveThresholds(cfg, lang, metricID)
+	tw, te, enabled := cfg.TestMetricThresholds(lang, metricID)
+	if enabled != nil && !*enabled {
+		return 0, 0
+	}
+	twOff, teOff := cfg.TestMetricOff(lang, metricID)
+	if twOff {
+		warn = 0
+	} else if tw > 0 {
+		warn = tw
+	}
+	if teOff {
+		errAt = 0
+	} else if te > 0 {
+		errAt = te
+	}
+	return warn, errAt
 }
 
 // EffectiveThresholds resolves a metric's warn/error thresholds the way a run
@@ -420,10 +475,15 @@ func (e *Engine) metricResults(lang parser.LanguageID, stats *metrics.FileStats)
 }
 
 // metricVerdict resolves the severity a measured value earns for a metric
-// and the threshold that fired; ok is false when nothing is crossed. A
-// value crosses a threshold when strictly greater than it.
+// and the threshold that fired; ok is false when nothing is crossed.
 func (e *Engine) metricVerdict(lang parser.LanguageID, metric string, value int) (sev model.Severity, threshold int, ok bool) {
 	warn, errAt := e.thresholds(lang, metric)
+	return metricVerdictAt(value, warn, errAt)
+}
+
+// metricVerdictAt applies pre-resolved thresholds; a value crosses when
+// strictly greater than the level, and a level resolved to 0 cannot fire.
+func metricVerdictAt(value, warn, errAt int) (sev model.Severity, threshold int, ok bool) {
 	if warn == 0 && errAt == 0 {
 		return "", 0, false
 	}
@@ -461,11 +521,19 @@ func scopeRange(stats *metrics.FileStats, scope string) (line, end int) {
 // measured scope (function, class, or the file).
 func (e *Engine) metricFindings(lang parser.LanguageID, stats *metrics.FileStats) []model.Finding {
 	var findings []model.Finding
+	// Test files get their own baselines when the policy declares them:
+	// tests legitimately run long and take many parameters, and excluding
+	// them from measurement entirely would hide regressions wholesale.
+	testFile := sources.IsTestPath(stats.File)
 	add := func(metric, scope string, value int) {
 		if !e.metricEnabled(lang, metric) {
 			return
 		}
-		sev, threshold, crossed := e.metricVerdict(lang, metric, value)
+		warn, errAt := e.thresholds(lang, metric)
+		if testFile {
+			warn, errAt = EffectiveTestThresholds(e.cfg, string(lang), metric)
+		}
+		sev, threshold, crossed := metricVerdictAt(value, warn, errAt)
 		if !crossed {
 			return
 		}
@@ -531,7 +599,7 @@ func (e *Engine) thresholdsByLang(langs ...string) (warn, errAt int) {
 func (e *Engine) CheckSource(name string, src []byte) ([]model.Finding, error) {
 	lang, ok := parser.LanguageForFile(filepath.Base(name))
 	if !ok {
-		return nil, fmt.Errorf("unsupported language for %q (use .go or .java)", name)
+		return nil, fmt.Errorf("unsupported language for %q (use .go, .java, .ts, .js, .py, .c, .cpp, .cs, .rs)", name)
 	}
 	e.ensureDeps()
 	pp, err := parser.New(lang)

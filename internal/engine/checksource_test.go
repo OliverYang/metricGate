@@ -46,7 +46,8 @@ func TestCheckSourceRejectsUnknownLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer eng.Close()
-	if _, err := eng.CheckSource("x.py", []byte("print(1)")); err == nil {
+	// .pyz is not a source extension any language claims.
+	if _, err := eng.CheckSource("x.pyz", []byte("print(1)")); err == nil {
 		t.Fatal("expected error for unsupported language")
 	}
 }

@@ -20,17 +20,31 @@ import (
 	"metricgate/internal/rules"
 )
 
-// archFileOf describes one parsed file for the dependency graph. Go packages
-// are identified by their directory (their import path is not written in the
-// file); Java packages by their package clause, normalised to slashes.
+// archFileOf describes one parsed file for the dependency graph. A package is
+// either declared in the file (Java, C#: the package/namespace clause; Python:
+// see below) or implied by its location (Go, C/C++, TypeScript/JavaScript,
+// Rust: the directory, because nothing in the file names its own import path).
 func archFileOf(lang parser.LanguageID, root, path string, src []byte, tree *sitter.Tree) arch.File {
 	raw := arch.Extract(lang, src, tree.RootNode())
-	pkg := raw.Package
-	java := lang == parser.LangJava
-	if !java {
-		pkg = packageID(root, path)
+	pkg := declaredPackage(lang, raw, root, path)
+	return arch.File{Name: path, Pkg: pkg, Style: arch.ImportStyle(lang), Imports: raw.Imports}
+}
+
+// declaredPackage picks the graph node a file contributes: the declared
+// package name when the language has one that is unambiguous, the file's
+// directory otherwise.
+//
+// Python is the awkward case. It does declare `package.module` names, but they
+// start at the import root, which is not known from the file alone — a
+// directory-relative node at least matches the imports under a src/ root, and
+// is the same approximation Go already lives with. So it takes the directory.
+func declaredPackage(lang parser.LanguageID, raw arch.Raw, root, path string) string {
+	switch lang {
+	case parser.LangJava, parser.LangCS:
+		return raw.Package
+	default:
+		return packageID(root, path)
 	}
-	return arch.File{Name: path, Pkg: pkg, Java: java, Imports: raw.Imports}
 }
 
 // typeCensus reports a file's type declarations for Martin's abstractness.

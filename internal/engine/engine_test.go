@@ -57,9 +57,9 @@ func TestRunOnTestdata(t *testing.T) {
 	}
 	// sample.go + java/Sample.java + the arch fixture (3) + the archsup
 	// fixture (2) + the clone fixtures (2) + the clone-suppression fixture
-	// (2) + the CK fixture (1) + the stub fixture (1) + the sdp fixture (6)
-	if s.Files != 19 {
-		t.Fatalf("files = %d, want 19", s.Files)
+	// (2) + the CK fixtures (2) + the stub fixture (1) + the sdp fixture (6)
+	if s.Files != 20 {
+		t.Fatalf("files = %d, want 20", s.Files)
 	}
 	if n := len(s.ParseErrors); n != 0 {
 		t.Fatalf("unexpected parse errors: %v", s.ParseErrors)

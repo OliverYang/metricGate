@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	sitter "github.com/tree-sitter/go-tree-sitter"
+
 	"metricgate/internal/arch"
 	"metricgate/internal/clones"
 	"metricgate/internal/config"
@@ -126,16 +128,29 @@ func constraints(cfg *config.Config, langs map[parser.LanguageID]bool) []string 
 		}
 	}
 
-	for _, lang := range []parser.LanguageID{parser.LangGo, parser.LangJava} {
-		if langs[lang] {
-			add(langConstraints(cfg, lang))
-		}
+	for _, lang := range presentLangs(langs) {
+		add(langConstraints(cfg, lang))
 	}
 	// Architecture constraints are global (a dependency direction is never
 	// single-language), so they are added once, however many languages ran.
 	add(bullets(arch.Summary(cfg.ArchPolicy())))
 
 	sort.Strings(out)
+	return out
+}
+
+// presentLangs lists the languages of the fact set in a stable order. The
+// pack used to render Go and Java only, so a TypeScript file got structural
+// facts and no constraints at all — the half of the pack the agent is
+// supposed to obey was silently missing for seven of nine languages.
+func presentLangs(langs map[parser.LanguageID]bool) []parser.LanguageID {
+	out := make([]parser.LanguageID, 0, len(langs))
+	for lang, ok := range langs {
+		if ok {
+			out = append(out, lang)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 
@@ -151,14 +166,21 @@ func bullets(lines []string) []string {
 // langConstraints renders the rule and limit lines of one language.
 func langConstraints(cfg *config.Config, lang parser.LanguageID) []string {
 	var lines []string
-	for _, r := range rules.RulesFor(lang, cfg) {
+	// DSL validation needs the grammar; a parser that fails to build just
+	// skips the custom rules (the engine would report the real problem).
+	var langPtr *sitter.Language
+	if p, err := parser.New(lang); err == nil {
+		langPtr = p.Lang
+		defer p.Close()
+	}
+	for _, r := range rules.RulesFor(lang, cfg, langPtr) {
 		if l := ruleLine(cfg, lang, r); l != "" {
 			lines = append(lines, l)
 		}
 	}
 	ids := metricIDs
-	if lang == parser.LangJava {
-		ids = javaMetricIDs
+	if metrics.HasClasses(string(lang)) {
+		ids = classMetricIDs
 	}
 	for _, id := range ids {
 		if l := limitLine(cfg, lang, id); l != "" {
@@ -231,9 +253,9 @@ var metricIDs = []string{
 	metrics.MetricParams,
 }
 
-// javaMetricIDs extends metricIDs with the CK class metrics, which only
-// exist for Java.
-var javaMetricIDs = append(append([]string{}, metricIDs...),
+// classMetricIDs extends metricIDs with the CK class metrics, which exist
+// for every language that declares classes.
+var classMetricIDs = append(append([]string{}, metricIDs...),
 	metrics.MetricWMC, metrics.MetricNOM, metrics.MetricLCOM,
 	metrics.MetricCBO, metrics.MetricDIT)
 

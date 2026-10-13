@@ -13,6 +13,7 @@
 package deps
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -69,8 +70,10 @@ func New(entries []string) Allowlist {
 
 // ForRoot builds the allowlist for a repository: the policy's declared allow
 // and self entries, plus the module path and requirements read from the
-// nearest go.mod above root. A missing go.mod is not an error — the policy
-// entries still apply, and a non-Go repository simply has none.
+// nearest go.mod above root, plus npm dependency names read from the nearest
+// package.json/package-lock.json. A missing manifest is not an error — the
+// policy entries still apply, and a repository with none simply has no
+// manifest-derived entries.
 func ForRoot(root string, cfg *config.Config) Allowlist {
 	var entries []string
 	if cfg != nil {
@@ -82,7 +85,104 @@ func ForRoot(root string, cfg *config.Config) Allowlist {
 		entries = append(entries, module)
 		entries = append(entries, requires...)
 	}
+	entries = append(entries, npmNames(root)...)
+	entries = append(entries, pyNames(root)...)
+	entries = append(entries, cargoNames(root)...)
 	return New(entries)
+}
+
+// npmNames returns the dependency names declared for an npm project: the
+// dependencies/devDependencies of the nearest package.json, plus the
+// packages of the nearest package-lock.json. Scoped names (@scope/pkg)
+// are kept whole; names are manifest truth, so no version parsing beyond
+// the JSON keys themselves.
+func npmNames(root string) []string {
+	if pkg, ok := findManifest(root, "package-lock.json"); ok {
+		if names := npmLockNames(pkg); len(names) > 0 {
+			return names
+		}
+	}
+	if pkg, ok := findManifest(root, "package.json"); ok {
+		return npmPkgJSONNames(pkg)
+	}
+	return nil
+}
+
+// findManifest walks up from root looking for the named file, stopping at the
+// filesystem root. A file root is searched from its directory.
+func findManifest(root, name string) (string, bool) {
+	dir := root
+	if fi, err := os.Stat(root); err == nil && !fi.IsDir() {
+		dir = filepath.Dir(root)
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	for {
+		candidate := filepath.Join(dir, name)
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			return candidate, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+// npmPkgJSONNames reads dependencies and devDependencies keys from a
+// package.json. A malformed file yields nothing rather than an error.
+func npmPkgJSONNames(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var pkg struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return nil
+	}
+	var out []string
+	for name := range pkg.Dependencies {
+		out = append(out, name)
+	}
+	for name := range pkg.DevDependencies {
+		out = append(out, name)
+	}
+	return out
+}
+
+// npmLockNames reads the package keys ("node_modules/NAME", possibly scoped)
+// from a package-lock.json v2/v3. A malformed file yields nothing.
+func npmLockNames(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var lock struct {
+		Packages map[string]struct {
+			Name string `json:"name"`
+		} `json:"packages"`
+		Dependencies map[string]struct{} `json:"dependencies"`
+	}
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return nil
+	}
+	var out []string
+	for key := range lock.Packages {
+		name := strings.TrimPrefix(key, "node_modules/")
+		if name == "" || name == key && !strings.HasPrefix(key, "node_modules/") {
+			continue // the root package entry ""
+		}
+		out = append(out, name)
+	}
+	for name := range lock.Dependencies {
+		out = append(out, name)
+	}
+	return out
 }
 
 // findGoMod walks up from root looking for a go.mod, stopping at the filesystem
@@ -173,4 +273,138 @@ func unquote(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// pyNames returns the dependency names declared for a Python project:
+// requirement lines of the nearest requirements*.txt plus the project/dependencies
+// lists of the nearest pyproject.toml. A missing manifest is not an error.
+func pyNames(root string) []string {
+	var out []string
+	for _, name := range []string{"requirements.txt", "requirements-dev.txt", "requirements_dev.txt", "dev-requirements.txt"} {
+		if req, ok := findManifest(root, name); ok {
+			out = append(out, pyReqNames(req)...)
+		}
+	}
+	if py, ok := findManifest(root, "pyproject.toml"); ok {
+		out = append(out, pyProjectNames(py)...)
+	}
+	return out
+}
+
+// pyReqNames reads requirement specifiers from a requirements file: one name
+// per non-comment, non-empty line, stripped of version/extra markers. A
+// malformed line contributes nothing.
+func pyReqNames(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-") {
+			continue // comments, options (-r, -e, --index-url)
+		}
+		out = append(out, pyReqName(line))
+	}
+	return out
+}
+
+// pyReqName strips one requirement line down to the package name: cut at the
+// first version/extras/environment marker (space, =, <, >, ~, !, [, ;, @)
+// and normalize separators to underscores, matching import-name conventions
+// loosely (the allowlist also matches entry prefixes, so both spellings work).
+func pyReqName(line string) string {
+	if i := strings.IndexAny(line, " =<>~![@;"); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.TrimSpace(line)
+	line = strings.ReplaceAll(line, "-", "_")
+	line = strings.ReplaceAll(line, ".", "_")
+	return strings.ToLower(line)
+}
+
+// pyProjectNames reads the project.dependencies names from a pyproject.toml.
+// PEP 621 dependency arrays are line-scanned (no TOML dependency): entries
+// between `dependencies = [` and the closing `]` are stripped to package
+// names with the same rule as requirements files. A malformed file yields
+// nothing rather than an error.
+func pyProjectNames(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	inDeps := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !inDeps {
+			inDeps = pyDepsArrayOpens(trimmed, &out)
+			continue
+		}
+		if strings.HasPrefix(trimmed, "]") {
+			inDeps = false
+			continue
+		}
+		out = append(out, pyReqName(strings.Trim(trimmed, ",\"")))
+	}
+	return out
+}
+
+// pyDepsArrayOpens reports whether a line opens a project.dependencies array,
+// capturing any requirement stated on the same line.
+func pyDepsArrayOpens(trimmed string, out *[]string) bool {
+	if !strings.HasPrefix(trimmed, "dependencies") || !strings.Contains(trimmed, "[") {
+		return false
+	}
+	rest := trimmed[strings.Index(trimmed, "[")+1:]
+	rest = strings.TrimSuffix(rest, "]")
+	if name := pyReqName(strings.Trim(rest, ",\"")); name != "" {
+		*out = append(*out, name)
+	}
+	return !strings.Contains(trimmed, "]") || strings.Index(trimmed, "[") > strings.Index(trimmed, "]")
+}
+
+// cargoNames reads crate names from a Cargo.toml: [dependencies] section
+// keys, both inline-table entries (serde = { version = "1" }) and simple
+// ones (serde = "1"). A malformed file yields nothing rather than an error.
+func cargoNames(root string) []string {
+	path, ok := findManifest(root, "Cargo.toml")
+	if !ok {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	inDeps := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "" || strings.HasPrefix(trimmed, "#"):
+			continue
+		case strings.HasPrefix(trimmed, "["):
+			inDeps = trimmed == "[dependencies]"
+		case inDeps:
+			if key, _, ok := strings.Cut(trimmed, "="); ok {
+				if name := strings.TrimSpace(key); name != "" && !strings.HasPrefix(name, "#") {
+					names = append(names, name)
+				}
+			}
+		}
+	}
+	return names
+}
+
+// AnyCovers reports whether any entry covers path — the scan's coverage
+// test, mirroring allowedImport's boundary semantics so a draft never
+// suggests an entry the checker would treat as already covered.
+func AnyCovers(path string, entries []string) bool {
+	for _, e := range entries {
+		if Matches(path, e) {
+			return true
+		}
+	}
+	return false
 }

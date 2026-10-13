@@ -51,22 +51,39 @@ func TestMatchesWildcards(t *testing.T) {
 func TestResolvesPerLanguage(t *testing.T) {
 	cases := []struct {
 		imp, pkg string
-		java     bool
+		style    string
 		want     bool
 	}{{
 		imp: "metricgate/internal/rules", pkg: "internal/rules", want: true,
 	}, {
-		imp: "com/foo/Bar", pkg: "com/foo", java: true, want: true, // type import
+		// The empty style is the historical default and must keep behaving as
+		// Go's trailing match, or every pre-existing caller changes meaning.
+		imp: "metricgate/internal/rules", pkg: "internal/rules", style: "", want: true,
 	}, {
-		imp: "com/foo/Bar", pkg: "com/foo", java: false, want: false, // trailing match is wrong for Java
+		imp: "com/foo/Bar", pkg: "com/foo", style: StyleLead, want: true, // type import
 	}, {
-		imp: "com/foobot/Bar", pkg: "com/foo", java: true, want: false,
+		imp: "com/foo/Bar", pkg: "com/foo", style: StyleGo, want: false, // trailing match is wrong for Java
+	}, {
+		imp: "com/foobot/Bar", pkg: "com/foo", style: StyleLead, want: false,
+	}, {
+		// A package may only be matched on a segment boundary, never on a
+		// string prefix: "pkg/other" does not depend on "pkg/oth".
+		imp: "pkg/other/x", pkg: "pkg/oth", style: StyleLead, want: false,
+	}, {
+		// Rust writes its module path with "::" and the graph normalises it.
+		// The extractor has already dropped the `crate::` root by then, so
+		// this is the form the matcher actually sees.
+		imp: "geo::Shape", pkg: "geo", style: StyleRust, want: true,
+	}, {
+		imp: "geo::shape::Circle", pkg: "geo/shape", style: StyleRust, want: true,
+	}, {
+		imp: "geo::shape::Circle", pkg: "shape", style: StyleRust, want: false,
 	}, {
 		imp: "fmt", pkg: "internal/rules", want: false,
 	}}
 	for _, c := range cases {
-		if got := resolves(c.imp, c.pkg, c.java); got != c.want {
-			t.Errorf("resolves(%q, %q, java=%v) = %v, want %v", c.imp, c.pkg, c.java, got, c.want)
+		if got := resolves(c.imp, c.pkg, c.style); got != c.want {
+			t.Errorf("resolves(%q, %q, style=%q) = %v, want %v", c.imp, c.pkg, c.style, got, c.want)
 		}
 	}
 }
@@ -108,7 +125,7 @@ func TestBuildIgnoresSelfEdges(t *testing.T) {
 
 func TestBuildResolvesJavaTypeImports(t *testing.T) {
 	g := Build([]File{
-		{Name: "A.java", Pkg: "com/app", Java: true, Imports: []Import{{Path: "com/store/Repo", Line: 4}}},
+		{Name: "A.java", Pkg: "com/app", Style: StyleLead, Imports: []Import{{Path: "com/store/Repo", Line: 4}}},
 		{Name: "B.java", Pkg: "com/store"},
 	})
 	edges := g.Edges()
