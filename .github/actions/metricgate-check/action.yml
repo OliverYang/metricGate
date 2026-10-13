@@ -1,0 +1,133 @@
+# Composite action: gate the lines a pull request adds.
+#
+# Usage in a consumer workflow:
+#   - uses: <owner>/<repo>/actions/metricgate-check@v1
+#     with:
+#       base: origin/main
+#
+# Requirements the consumer must satisfy:
+#   - checkout with fetch-depth: 0 (metricgate needs the merge-base)
+#   - a Go toolchain, or pin go-version input to let the action set it up
+#
+# Zero credentials: metricGate is pure local static analysis.
+
+name: 'metricGate check'
+description: >
+  Gate the changed lines of a pull request with metricGate deterministic
+  local static analysis. Fails on error-severity findings. Optionally writes
+  SARIF for code scanning.
+author: 'metricGate'
+
+inputs:
+  base:
+    description: 'Git ref to diff against (with -diff)'
+    required: false
+    default: 'origin/main'
+  path:
+    description: 'Repository path to check'
+    required: false
+    default: '.'
+  policy:
+    description: 'Policy file path (empty = metricGate default resolution)'
+    required: false
+    default: ''
+  go-version:
+    description: 'Go toolchain version to set up (empty = use go.mod)'
+    required: false
+    default: ''
+  sarif:
+    description: 'Write a SARIF report to this path (empty = skip)'
+    required: false
+    default: ''
+  max-cognitive:
+    description: 'Override the cognitive-complexity error threshold (0 = policy default)'
+    required: false
+    default: '0'
+  max-cyclomatic:
+    description: 'Override the cyclomatic-complexity error threshold (0 = policy default)'
+    required: false
+    default: '0'
+
+outputs:
+  findings-json:
+    description: 'Path to the JSON findings report'
+    value: 'metricgate-findings.json'
+  sarif-file:
+    description: 'Path to the SARIF report (only when sarif input was set)'
+    value: ${{ steps.gate.outputs.sarif-file }}
+  errors:
+    description: 'Number of error-severity findings'
+    value: ${{ steps.summary.outputs.errors }}
+  warnings:
+    description: 'Number of warning-severity findings'
+    value: ${{ steps.summary.outputs.warnings }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      if: ${{ inputs.go-version != '' }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - name: Build the gate
+      shell: bash
+      run: go build -o "$RUNNER_TEMP/metricgate" ./cmd/metricgate
+
+    - name: Check the changed lines
+      id: gate
+      shell: bash
+      run: |
+        set -o pipefail
+        args=(check "${{ inputs.path }}" -diff -base "${{ inputs.base }}" -format json)
+        if [ -n "${{ inputs.policy }}" ]; then
+          args+=(-config "${{ inputs.policy }}")
+        fi
+        if [ "${{ inputs.max-cognitive }}" != "0" ]; then
+          args+=(-max-cognitive "${{ inputs.max-cognitive }}")
+        fi
+        if [ "${{ inputs.max-cyclomatic }}" != "0" ]; then
+          args+=(-max-cyclomatic "${{ inputs.max-cyclomatic }}")
+        fi
+        if [ -n "${{ inputs.sarif }}" ]; then
+          args+=(-sarif "${{ inputs.sarif }}")
+          echo "sarif-file=${{ inputs.sarif }}" >> "$GITHUB_OUTPUT"
+        fi
+        echo "running: metricgate ${args[*]}"
+        "$RUNNER_TEMP/metricgate" "${args[@]}" > metricgate-findings.json
+
+    - name: Summarize
+      id: summary
+      if: always()
+      shell: bash
+      run: |
+        python3 - "$GITHUB_OUTPUT" <<'PY'
+        import json, sys
+
+        out = sys.argv[1]
+        errors = warnings = 0
+        try:
+            data = json.load(open("metricgate-findings.json"))
+            findings = data.get("findings", [])
+            errors = sum(1 for f in findings if f.get("severity") == "error")
+            warnings = sum(1 for f in findings if f.get("severity") == "warning")
+        except (OSError, ValueError):
+            pass
+        with open(out, "a") as fh:
+            fh.write(f"errors={errors}\n")
+            fh.write(f"warnings={warnings}\n")
+        PY
+
+    - name: Upload findings
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: metricgate-findings
+        path: |
+          metricgate-findings.json
+          ${{ inputs.sarif }}
+
+branding:
+  icon: 'shield'
+  color: 'blue'

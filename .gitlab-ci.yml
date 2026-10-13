@@ -1,0 +1,35 @@
+stages:
+  - check
+  - analyze
+  - report
+
+metricgate-pr-check:
+  stage: check
+  image: golang:1.23
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - cd .. && go build -o metricgate ./cmd/metricgate
+    - ./metricgate check . -diff -base $CI_MERGE_REQUEST_TARGET_BRANCH_NAME \
+        -format json -out findings.json
+    - ./metricgate check . -diff -base $CI_MERGE_REQUEST_TARGET_BRANCH_NAME \
+        -format sarif -out findings.sarif
+  artifacts:
+    reports:
+      sast: findings.sarif
+    paths:
+      - findings.json
+    expire_in: 7 days
+
+metricgate-full-scan:
+  stage: analyze
+  image: golang:1.23
+  script:
+    - cd .. && go build -o metricgate ./cmd/metricgate
+    - ./metricgate check . -format json -out findings-full.json
+    - ./metricgate stats . > metrics-trend.json
+  artifacts:
+    paths:
+      - findings-full.json
+      - metrics-trend.json
+    expire_in: 30 days

@@ -1,0 +1,147 @@
+# Gate the lines a pull request adds, and surface the verdict where the
+# author looks: required check (blocking) + check-run annotations + one PR
+# comment. Zero credentials: metricGate is pure local static analysis and
+# calls nothing over the network.
+#
+# fetch-depth: 0 is required. The default shallow checkout has no merge-base
+# with the target branch, and metricgate refuses to guess: it names the ref it
+# could not resolve rather than reporting a clean tree.
+#
+# paths: keep in sync with internal/parser/parser.go LanguageForFile. Only
+# listed paths trigger the gate; policy.yaml changes re-gate everything.
+name: metricGate PR Gate
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - '**.go'
+      - '**.java'
+      - '**.ts'
+      - '**.mts'
+      - '**.cts'
+      - '**.js'
+      - '**.mjs'
+      - '**.cjs'
+      - '**.jsx'
+      - '**.py'
+      - '**.c'
+      - '**.h'
+      - '**.cpp'
+      - '**.cc'
+      - '**.cxx'
+      - '**.hpp'
+      - '**.hh'
+      - '**.hxx'
+      - '**.cs'
+      - '**.rs'
+      - 'policy.yaml'
+      - '.github/workflows/metricgate-pr.yml'
+
+permissions:
+  # Check-run annotations (line-level findings on the PR diff).
+  checks: write
+  # The summary comment.
+  pull-requests: write
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the gate
+        run: go build -o metricgate ./cmd/metricgate
+
+      - name: Check the changed lines
+        id: check
+        run: |
+          set -o pipefail
+          base="origin/${{ github.base_ref }}"
+          echo "gating against $base"
+          # SARIF is written via -sarif; JSON goes to stdout, human output to
+          # stderr. Exit code drives the required check: 0 pass, 1 violations.
+          ./metricgate check . -diff -base "$base" \
+            -sarif findings.sarif \
+            -format json > findings.json
+        continue-on-error: false
+
+      - name: Summarize findings
+        id: summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          path = "findings.json"
+          body_path = "findings-summary.md"
+          if not os.path.exists(path):
+              open(body_path, "w").write("metricGate did not produce a findings report.\n")
+              raise SystemExit(0)
+
+          data = json.load(open(path))
+          findings = data.get("findings", [])
+          errors = [f for f in findings if f.get("severity") == "error"]
+          warnings = [f for f in findings if f.get("severity") == "warning"]
+
+          lines = ["## metricGate gate report", ""]
+          verdict = "⛔ **gate FAILED**" if errors else ("⚠ **gate passed with warnings**" if warnings else "✅ **gate PASSED** — no new violations")
+          lines.append(verdict + f" — {len(errors)} error(s), {len(warnings)} warning(s) on changed lines")
+          lines.append("")
+          shown = findings[:20]
+          for f in shown:
+              sev = "⛔" if f.get("severity") == "error" else "⚠"
+              lines.append(f"- {sev} `{f.get('file','?')}:{f.get('startLine','?')}` **{f.get('ruleId','?')}** — {f.get('message','')}")
+          if len(findings) > len(shown):
+              lines.append(f"- … and {len(findings) - len(shown)} more (see the JSON artifact)")
+          lines.append("")
+          lines.append("<sub>metricGate is deterministic local static analysis: same diff, same verdict. No code leaves this runner.</sub>")
+          open(body_path, "w").write("\n".join(lines) + "\n")
+          PY
+
+      - name: Comment on the PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('findings-summary.md', 'utf8');
+            const marker = '<!-- metricgate-gate-report -->';
+            // Replace our previous comment instead of stacking one per run.
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: marker + '\n' + body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: marker + '\n' + body,
+              });
+            }
+
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metricgate-findings
+          path: |
+            findings.json
+            findings.sarif

@@ -1,0 +1,44 @@
+# Weekly whole-tree scan: the trend/legacy-debt view, deliberately separate
+# from the PR gate. The PR gate is diff-scoped (only new violations fail);
+# this scan shows the full picture including accepted legacy debt, so it is
+# report-only and never a required check.
+name: metricGate Scheduled Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * 1' # Weekly, Monday 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  full-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the gate
+        run: go build -o metricgate ./cmd/metricgate
+
+      - name: Run full analysis
+        # Report-only: the whole tree may carry accepted legacy debt; the
+        # exit code is recorded but does not fail the run.
+        run: |
+          ./metricgate check . -format json > findings-full.json || true
+          ./metricgate check . -sarif findings.sarif || true
+          ./metricgate stats . -format json > metrics-trend.json
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: metricgate-full-results
+          path: |
+            findings-full.json
+            findings.sarif
+            metrics-trend.json
