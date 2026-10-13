@@ -314,6 +314,10 @@ CI 流程控制（3 个 workflow + composite action）、
 | ~~—~~ | ~~Cockpit 策略可查可解析可改（发现链 / 分节 / 生效键出处 / yaml 校验原子写）~~ | ✅ 已完成（迭代 16）→ 同上 |
 | — | 发现链 CLI 查询动词（`metricgate policy show`）；MCP 侧策略工具 | ⬜ 遗留，见迭代 16 日志「遗留」节 |
 | — | 保存 `.bak` 无轮转上限（当前每次保存追加一份） | ⬜ 遗留，见迭代 16 日志「遗留」节 |
+| ~~—~~ | ~~CODEOWNERS 归属：解析 + `reachability`/`impact` 归属列 + `rules gaps` 按 owner 分组~~ | ✅ 已完成（迭代 17）→ [docs/iterations/iter-17-ownership-and-trend-window.md](iterations/iter-17-ownership-and-trend-window.md) |
+| ~~—~~ | ~~`trends` 可用性：`-out / -since / -project`~~ | ✅ 已完成（迭代 17）→ 同上 |
+| — | Cockpit 侧 owner 视图（复用 `internal/owners`，需要前端交互验证） | ⬜ 遗留，见迭代 17 日志「遗留」节 |
+| — | `internal/owners` 不认 GitHub 支持的自定义 CODEOWNERS location | ⬜ 遗留，见迭代 17 日志「遗留」节 |
 
 > 注：本文与 `docs/roadmap.md`（审美回路 5 迭代计划，已全部完成）正交，
 > 是 v1.x 之后的候选池。

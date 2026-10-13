@@ -155,6 +155,7 @@ architecture:
         - internal/parsetest
         - internal/policygap
         - internal/rulegen
+        - internal/owners
         - internal/status
         - internal/symbols
       may_depend_on: [core]

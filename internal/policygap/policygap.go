@@ -16,6 +16,7 @@ package policygap
 import (
 	"metricgate/internal/config"
 	"metricgate/internal/model"
+	"metricgate/internal/owners"
 	"metricgate/internal/rules"
 )
 
@@ -64,6 +65,12 @@ type Input struct {
 	Summary   *model.RunSummary
 	Packages  []string // dependency-graph nodes
 	Languages []string // languages the run actually scanned
+	// Codeowners routes the audit's firing rules to the people CODEOWNERS
+	// names. It lives in Input rather than as a second argument because the
+	// audit's value is that it reads one run: a gap list you must re-derive
+	// from a separate lookup is a gap list nobody sends. An empty map disables
+	// the section, which is honest rather than silently empty.
+	Codeowners owners.Map
 }
 
 // RuleAudit is one rule's verdict.
@@ -110,6 +117,14 @@ type Report struct {
 	Unlayered  []string     `json:"unlayered_packages,omitempty"`
 	Hot        []HotRule    `json:"hot_rules,omitempty"`
 	Suppressed []RuleCount  `json:"suppressed,omitempty"`
+	// Owners routes the firing rules to the inboxes CODEOWNERS names. An owner
+	// with no rules is not listed, and a rule with no owner is not listed either
+	// — Unattributed is that count, reported rather than hidden in a bucket.
+	Owners []OwnerGroup `json:"owners,omitempty"`
+	// Unattributed counts catalogued rules that fired nowhere and so cannot be
+	// routed. It is deliberately separate from an unowned file: a silent rule
+	// is not a missing owner, it is a rule that had nothing to say.
+	Unattributed int `json:"unattributed,omitempty"`
 }
 
 // Analyze audits one run. Every list in the result is sorted, so two audits of
@@ -127,6 +142,7 @@ func Analyze(in Input) Report {
 	rep.Layers, rep.Unlayered = auditLayers(in)
 	rep.Hot = hotRules(in.Summary)
 	rep.Suppressed = suppressed(in.Summary)
+	rep.Owners, rep.Unattributed = auditOwners(in, rep.Rules)
 	for _, r := range rep.Rules {
 		if r.Findings > 0 {
 			rep.Firing++

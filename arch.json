@@ -30,6 +30,7 @@
     "internal/impact",
     "internal/metrics",
     "internal/model",
+    "internal/owners",
     "internal/parser",
     "internal/parsetest",
     "internal/policygap",
@@ -94,7 +95,7 @@
     {
       "from": "cmd/metricgate",
       "to": "internal/config",
-      "count": 7
+      "count": 8
     },
     {
       "from": "cmd/metricgate",
@@ -170,6 +171,11 @@
       "from": "cmd/metricgate",
       "to": "internal/model",
       "count": 5
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/owners",
+      "count": 3
     },
     {
       "from": "cmd/metricgate",
@@ -739,6 +745,11 @@
     {
       "from": "internal/policygap",
       "to": "internal/model",
+      "count": 3
+    },
+    {
+      "from": "internal/policygap",
+      "to": "internal/owners",
       "count": 2
     },
     {

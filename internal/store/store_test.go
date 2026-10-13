@@ -140,3 +140,51 @@ func assertLegacyMigration(t *testing.T, path string) {
 		t.Fatalf("reopen migrated database: %v", err)
 	}
 }
+
+// TestProjectRootResolvesASymlinkedSpelling covers the macOS trap: `git
+// rev-parse` records the canonical root (/private/tmp/x), while an operator
+// types the path their shell shows (/tmp/x). The exact match fails, but the
+// value is not wrong, so it must resolve rather than be refused — a refusal
+// here reads as "no such project" for a project that has runs.
+func TestProjectRootResolvesASymlinkedSpelling(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	dir := t.TempDir()
+	if _, err := st.SaveRunForProject(&model.RunSummary{Files: 1}, "test", "abc", dir); err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := st.ProjectRoot(dir)
+	if err != nil {
+		t.Fatalf("ProjectRoot(%q) failed on the recorded spelling: %v", dir, err)
+	}
+	// A path the OS hides a symlink in is the shape the resolver has to survive;
+	// on a tree with no symlinks the fallback (cleaned literal compare) is what
+	// the same assertion exercises.
+	got, err := st.ProjectRoot(filepath.Join(canonicalPath(dir), "."))
+	if err != nil {
+		t.Fatalf("ProjectRoot(rewritten) failed: %v", err)
+	}
+	if got != recorded {
+		t.Errorf("ProjectRoot(rewritten) = %q, want %q", got, recorded)
+	}
+}
+
+// TestProjectRootRefusesAnUnknownRoot states the honest failure instead of
+// returning an empty filter: "0 runs" for a database with rows is the message
+// this exists to prevent.
+func TestProjectRootRefusesAnUnknownRoot(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.SaveRunForProject(&model.RunSummary{Files: 1}, "test", "abc", t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ProjectRoot("/definitely/not/recorded"); err == nil {
+		t.Errorf("ProjectRoot(/definitely/not/recorded) resolved; want a refusal naming the recorded roots")
+	}
+}

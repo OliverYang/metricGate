@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"metricgate/internal/engine"
+	"metricgate/internal/owners"
 	"metricgate/internal/policygap"
 )
 
@@ -17,17 +18,30 @@ import (
 //
 // It is the answer to "the gate passed — is that because the code is clean, or
 // because the policy is thin?" A finding list cannot distinguish the two.
-func cmdRulesGaps(args []string) {
+// gapsFlags holds the parsed `rules gaps` command line, so cmdRulesGaps reads
+// as a sequence of steps rather than a wall of dereferenced flag pointers.
+type gapsFlags struct {
+	configPath, format, root string
+	owners                   bool
+}
+
+func parseGapsFlags(args []string) gapsFlags {
 	set := flag.NewFlagSet("rules gaps", flag.ExitOnError)
 	configPath := set.String("config", "", "policy file")
 	format := set.String("format", "text", "text|json")
+	owners := set.Bool("owners", false, "group the firing rules by the owner CODEOWNERS names, so the audit can be routed instead of read")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {
 		root = set.Arg(0)
 	}
-	rep := runGaps(*configPath, root)
-	if *format == "json" {
+	return gapsFlags{configPath: *configPath, format: *format, root: root, owners: *owners}
+}
+
+func cmdRulesGaps(args []string) {
+	f := parseGapsFlags(args)
+	rep := runGaps(f.configPath, f.root, f.owners)
+	if f.format == "json" {
 		data, _ := json.MarshalIndent(rep, "", "  ")
 		os.Stdout.Write(append(data, '\n'))
 		return
@@ -37,7 +51,12 @@ func cmdRulesGaps(args []string) {
 
 // runGaps runs the engine once and audits the result. The audit reads the same
 // run rather than a second pass, so what it reports is what `check` saw.
-func runGaps(configPath, root string) policygap.Report {
+//
+// withOwners loads CODEOWNERS for the routing section. It is opt-in because a
+// repository without the file would otherwise print an owner heading with
+// nothing under it, which reads as a broken report rather than as the absent
+// configuration it is.
+func runGaps(configPath, root string, withOwners bool) policygap.Report {
 	cfg, err := loadPolicyFor(configPath, root)
 	if err != nil {
 		fail(err)
@@ -51,13 +70,21 @@ func runGaps(configPath, root string) policygap.Report {
 	if err != nil {
 		fail(err)
 	}
+	var codeowners owners.Map
+	if withOwners {
+		codeowners, err = owners.Find(root)
+		if err != nil {
+			fail(err)
+		}
+	}
 	return policygap.Analyze(policygap.Input{
-		Root:      root,
-		Config:    cfg,
-		Catalog:   engine.Catalog(cfg),
-		Summary:   res.Summary,
-		Packages:  res.Packages,
-		Languages: res.Languages,
+		Root:       root,
+		Config:     cfg,
+		Catalog:    engine.Catalog(cfg),
+		Summary:    res.Summary,
+		Packages:   res.Packages,
+		Languages:  res.Languages,
+		Codeowners: codeowners,
 	})
 }
 
@@ -74,6 +101,7 @@ func printGaps(rep policygap.Report) {
 		"switched off — a decision, not a gap:")
 	printStatusGroup(rep, policygap.StatusFiring, "firing:")
 	printStatusGroup(rep, policygap.StatusNoFiles, "no files of their language:")
+	printOwners(rep)
 	printArmedSummary(rep)
 	printHot(rep)
 	printLayers(rep)
@@ -95,6 +123,33 @@ func printStatusGroup(rep policygap.Report, status policygap.Status, heading str
 	fmt.Printf("%s\n", heading)
 	for _, l := range lines {
 		fmt.Println(l)
+	}
+	fmt.Println()
+}
+
+// printOwners routes the audit. Each group is one owner, the rules that fired
+// in the files CODEOWNERS assigned to them, and the finding count that makes
+// the group worth opening.
+//
+// The unattributed count is stated rather than omitted: a routing table that
+// silently drops the silent rules is a report that looks complete and is not.
+// So is a missing CODEOWNERS, which is why that case says so explicitly
+// instead of printing an empty section.
+func printOwners(rep policygap.Report) {
+	if len(rep.Owners) == 0 {
+		if rep.Unattributed > 0 {
+			fmt.Printf("owners: no CODEOWNERS in this tree — %d catalogued rule(s) cannot be routed to an inbox\n\n",
+				rep.Unattributed)
+		}
+		return
+	}
+	fmt.Println("by owner:")
+	for _, g := range rep.Owners {
+		fmt.Printf("  %-24s %3d finding(s)  %s\n", g.Owner, g.Findings, strings.Join(g.RuleIDs, " "))
+	}
+	if rep.Unattributed > 0 {
+		fmt.Printf("  %-24s %3d rule(s) that fired nowhere and cannot be routed\n",
+			owners.Unknown, rep.Unattributed)
 	}
 	fmt.Println()
 }

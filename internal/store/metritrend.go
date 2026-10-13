@@ -48,8 +48,14 @@ type MetricTrend struct {
 // so a policy change shows up as a step in the warn/error columns — the
 // "experiment" half of the loop: adjust the threshold, run, compare.
 func (s *Store) MetricTrend(limit int) (MetricTrend, error) {
+	return s.MetricTrendIn(Window{Limit: limit})
+}
+
+// MetricTrendIn is MetricTrend scoped by a Window. A window carrying only
+// Limit is MetricTrend, so the two renderers cannot disagree.
+func (s *Store) MetricTrendIn(w Window) (MetricTrend, error) {
 	t := MetricTrend{Series: map[string][]MetricPoint{}}
-	if err := s.scanMetricTrend(&t, limit); err != nil {
+	if err := s.scanMetricTrend(&t, w); err != nil {
 		return t, err
 	}
 	for m := range t.Series {
@@ -64,17 +70,23 @@ func (s *Store) MetricTrend(limit int) (MetricTrend, error) {
 // scanMetricTrend streams the snapshot rows for the run window into per-
 // (run, metric) points. Rows arrive oldest-first, so appending preserves
 // the series order without a final sort.
-func (s *Store) scanMetricTrend(t *MetricTrend, limit int) error {
-	innerLimit := ""
-	args := []any{}
-	if limit > 0 {
-		innerLimit = ` LIMIT ?`
-		args = append(args, limit)
+func (s *Store) scanMetricTrend(t *MetricTrend, w Window) error {
+	// The run id subquery is scoped by the window, so the metric rows that
+	// survive are exactly the runs the window admits — including the
+	// project scope, which the snapshots themselves do not carry.
+	where, filterArgs := w.runFilter()
+	runsQ := `SELECT id FROM runs` + where
+	if w.Limit > 0 {
+		runsQ += ` ORDER BY started_at DESC, id DESC LIMIT ?`
 	}
 	q := `SELECT s.run_id, r.started_at, s.metric, s.value, s.warn_threshold, s.err_threshold
 	      FROM metric_snapshots s JOIN runs r ON r.id = s.run_id
-	      WHERE r.id IN (SELECT id FROM runs ORDER BY started_at DESC, id DESC` + innerLimit + `)
+	      WHERE s.run_id IN (` + runsQ + `)
 	      ORDER BY r.started_at ASC, r.id ASC`
+	args := append(append([]any{}, filterArgs...))
+	if w.Limit > 0 {
+		args = append(args, w.Limit)
+	}
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return err

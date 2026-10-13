@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"sort"
 
 	"metricgate/internal/facts"
 	"metricgate/internal/impact"
+	"metricgate/internal/owners"
 	"metricgate/internal/refs"
 	"metricgate/internal/symbols"
 )
@@ -19,6 +21,7 @@ type impactFlags struct {
 	query, format, root string
 	max, depth          int
 	maxAffected         int
+	owners              bool
 }
 
 // parseImpactFlags consumes the impact command line.
@@ -30,6 +33,7 @@ func parseImpactFlags(args []string) impactFlags {
 	max := set.Int("max", 50, "maximum references to print")
 	depth := set.Int("depth", impact.DefaultDepth, "transitive hops: 1 = this symbol's use sites, 2 = who calls the callers")
 	maxAffected := set.Int("max-affected", impact.DefaultMaxAffectedFiles, "cap on affected files in a transitive walk (0 = default, -1 = no cap)")
+	owners := set.Bool("owners", false, "add an owner column to the affected-file list, so the blast radius lands in the right inbox")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {
@@ -39,7 +43,7 @@ func parseImpactFlags(args []string) impactFlags {
 		fail(fmt.Errorf("impact needs -q NAME"))
 	}
 	_ = configPath // reserved: layer annotation of affected files lands with the arch wiring
-	return impactFlags{query: *query, format: *format, root: root, max: *max, depth: *depth, maxAffected: *maxAffected}
+	return impactFlags{query: *query, format: *format, root: root, max: *max, depth: *depth, maxAffected: *maxAffected, owners: *owners}
 }
 
 func cmdImpact(args []string) {
@@ -57,7 +61,15 @@ func cmdImpact(args []string) {
 		printImpactJSON(report)
 		return
 	}
-	printImpact(report, defs, f.max)
+	if f.owners {
+		m, err := owners.Find(f.root)
+		if err != nil {
+			fail(err)
+		}
+		printImpact(report, defs, f.max, f, m)
+		return
+	}
+	printImpact(report, defs, f.max, f, owners.Map{})
 }
 
 // printImpactJSON renders the machine-readable form, including the tiered
@@ -72,7 +84,7 @@ func printImpactJSON(r impact.Report) {
 
 // printImpact renders the report, falling back to near-miss suggestions when
 // the exact name is unknown (the same discipline as the symbols command).
-func printImpact(r impact.Report, defs *symbols.Index, max int) {
+func printImpact(r impact.Report, defs *symbols.Index, max int, f impactFlags, m owners.Map) {
 	fmt.Printf("symbol %q — %d definition(s), %d call(s), %d type use(s), %d affected file(s)\n",
 		r.Symbol, len(r.Definitions), r.Calls, r.TypeUses, len(r.AffectedFiles))
 	fmt.Printf("confidence: %s — name-based; interface dispatch, reflection and dynamic names can be missed\n", r.Confidence)
@@ -97,12 +109,16 @@ func printImpact(r impact.Report, defs *symbols.Index, max int) {
 		fmt.Printf("\nreferences:\n")
 		printRefs(r.References, max)
 	}
-	printImpactTail(r)
+	printImpactTail(r, f, m)
 }
 
 // printImpactTail renders the parts that only a transitive walk produces: the
 // reached names by tier, and the affected files with any width-cap remainder.
-func printImpactTail(r impact.Report) {
+//
+// With -owners the affected files are grouped by owner: the same list, sorted
+// by who has to look at it, so a 40-file blast radius reads as four
+// conversations rather than forty file paths.
+func printImpactTail(r impact.Report, f impactFlags, m owners.Map) {
 	deep := r.Depth > 1
 	if !deep && len(r.References) == 0 {
 		return
@@ -116,8 +132,40 @@ func printImpactTail(r impact.Report) {
 		heading += fmt.Sprintf(" (+%d past the width cap, not expanded)", r.HiddenAffectedFiles)
 	}
 	fmt.Println(heading)
-	for _, f := range r.AffectedFiles {
-		fmt.Printf("  %s\n", f)
+	if !f.owners {
+		for _, file := range r.AffectedFiles {
+			fmt.Printf("  %s\n", file)
+		}
+		return
+	}
+	printAffectedByOwner(r.AffectedFiles, m)
+}
+
+// printAffectedByOwner groups the affected files under their owner, keeping the
+// paths unchanged inside each group. Grouped, unowned files are visible as one
+// "unknown" group instead of being scattered through the list, which is the
+// point: a routing gap you can act on is a number, not a pattern.
+func printAffectedByOwner(files []string, m owners.Map) {
+	if unknown, total := m.UnknownShare(files); unknown > 0 {
+		fmt.Printf("  %s: %d of %d file(s) — nobody has claimed them\n", owners.Unknown, unknown, total)
+	}
+	groups := map[string][]string{}
+	for _, file := range files {
+		groups[m.OwnerOf(file)] = append(groups[m.OwnerOf(file)], file)
+	}
+	owners_ := make([]string, 0, len(groups))
+	for o := range groups {
+		if o == "" {
+			continue
+		}
+		owners_ = append(owners_, o)
+	}
+	sort.Strings(owners_)
+	for _, o := range owners_ {
+		fmt.Printf("  %s (%d):\n", o, len(groups[o]))
+		for _, file := range groups[o] {
+			fmt.Printf("    %s\n", file)
+		}
 	}
 }
 

@@ -457,25 +457,39 @@ type TrendReport struct {
 	Range    *TrendRange  `json:"range,omitempty"`
 	Series   []TrendPoint `json:"series"`
 	TopRules []RuleCount  `json:"topRules"`
+	// Window states the scope the series and rule counts were folded over, so a
+	// report read next to a hand-exported one says which runs it covered
+	// instead of leaving the reader to guess from "runs": 20.
+	Window string `json:"window"`
 }
 
 // Report folds the most recent limit runs (limit <= 0 means every run) into one
 // report. A store with no runs yields a zero report, not an error; the series
 // and rule lists are always non-nil so the JSON reads "[]" rather than "null".
 func (s *Store) Report(limit int) (TrendReport, error) {
-	records, err := s.LatestRuns(limit)
+	return s.ReportIn(Window{Limit: limit})
+}
+
+// ReportIn is Report scoped by a Window.
+//
+// A report is assembled from three queries, and the window must reach all three
+// or the parts disagree: a series that stops 90 days ago next to a top-rules
+// list that spans every run in the database is the shape of a silently wrong
+// answer. So the window is applied once, up front, and handed to each query.
+func (s *Store) ReportIn(w Window) (TrendReport, error) {
+	records, err := s.LatestRunsIn(w)
 	if err != nil {
 		return TrendReport{}, err
 	}
-	trend, err := s.SeverityTrend(limit)
+	trend, err := s.SeverityTrendIn(w)
 	if err != nil {
 		return TrendReport{}, err
 	}
-	rules, err := s.RuleFrequency(limit)
+	rules, err := s.RuleFrequencyIn(w)
 	if err != nil {
 		return TrendReport{}, err
 	}
-	out := TrendReport{Runs: len(records), Series: trend.Series, TopRules: rules}
+	out := TrendReport{Runs: len(records), Series: trend.Series, TopRules: rules, Window: w.String()}
 	if out.Series == nil {
 		out.Series = []TrendPoint{}
 	}
@@ -490,40 +504,51 @@ func (s *Store) Report(limit int) (TrendReport, error) {
 	return out, nil
 }
 
+// LatestRunsIn returns the runs the window admits, newest first. It is the one
+// projection callers should use: it takes archive mode from the caller, so
+// "which runs are in scope" is never accidental.
+func (s *Store) LatestRunsIn(w Window) ([]RunRecord, error) {
+	return s.latestRunsScoped(w, 2)
+}
+
 func (s *Store) ReportForProject(limit int, projectRoot string) (TrendReport, error) {
-	return s.reportForScope(limit, projectRoot, false)
+	return s.reportForScope(Window{Limit: limit, ProjectRoot: projectRoot}, false)
 }
 
 // ReportArchivedForProject folds archived runs for one project into a report.
 func (s *Store) ReportArchivedForProject(limit int, projectRoot string) (TrendReport, error) {
-	return s.reportForScope(limit, projectRoot, true)
+	return s.reportForScope(Window{Limit: limit, ProjectRoot: projectRoot}, true)
 }
 
 func (s *Store) ReportUnassigned(limit int) (TrendReport, error) {
-	return s.reportForScope(limit, "", false)
+	return s.reportForScope(Window{Limit: limit, Unassigned: true}, false)
 }
 
 func (s *Store) ReportArchivedUnassigned(limit int) (TrendReport, error) {
-	return s.reportForScope(limit, "", true)
+	return s.reportForScope(Window{Limit: limit, Unassigned: true}, true)
 }
 
-func (s *Store) reportForScope(limit int, projectRoot string, archived bool) (TrendReport, error) {
+func (s *Store) reportForScope(w Window, archived bool) (TrendReport, error) {
 	archiveMode := 0
 	if archived {
 		archiveMode = 1
 	}
-	records, err := s.latestRunsState(limit, projectRoot, true, archiveMode)
+	records, err := s.latestRunsScoped(w, archiveMode)
 	if err != nil {
 		return TrendReport{}, err
 	}
-	if projectRoot == "" {
-		return s.reportForRecords(records, fmt.Sprintf("archived = %d AND (project_root IS NULL OR project_root = '')", archiveMode), nil, limit)
-	}
-	return s.reportForRecords(records, fmt.Sprintf("archived = %d AND project_root = ?", archiveMode), []any{projectRoot}, limit)
+	return s.reportForRecords(records, w, archiveMode)
 }
 
-func (s *Store) reportForRecords(records []RunRecord, projectClause string, projectArgs []any, limit int) (TrendReport, error) {
-	out := TrendReport{Runs: len(records), Series: make([]TrendPoint, 0, len(records)), TopRules: []RuleCount{}}
+// reportForRecords builds the report from an already-scoped record list, then
+// re-scopes the rule-frequency query with the same window.
+//
+// It cannot reuse the records alone, because a finding count is a JOIN over
+// runs, and the same window that selected the records must select the runs the
+// counts aggregate — two different scopes in one report is the shape of a
+// silently wrong answer.
+func (s *Store) reportForRecords(records []RunRecord, w Window, archiveMode int) (TrendReport, error) {
+	out := TrendReport{Runs: len(records), Series: make([]TrendPoint, 0, len(records)), TopRules: []RuleCount{}, Window: w.String()}
 	for i := len(records) - 1; i >= 0; i-- {
 		run := records[i]
 		out.Series = append(out.Series, TrendPoint{StartedAt: run.StartedAt, Errors: run.ErrorCount, Warnings: run.WarningCount, Infos: run.InfoCount})
@@ -531,27 +556,103 @@ func (s *Store) reportForRecords(records []RunRecord, projectClause string, proj
 	if len(records) > 0 {
 		out.Range = &TrendRange{Start: records[len(records)-1].StartedAt, End: records[0].StartedAt}
 	}
-	query := `SELECT rule_id, COUNT(*) FROM findings WHERE run_id IN (
-		SELECT id FROM runs WHERE ` + projectClause + ` ORDER BY started_at DESC, id DESC`
-	args := append([]any{}, projectArgs...)
-	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
-	}
-	query += `) GROUP BY rule_id ORDER BY COUNT(*) DESC, rule_id ASC`
-	rows, err := s.db.Query(query, args...)
+	rules, err := s.RuleFrequencyScoped(w, archiveMode)
 	if err != nil {
 		return TrendReport{}, err
 	}
+	out.TopRules = rules
+	return out, nil
+}
+
+// RuleFrequencyScoped counts rule frequencies inside one archive mode and one
+// window. It is the single place the rule-count query gets its scope, so
+// Report, ReportIn and every reportFor* sibling agree by construction.
+func (s *Store) RuleFrequencyScoped(w Window, archiveMode int) ([]RuleCount, error) {
+	// Archive mode and project scope are two different questions: archive mode
+	// is not part of Window, because a caller that wants archived scope states
+	// it explicitly rather than leaving it implicit in a struct field.
+	conds, args := s.runScope(archiveMode, w)
+	inner := `SELECT id FROM runs WHERE ` + strings.Join(conds, ` AND `) + ` ORDER BY started_at DESC, id DESC`
+	if w.Limit > 0 {
+		inner += ` LIMIT ?`
+		args = append(args, w.Limit)
+	}
+	query := `SELECT rule_id, COUNT(*) FROM findings WHERE run_id IN (` + inner + `)
+	      GROUP BY rule_id ORDER BY COUNT(*) DESC, rule_id ASC`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
+	var out []RuleCount
 	for rows.Next() {
 		var rule RuleCount
 		if err := rows.Scan(&rule.RuleID, &rule.Count); err != nil {
-			return TrendReport{}, err
+			return nil, err
 		}
-		out.TopRules = append(out.TopRules, rule)
+		out = append(out, rule)
 	}
 	return out, rows.Err()
+}
+
+// ProjectRoot resolves an operator-supplied -project value to a root that is
+// actually recorded in the run history.
+//
+// It deliberately does not treat an unknown value as a literal filter: a typo
+// would then produce "0 runs" for a database that holds hundreds, which reads
+// as "no work happened" rather than "no such project". Matching is exact
+// first, then by path suffix (the repository name, as in the Cockpit's project
+// picker), and a refusal lists every recorded root, because a refusal with
+// nothing to choose from is a dead end.
+func (s *Store) ProjectRoot(want string) (string, error) {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return "", nil
+	}
+	roots, err := s.ProjectRoots()
+	if err != nil {
+		return "", err
+	}
+	for _, root := range roots {
+		if root == want {
+			return root, nil
+		}
+	}
+	// A recorded root is what `git rev-parse` canonicalized (/private/tmp/x on
+	// macOS), while an operator types the path their shell shows (/tmp/x). Exact
+	// match fails on a path that is not wrong, so the resolver compares
+	// canonical forms next — otherwise a correct project is refused for the
+	// reason that the OS hides a symlink in it.
+	canonical := canonicalPath(want)
+	for _, root := range roots {
+		if canonicalPath(root) == canonical {
+			return root, nil
+		}
+	}
+	for _, root := range roots {
+		if strings.HasSuffix(filepath.ToSlash(root), "/"+filepath.ToSlash(want)) {
+			return root, nil
+		}
+	}
+	if len(roots) == 0 {
+		return "", fmt.Errorf("no project is recorded in this database yet — run `metricgate check` first")
+	}
+	return "", fmt.Errorf("no recorded project matches %q; recorded project root(s): %s", want, strings.Join(roots, ", "))
+}
+
+// canonicalPath resolves symlinks so two spellings of one directory compare
+// equal. It falls back to the cleaned path when the OS refuses the resolution:
+// a path that cannot be resolved is still comparable on its own spelling, and
+// refusing the whole lookup would be a worse answer than a literal compare.
+func canonicalPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(resolved)
 }
 
 // ProjectRoots returns all non-empty project roots in the run history.
@@ -577,60 +678,52 @@ func (s *Store) ProjectRoots() ([]string, error) {
 // "every run" (still capped at the database size; this is for tests and the
 // `metricgate trends` default window of 20).
 func (s *Store) LatestRuns(limit int) ([]RunRecord, error) {
-	return s.latestRunsState(limit, "", false, 2)
+	return s.latestRunsScoped(Window{Limit: limit}, 2)
 }
 
 // LatestRunsForProject returns recent runs for exactly one verified project root.
 func (s *Store) LatestRunsForProject(limit int, projectRoot string) ([]RunRecord, error) {
-	return s.latestRunsState(limit, projectRoot, true, 0)
+	return s.latestRunsScoped(Window{Limit: limit, ProjectRoot: projectRoot}, 0)
 }
 
 // LatestArchivedRunsForProject returns archived runs for exactly one project.
 func (s *Store) LatestArchivedRunsForProject(limit int, projectRoot string) ([]RunRecord, error) {
-	return s.latestRunsState(limit, projectRoot, true, 1)
+	return s.latestRunsScoped(Window{Limit: limit, ProjectRoot: projectRoot}, 1)
 }
 
 // LatestUnassignedRuns returns active runs without a project identity.
 func (s *Store) LatestUnassignedRuns(limit int) ([]RunRecord, error) {
-	return s.latestRunsState(limit, "", true, 0)
+	return s.latestRunsScoped(Window{Limit: limit, Unassigned: true}, 0)
 }
 
 // LatestArchivedUnassignedRuns returns archived runs without a project identity.
 func (s *Store) LatestArchivedUnassignedRuns(limit int) ([]RunRecord, error) {
-	return s.latestRunsState(limit, "", true, 1)
+	return s.latestRunsScoped(Window{Limit: limit, Unassigned: true}, 1)
 }
 
-func (s *Store) latestRuns(limit int, projectRoot string, filter bool) ([]RunRecord, error) {
-	return s.latestRunsState(limit, projectRoot, filter, 0)
-}
-
-// archiveMode: 0 active, 1 archived, 2 any.
-func (s *Store) latestRunsState(limit int, projectRoot string, filter bool, archiveMode int) ([]RunRecord, error) {
+// latestRunsScoped is the one place a runs query is constructed: archive mode,
+// window scope, ordering and limit all come from the same call, so a listing and
+// a count can never disagree about which runs were in scope.
+func (s *Store) latestRunsScoped(w Window, archiveMode int) ([]RunRecord, error) {
+	conditions, args := s.runScope(archiveMode, w)
 	q := `SELECT id, started_at, duration_ms, tool_version, COALESCE(git_commit, ''),
 	             files, error_count, warning_count, info_count, COALESCE(project_root, ''),
 	             COALESCE(policy_digest, ''), COALESCE(trace_id, ''), archived
 	      FROM runs`
-	args := []any{}
-	conditions := []string{}
-	if archiveMode < 2 {
-		conditions = append(conditions, fmt.Sprintf("archived = %d", archiveMode))
-	}
-	if filter {
-		if projectRoot == "" {
-			conditions = append(conditions, `(project_root IS NULL OR project_root = '')`)
-		} else {
-			conditions = append(conditions, `project_root = ?`)
-			args = append(args, projectRoot)
-		}
-	}
 	if len(conditions) > 0 {
 		q += ` WHERE ` + strings.Join(conditions, ` AND `)
 	}
 	q += ` ORDER BY started_at DESC, id DESC`
-	if limit > 0 {
+	if w.Limit > 0 {
 		q += ` LIMIT ?`
-		args = append(args, limit)
+		args = append(args, w.Limit)
 	}
+	return s.scanRuns(q, args)
+}
+
+// scanRuns executes one runs query and scans the rows. The column list is the
+// one place a new provenance column is added, so every runs query stays in step.
+func (s *Store) scanRuns(q string, args []any) ([]RunRecord, error) {
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -649,6 +742,27 @@ func (s *Store) latestRunsState(limit int, projectRoot string, filter bool, arch
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// runScope turns an archive mode plus a window into one set of WHERE conditions
+// and the argument list that goes with them, in a fixed order. Both the run
+// listing and the rule-count subquery build their scope here, which is why the
+// two cannot drift apart: drift looks like a series that stops in March next
+// to a top-rules list spanning every run in the database.
+//
+// archiveMode: 0 active, 1 archived, 2 any.
+func (s *Store) runScope(archiveMode int, w Window) ([]string, []any) {
+	conditions := []string{}
+	args := []any{}
+	if archiveMode < 2 {
+		conditions = append(conditions, fmt.Sprintf("archived = %d", archiveMode))
+	}
+	windowClause, windowArgs := w.runScope(archiveMode)
+	if windowClause != "" {
+		conditions = append(conditions, windowClause)
+	}
+	args = append(args, windowArgs...)
+	return conditions, args
 }
 
 // RunFindings returns every finding recorded under runID, in insertion
@@ -680,15 +794,33 @@ func (s *Store) RunFindings(runID int64) ([]model.Finding, error) {
 // most recent limit runs (oldest first, so the output reads as a chart).
 // limit <= 0 means "all runs".
 func (s *Store) SeverityTrend(limit int) (SeverityTrend, error) {
+	return s.SeverityTrendIn(Window{Limit: limit})
+}
+
+// SeverityTrendIn is SeverityTrend scoped by a Window: a date lower bound, a
+// project root, or both. A window with only Limit set is exactly SeverityTrend,
+// so the two cannot drift.
+//
+// The filter is applied to the INNER query, before the LIMIT: "the last 20 runs
+// " applies to the runs the window admits, not to the whole table. Filtering
+// outside instead would take the 20 most recent runs of every project and then
+// hide the ones the window excludes — a series that silently ends at the wrong
+// end.
+func (s *Store) SeverityTrendIn(w Window) (SeverityTrend, error) {
+	where, filterArgs := w.runFilter()
 	innerLimit := ""
-	args := []any{}
-	if limit > 0 {
+	if w.Limit > 0 {
 		innerLimit = ` LIMIT ?`
-		args = append(args, limit)
+	}
+	// Limit is applied after the window, so the argument order is: the
+	// window's own bind values, then the limit.
+	args := append(append([]any{}, filterArgs...), w.Limit)
+	if innerLimit == "" {
+		args = filterArgs
 	}
 	q := `SELECT started_at, error_count, warning_count, info_count FROM (
 	          SELECT id, started_at, error_count, warning_count, info_count
-	          FROM runs ORDER BY started_at DESC, id DESC` + innerLimit + `
+	          FROM runs` + where + ` ORDER BY started_at DESC, id DESC` + innerLimit + `
 	      ) ORDER BY started_at ASC, id ASC`
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
@@ -714,15 +846,26 @@ func (s *Store) SeverityTrend(limit int) (SeverityTrend, error) {
 // recent limit runs. Rules are returned in descending count order, breaking
 // ties alphabetically on rule id for stable output.
 func (s *Store) RuleFrequency(limit int) ([]RuleCount, error) {
-	runArg := ""
-	args := []any{}
-	if limit > 0 {
-		runArg = ` WHERE run_id IN (
-		    SELECT id FROM runs ORDER BY started_at DESC, id DESC LIMIT ?
-		)`
-		args = append(args, limit)
+	return s.RuleFrequencyIn(Window{Limit: limit})
+}
+
+// RuleFrequencyIn is RuleFrequency scoped by a Window.
+//
+// The scope lives in the innermost subquery, for the same reason as
+// SeverityTrendIn: the limit selects runs AFTER the window has filtered them.
+//
+// The always-on-wrapper clause is built the same way in both functions, so a
+// limit of 0 ("every run") and a limit of N produce identical SQL shapes here
+// and in SeverityTrendIn; the window bind values come first, then the limit.
+func (s *Store) RuleFrequencyIn(w Window) ([]RuleCount, error) {
+	where, filterArgs := w.runFilter()
+	inner := `SELECT id FROM runs` + where
+	args := append([]any{}, filterArgs...)
+	if w.Limit > 0 {
+		inner += ` ORDER BY started_at DESC, id DESC LIMIT ?`
+		args = append(args, w.Limit)
 	}
-	q := `SELECT rule_id, COUNT(*) FROM findings` + runArg + `
+	q := `SELECT rule_id, COUNT(*) FROM findings WHERE run_id IN (` + inner + `)
 	      GROUP BY rule_id ORDER BY COUNT(*) DESC, rule_id ASC`
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
