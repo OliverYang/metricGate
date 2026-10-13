@@ -30,11 +30,11 @@ func cmdRules(args []string) {
 // `rules explain explain <id>`) reports one.
 func cmdRulesExplain(args []string) {
 	set := flag.NewFlagSet("rules explain", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
+	configPath := set.String("config", "", "policy file")
 	format := set.String("format", "text", "text|json")
 	lang := set.String("lang", "go", "language id to explain")
 	parseArgs(set, args)
-	cfg, err := loadPolicy(*configPath)
+	cfg, err := loadPolicyFor(*configPath, ".")
 	if err != nil {
 		fail(err)
 	}
@@ -228,6 +228,9 @@ func explainRule(cfg *config.Config, lang, ruleID, format string) {
 	fmt.Printf("  Reason:      %s\n", explain.Reason)
 	fmt.Printf("  Severity:    %s\n", explain.Severity)
 	fmt.Printf("  Source:      %s\n", explain.PolicySource)
+	if explain.Note != "" {
+		fmt.Printf("  Note:        %s\n", explain.Note)
+	}
 	switch {
 	case explain.Thresholds.WarnOff || explain.Thresholds.ErrorOff:
 		fmt.Printf("  Thresholds:  warn=%s, error=%s\n",

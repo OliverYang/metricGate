@@ -79,9 +79,15 @@ func cmdArchDiff(args []string) {
 // invocations keep their old semantics.
 func collectForArch(root, cfgFile string) ([]*facts.FileFacts, error) {
 	if cfgFile == "" {
-		return facts.Collect(root)
+		// No -config: discover one at root so an unfiltered capture still
+		// honours the repository's exclude list.
+		cfg, err := loadPolicyFor("", root)
+		if err != nil {
+			return nil, err
+		}
+		return facts.CollectSelected(root, cfg)
 	}
-	cfg, err := loadPolicy(cfgFile)
+	cfg, err := loadPolicyFor(cfgFile, root)
 	if err != nil {
 		return nil, err
 	}
@@ -104,16 +110,28 @@ func archFiles(list []*facts.FileFacts) []arch.File {
 		if f == nil || !productionPath(f.File) {
 			continue // tests/fixtures are not the architecture contract
 		}
-		java := f.Language == string(parser.LangJava)
+		lang := parser.LanguageID(f.Language)
+		java := lang == parser.LangJava
 		pkg := f.Package
 		if java {
+			// Java spells its package in the file, slashed.
 			pkg = strings.ReplaceAll(pkg, ".", "/")
+		} else if lang == parser.LangCS {
+			// C# namespaces stay dotted: they are compared against using
+			// directives, which are dotted too. Slashing one side only
+			// would make every namespace import unresolvable.
+			pkg = f.Package
 		} else {
-			// A Go file does not spell its own import path; its directory
+			// Everything else does not name its own import path; its directory
 			// relative to the run root is the graph node, same as the gate.
 			pkg = filepath.ToSlash(filepath.Dir(f.File))
 		}
-		out = append(out, arch.File{Name: f.File, Pkg: pkg, Java: java, Imports: cleanImports(f.Imports, java)})
+		out = append(out, arch.File{
+			Name:    f.File,
+			Pkg:     pkg,
+			Style:   arch.ImportStyle(lang),
+			Imports: cleanImports(f.Imports, java),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

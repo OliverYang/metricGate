@@ -13,12 +13,23 @@ import (
 	"metricgate/internal/symbols"
 )
 
-func cmdImpact(args []string) {
+// impactFlags holds the parsed impact command line, so cmdImpact reads as
+// a sequence of steps instead of a wall of dereferenced flag pointers.
+type impactFlags struct {
+	query, format, root string
+	max, depth          int
+	maxAffected         int
+}
+
+// parseImpactFlags consumes the impact command line.
+func parseImpactFlags(args []string) impactFlags {
 	set := flag.NewFlagSet("impact", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
+	configPath := set.String("config", "", "policy file")
 	query := set.String("q", "", "symbol name to analyse (required)")
 	format := set.String("format", "text", "text|json")
 	max := set.Int("max", 50, "maximum references to print")
+	depth := set.Int("depth", impact.DefaultDepth, "transitive hops: 1 = this symbol's use sites, 2 = who calls the callers")
+	maxAffected := set.Int("max-affected", impact.DefaultMaxAffectedFiles, "cap on affected files in a transitive walk (0 = default, -1 = no cap)")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {
@@ -28,21 +39,35 @@ func cmdImpact(args []string) {
 		fail(fmt.Errorf("impact needs -q NAME"))
 	}
 	_ = configPath // reserved: layer annotation of affected files lands with the arch wiring
-	files, defs, uses, err := facts.CollectWithRefs(root)
+	return impactFlags{query: *query, format: *format, root: root, max: *max, depth: *depth, maxAffected: *maxAffected}
+}
+
+func cmdImpact(args []string) {
+	f := parseImpactFlags(args)
+	files, defs, uses, err := facts.CollectWithRefs(f.root)
 	if err != nil {
 		fail(err)
 	}
 	_ = files
-	report := impact.Compute(*query, defs, uses)
-	if *format == "json" {
-		data, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			fail(err)
-		}
-		fmt.Println(string(data))
+	report := impact.ComputeWith(f.query, defs, uses, impact.Options{
+		Depth:            f.depth,
+		MaxAffectedFiles: f.maxAffected,
+	})
+	if f.format == "json" {
+		printImpactJSON(report)
 		return
 	}
-	printImpact(report, defs, *max)
+	printImpact(report, defs, f.max)
+}
+
+// printImpactJSON renders the machine-readable form, including the tiered
+// closure a text render cannot express.
+func printImpactJSON(r impact.Report) {
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		fail(err)
+	}
+	fmt.Println(string(data))
 }
 
 // printImpact renders the report, falling back to near-miss suggestions when
@@ -51,6 +76,10 @@ func printImpact(r impact.Report, defs *symbols.Index, max int) {
 	fmt.Printf("symbol %q — %d definition(s), %d call(s), %d type use(s), %d affected file(s)\n",
 		r.Symbol, len(r.Definitions), r.Calls, r.TypeUses, len(r.AffectedFiles))
 	fmt.Printf("confidence: %s — name-based; interface dispatch, reflection and dynamic names can be missed\n", r.Confidence)
+	if r.Depth > 1 {
+		fmt.Printf("depth: %d — reached %d further name(s); tiers say how far each can be trusted\n",
+			r.Depth, len(r.Reach))
+	}
 	if r.Note != "" {
 		fmt.Printf("note: %s\n", r.Note)
 	}
@@ -67,9 +96,51 @@ func printImpact(r impact.Report, defs *symbols.Index, max int) {
 	if len(r.References) > 0 {
 		fmt.Printf("\nreferences:\n")
 		printRefs(r.References, max)
-		fmt.Printf("\naffected files (%d):\n", len(r.AffectedFiles))
-		for _, f := range r.AffectedFiles {
-			fmt.Printf("  %s\n", f)
+	}
+	printImpactTail(r)
+}
+
+// printImpactTail renders the parts that only a transitive walk produces: the
+// reached names by tier, and the affected files with any width-cap remainder.
+func printImpactTail(r impact.Report) {
+	deep := r.Depth > 1
+	if !deep && len(r.References) == 0 {
+		return
+	}
+	if deep && len(r.Reach) > 0 {
+		fmt.Printf("\nreached (depth 2..%d):\n", r.Depth)
+		printReach(r.Reach)
+	}
+	heading := fmt.Sprintf("\naffected files (%d):", len(r.AffectedFiles))
+	if r.HiddenAffectedFiles > 0 {
+		heading += fmt.Sprintf(" (+%d past the width cap, not expanded)", r.HiddenAffectedFiles)
+	}
+	fmt.Println(heading)
+	for _, f := range r.AffectedFiles {
+		fmt.Printf("  %s\n", f)
+	}
+}
+
+// printReach lists the transitively reached names with the tier that says how
+// far each can be believed, so a wide answer is readable as a ranking instead
+// of an undifferentiated wall of names.
+func printReach(rs []impact.Reach) {
+	byTier := map[string][]impact.Reach{}
+	for _, r := range rs {
+		byTier[r.Tier] = append(byTier[r.Tier], r)
+	}
+	for _, tier := range []string{impact.TierResolved, impact.TierAmbiguous, impact.TierExternal} {
+		group := byTier[tier]
+		if len(group) == 0 {
+			continue
+		}
+		fmt.Printf("  %s (%d):\n", tier, len(group))
+		for _, r := range group {
+			where := ""
+			if len(r.Files) > 0 {
+				where = fmt.Sprintf("  %d file(s)", len(r.Files))
+			}
+			fmt.Printf("    d%d  %s%s\n", r.Depth, r.Name, where)
 		}
 	}
 }

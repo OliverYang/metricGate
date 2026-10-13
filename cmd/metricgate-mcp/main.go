@@ -22,6 +22,7 @@ import (
 	"metricgate/internal/bundle"
 	"metricgate/internal/calllog"
 	"metricgate/internal/config"
+	"metricgate/internal/configpath"
 	"metricgate/internal/engine"
 	"metricgate/internal/facts"
 	"metricgate/internal/git"
@@ -33,7 +34,7 @@ import (
 const toolVersion = "0.1.0"
 
 func main() {
-	configPath := flag.String("config", "policy.yaml", "policy file (loaded once at startup)")
+	configPath := flag.String("config", "", "policy file (loaded once at startup)")
 	callLogPath := flag.String("calllog", os.Getenv("METRICGATE_CALLLOG"),
 		"append one JSON line per tool call to this file; '1' means "+calllog.DefaultPath+
 			". Off unless set here or via $METRICGATE_CALLLOG; local file only, never sent anywhere, and never records the code argument")
@@ -51,7 +52,7 @@ func main() {
 	}
 	defer eng.Close()
 
-	svc := &service{eng: eng, cfg: cfg, log: newCallLogger(*callLogPath)}
+	svc := newService(eng, cfg, *callLogPath)
 	srv := mcp.NewServer(&mcp.Implementation{Name: "metricgate", Version: toolVersion}, nil)
 	registerTools(srv, svc)
 
@@ -61,11 +62,16 @@ func main() {
 	}
 }
 
+// loadPolicy resolves the server's policy. An empty -config starts the
+// discovery search at the server's working directory (see configpath), so the
+// MCP server picks up .metricgate.yaml the same way the CLI does instead of
+// only honouring a literal policy.yaml next to wherever the agent started it.
 func loadPolicy(path string) (*config.Config, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	found := configpath.Discover(path, ".")
+	if !found.FoundAny() {
 		return config.Default()
 	}
-	return config.LoadFile(path)
+	return config.LoadFile(found.Path)
 }
 
 type constraintsIn struct {
@@ -130,6 +136,13 @@ type reviewBundleIn struct {
 	MaxChars      int    `json:"max_chars,omitempty" jsonschema:"UTF-8 byte budget (default 6000); mutually exclusive with max_tokens"`
 	MaxTokens     int    `json:"max_tokens,omitempty" jsonschema:"approximate model token budget"`
 	IncludeSource bool   `json:"include_source,omitempty" jsonschema:"include full source of selected files (default: diff only)"`
+	// TraceID echoes back the ambient trace, so a caller that wants to
+	// attribute this envelope can read it out of the response instead of
+	// having to remember what it passed in. It never overrides the ambient
+	// value: a trace names the unit of work a process is doing, and letting a
+	// tool call rename it would let any single call rewrite the attribution of
+	// every other call from the same session.
+	TraceID string `json:"trace_id,omitempty" jsonschema:"read-only: echoed back from $METRICGATE_TRACE_ID"`
 }
 
 // getReviewBundle reuses bundle.Build, the same builder the CLI uses, so the
@@ -137,41 +150,11 @@ type reviewBundleIn struct {
 // SDK cannot infer a schema for the self-referential facts.Symbol type; the
 // map is still returned as structuredContent carrying the full JSON bundle.
 func (s *service) getReviewBundle(ctx context.Context, req *mcp.CallToolRequest, in reviewBundleIn) (*mcp.CallToolResult, map[string]any, error) {
-	path := in.Path
-	if path == "" {
-		path = "."
+	request, err := reviewBundleRequest(in)
+	if err != nil {
+		return nil, nil, err
 	}
-	if in.MaxChars > 0 && in.MaxTokens > 0 {
-		return nil, nil, fmt.Errorf("max_chars and max_tokens are mutually exclusive")
-	}
-	budget, counter := in.MaxChars, facts.TokenCounter(facts.CharCounter{})
-	if in.MaxTokens > 0 {
-		budget, counter = in.MaxTokens, facts.CharEstimate{}
-	}
-	if budget <= 0 {
-		budget, counter = 6000, facts.CharCounter{}
-	}
-	mode := git.ModeWorkspace
-	switch {
-	case in.Commit != "":
-		mode = git.ModeCommit
-	case in.From != "" || in.To != "":
-		if in.From == "" || in.To == "" {
-			return nil, nil, fmt.Errorf("from and to must be provided together")
-		}
-		mode = git.ModeRange
-	default:
-		if in.Base != "" {
-			in.Base = git.ResolveBase(path, in.Base)
-		}
-	}
-	b, err := bundle.Build(bundle.BuildOptions{
-		Request: bundle.Request{
-			Root: path, Mode: mode, From: in.From, To: in.To, Commit: in.Commit,
-			Budget: budget, Counter: counter, IncludeSource: in.IncludeSource,
-		},
-		Config: s.cfg,
-	})
+	b, err := bundle.Build(bundle.BuildOptions{Request: request, Config: s.cfg})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -183,7 +166,59 @@ func (s *service) getReviewBundle(ctx context.Context, req *mcp.CallToolRequest,
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, nil, err
 	}
+	// The trace is echoed at the top level of the response rather than only
+	// inside the envelope's run block, because a caller reading this response
+	// is looking for "which unit of work is this", not for the run metadata.
+	if trace := traceID(); trace != "" {
+		out["traceId"] = trace
+	}
 	return nil, out, nil
+}
+
+// reviewBundleRequest turns the tool input into the request bundle.Build takes.
+//
+// It is its own function because reading the input is where this handler's
+// decisions live — budget versus token budget, workspace versus commit versus
+// range mode, and a merge-base resolved against the caller's own repository
+// rather than whatever directory the server happens to run in. Keeping them
+// here leaves the handler as read input, build, write output.
+func reviewBundleRequest(in reviewBundleIn) (bundle.Request, error) {
+	path := in.Path
+	if path == "" {
+		path = "."
+	}
+	budget, counter := in.MaxChars, facts.TokenCounter(facts.CharCounter{})
+	switch {
+	case in.MaxTokens > 0 && in.MaxChars > 0:
+		return bundle.Request{}, fmt.Errorf("max_chars and max_tokens are mutually exclusive")
+	case in.MaxTokens > 0:
+		budget, counter = in.MaxTokens, facts.CharEstimate{}
+	case budget <= 0:
+		budget, counter = 6000, facts.CharCounter{}
+	}
+	mode := git.ModeWorkspace
+	switch {
+	case in.Commit != "":
+		mode = git.ModeCommit
+	case in.From != "" || in.To != "":
+		if in.From == "" || in.To == "" {
+			return bundle.Request{}, fmt.Errorf("from and to must be provided together")
+		}
+		mode = git.ModeRange
+	case in.Base != "":
+		in.Base = git.ResolveBase(path, in.Base)
+	}
+	return bundle.Request{
+		Root:          path,
+		Mode:          mode,
+		From:          in.From,
+		To:            in.To,
+		Commit:        in.Commit,
+		Base:          in.Base,
+		Budget:        budget,
+		Counter:       counter,
+		IncludeSource: in.IncludeSource,
+	}, nil
 }
 
 type stubsIn struct {
@@ -278,9 +313,11 @@ func (s *service) findSymbols(ctx context.Context, req *mcp.CallToolRequest, in 
 }
 
 type impactIn struct {
-	Path  string `json:"path,omitempty" jsonschema:"file or directory to index (default .)"`
-	Query string `json:"query" jsonschema:"symbol name to analyse (exact match; near-miss names are reported in the note when nothing matches)"`
-	Max   int    `json:"max,omitempty" jsonschema:"maximum references to return (default 50)"`
+	Path        string `json:"path,omitempty" jsonschema:"file or directory to index (default .)"`
+	Query       string `json:"query" jsonschema:"symbol name to analyse (exact match; near-miss names are reported in the note when nothing matches)"`
+	Max         int    `json:"max,omitempty" jsonschema:"maximum references to return (default 50)"`
+	Depth       int    `json:"depth,omitempty" jsonschema:"transitive hops to walk outward: 1 = the symbol's own use sites (default), 2 = who calls the callers. Only above 1 does the result carry per-name tiers"`
+	MaxAffected int    `json:"max_affected,omitempty" jsonschema:"cap on affected files for a transitive walk (default 25); pass -1 for the real width"`
 }
 
 // getImpact answers "what breaks if this symbol changes?" from the definition
@@ -298,7 +335,10 @@ func (s *service) getImpact(ctx context.Context, req *mcp.CallToolRequest, in im
 	if err != nil {
 		return nil, impact.Report{}, err
 	}
-	report := impact.Compute(in.Query, defs, uses)
+	report := impact.ComputeWith(in.Query, defs, uses, impact.Options{
+		Depth:            in.Depth,
+		MaxAffectedFiles: in.MaxAffected,
+	})
 	if in.Max > 0 && len(report.References) > in.Max {
 		report.References = report.References[:in.Max]
 	}

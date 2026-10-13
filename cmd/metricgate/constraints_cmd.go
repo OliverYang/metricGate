@@ -40,7 +40,7 @@ func cmdConstraints(args []string) {
 func cmdConstraintsStatus(args []string) {
 	set := flag.NewFlagSet("constraints status", flag.ExitOnError)
 	var format, configPath string
-	set.StringVar(&configPath, "config", "policy.yaml", "policy file to audit")
+	set.StringVar(&configPath, "config", "", "policy file to audit")
 	set.StringVar(&format, "format", "text", "text|json")
 	rest := set.Args()
 	root := "."
@@ -48,7 +48,7 @@ func cmdConstraintsStatus(args []string) {
 		root = rest[0]
 	}
 	parseArgs(set, args)
-	cfg, err := loadPolicy(configPath)
+	cfg, err := loadPolicyFor(configPath, root)
 	if err != nil {
 		fail(err)
 	}
@@ -79,7 +79,7 @@ func cmdConstraintsExtract(args []string) {
 	set.StringVar(&file, "file", "", "non-standard constraint text: markdown tables (编号|条款) or free lines")
 	set.StringVar(&lang, "lang", "go", "go|java — policy language section used for dedup")
 	set.StringVar(&format, "format", "text", "text|json")
-	set.StringVar(&configPath, "config", "policy.yaml", "existing policy file to dedup against")
+	set.StringVar(&configPath, "config", "", "existing policy file to dedup against")
 	set.StringVar(&out, "out", "", "write deduped policy YAML candidates to this file")
 	parseArgs(set, args)
 	if file == "" {
@@ -89,7 +89,7 @@ func cmdConstraintsExtract(args []string) {
 	if err != nil {
 		fail(err)
 	}
-	cfg, err := loadPolicy(configPath)
+	cfg, err := loadPolicyFor(configPath, file)
 	if err != nil {
 		fail(err)
 	}
@@ -144,7 +144,7 @@ func cmdConstraintsRule(args []string) {
 	}
 	var base *config.Config
 	if configPath != "" {
-		base, err = loadPolicy(configPath)
+		base, err = loadPolicyFor(configPath, ".")
 		if err != nil {
 			fail(err)
 		}
@@ -395,7 +395,7 @@ func prefixLines(lines []string, prefix string) []string {
 func cmdConstraintsDigest(args []string) {
 	set := flag.NewFlagSet("constraints digest", flag.ExitOnError)
 	in := digestFlags{}
-	set.StringVar(&in.configPath, "config", "policy.yaml", "policy file")
+	set.StringVar(&in.configPath, "config", "", "policy file")
 	set.StringVar(&in.pkg, "pkg", "", "target package (Go import path or slash-normalised Java package; empty = repo-wide)")
 	set.StringVar(&in.format, "format", "text", "text|json")
 	set.StringVar(&in.lang, "lang", "", "go|java (default: auto from target package files, fallback go)")
@@ -403,7 +403,11 @@ func cmdConstraintsDigest(args []string) {
 	set.BoolVar(&in.noReuse, "no-reuse", false, "skip the reuse-symbols section (saves a repo walk)")
 	set.StringVar(&in.task, "task", "", "task text: conditionally filter the banned-API section to task-relevant bans (deterministic keyword matcher; empty = full list)")
 	parseArgs(set, args)
-	cfg, err := loadPolicy(in.configPath)
+	root := "."
+	if set.NArg() > 0 {
+		root = set.Arg(0)
+	}
+	cfg, err := loadPolicyFor(in.configPath, root)
 	if err != nil {
 		fail(err)
 	}

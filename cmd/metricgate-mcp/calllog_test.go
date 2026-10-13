@@ -40,6 +40,37 @@ func TestNewCallLoggerIsOffUnlessAsked(t *testing.T) {
 	}
 }
 
+func TestRecordProjectUsesCanonicalGitRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("package main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, path, name := (&callLogger{}).recordProject(checkPathIn{Path: file})
+	if id == "" || filepath.Clean(id) != filepath.Clean(path) || filepath.Clean(path) != filepath.Clean(canonicalRoot) || name != filepath.Base(canonicalRoot) {
+		t.Fatalf("recordProject = (%q, %q, %q), want canonical repository identity", id, path, name)
+	}
+}
+
+func TestRecordProjectLeavesVirtualAndRelativePathsUnassigned(t *testing.T) {
+	logger := &callLogger{}
+	for _, input := range []any{checkCodeIn{Name: "service.go", Code: "package service"}, checkPathIn{Path: "internal/service"}} {
+		id, path, name := logger.recordProject(input)
+		if id != "" || path != "" || name != "" {
+			t.Errorf("recordProject(%+v) = (%q, %q, %q), want unassigned", input, id, path, name)
+		}
+	}
+}
 func TestLocatorReadsOnlyAllowListedFields(t *testing.T) {
 	cases := []struct {
 		name string
@@ -74,7 +105,7 @@ func TestWrapToolRecordsVerdictAndNeverSource(t *testing.T) {
 			Findings: []model.Finding{{RuleID: "banned-api"}},
 		}, nil
 	}
-	wrapped := wrapTool(logger, "check_code", h)
+	wrapped := wrapLogged(logger, "check_code", h)
 	if _, _, err := wrapped(context.Background(), nil, checkCodeIn{Name: "service.go", Code: secret}); err != nil {
 		t.Fatalf("wrapped handler: %v", err)
 	}
@@ -127,7 +158,7 @@ func TestWrapToolDisabledWritesNothing(t *testing.T) {
 	var h mcp.ToolHandlerFor[checkPathIn, checkPathOut] = func(context.Context, *mcp.CallToolRequest, checkPathIn) (*mcp.CallToolResult, checkPathOut, error) {
 		return nil, checkPathOut{Verdict: "PASS"}, nil
 	}
-	wrapped := wrapTool(nil, "check_path", h)
+	wrapped := wrapLogged(nil, "check_path", h)
 	if _, out, err := wrapped(context.Background(), nil, checkPathIn{Path: "."}); err != nil || out.Verdict != "PASS" {
 		t.Fatalf("wrapped = %+v, %v; want the handler's result", out, err)
 	}
@@ -150,7 +181,7 @@ func TestWrapToolRecordsErrorsAsErrors(t *testing.T) {
 	var h mcp.ToolHandlerFor[checkPathIn, checkPathOut] = func(context.Context, *mcp.CallToolRequest, checkPathIn) (*mcp.CallToolResult, checkPathOut, error) {
 		return nil, checkPathOut{}, boom
 	}
-	if _, _, err := wrapTool(logger, "check_path", h)(context.Background(), nil, checkPathIn{Path: "nope"}); !errors.Is(err, boom) {
+	if _, _, err := wrapLogged(logger, "check_path", h)(context.Background(), nil, checkPathIn{Path: "nope"}); !errors.Is(err, boom) {
 		t.Fatalf("wrapped handler error = %v, want it passed through unchanged", err)
 	}
 	recs, _, err := calllog.Read(path)
@@ -172,7 +203,7 @@ func TestWrapToolSurvivesUnwritableLog(t *testing.T) {
 	var h mcp.ToolHandlerFor[checkCodeIn, checkCodeOut] = func(context.Context, *mcp.CallToolRequest, checkCodeIn) (*mcp.CallToolResult, checkCodeOut, error) {
 		return nil, checkCodeOut{Verdict: "PASS"}, nil
 	}
-	_, out, err := wrapTool(logger, "check_code", h)(context.Background(), nil, checkCodeIn{Name: "a.go"})
+	_, out, err := wrapLogged(logger, "check_code", h)(context.Background(), nil, checkCodeIn{Name: "a.go"})
 	if err != nil {
 		t.Fatalf("a log write failure must not surface as a tool error, got %v", err)
 	}

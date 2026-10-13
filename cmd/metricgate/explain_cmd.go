@@ -13,7 +13,7 @@ import (
 // cmdExplain implements `metricgate explain` command for preview/debug.
 func cmdExplain(args []string) {
 	set := flag.NewFlagSet("explain", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
+	configPath := set.String("config", "", "policy file")
 	format := set.String("format", "text", "text|json")
 	preview := set.Bool("preview", false, "show what would be scanned")
 	set.Parse(args)
@@ -23,7 +23,7 @@ func cmdExplain(args []string) {
 		root = set.Arg(0)
 	}
 
-	cfg, err := loadPolicy(*configPath)
+	cfg, err := loadPolicyFor(*configPath, root)
 	if err != nil {
 		fail(err)
 	}

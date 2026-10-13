@@ -29,7 +29,7 @@ type bundleFlags struct {
 func newBundleFlags() (*bundleFlags, *flag.FlagSet) {
 	f := &bundleFlags{}
 	set := flag.NewFlagSet("bundle", flag.ExitOnError)
-	set.StringVar(&f.configPath, "config", "policy.yaml", "policy file")
+	set.StringVar(&f.configPath, "config", "", "policy file")
 	set.StringVar(&f.format, "format", "json", "json")
 	set.StringVar(&f.out, "out", "", "write the bundle to this file (0600) instead of stdout")
 	set.StringVar(&f.base, "base", "", "git base ref, merge-base with HEAD (empty = HEAD)")
@@ -60,7 +60,7 @@ func cmdBundle(args []string) {
 	if err != nil {
 		fail(err)
 	}
-	cfg, err := loadPolicy(f.configPath)
+	cfg, err := loadPolicyFor(f.configPath, root)
 	if err != nil {
 		fail(err)
 	}

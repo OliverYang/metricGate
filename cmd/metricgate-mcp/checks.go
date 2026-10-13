@@ -77,7 +77,7 @@ func (s *service) checkPath(ctx context.Context, req *mcp.CallToolRequest, in ch
 	}
 	out := checkPathOut{Files: summary.Files}
 	if in.DiffOnly {
-		changed, err := git.ChangedLines("", git.ResolveBase("", "HEAD"))
+		changed, err := git.ChangedLinesFor(path, "HEAD")
 		if err != nil {
 			return nil, checkPathOut{}, err
 		}

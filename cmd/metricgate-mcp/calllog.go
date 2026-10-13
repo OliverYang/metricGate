@@ -27,6 +27,10 @@ import (
 type callLogger struct {
 	path    string
 	session string
+	// trace is the ambient trace id, read once at startup so every call from
+	// this process is attributed the same way whatever the worker that
+	// produced it was doing.
+	trace string
 
 	mu     sync.Mutex
 	warned bool
@@ -56,13 +60,26 @@ func newCallLogger(setting string) *callLogger {
 		}
 	}
 	fmt.Fprintf(os.Stderr, "metricgate-mcp: recording tool calls to %s\n", path)
+	if trace := traceID(); trace != "" {
+		fmt.Fprintf(os.Stderr, "metricgate-mcp: tagging calls with trace %q\n", trace)
+	}
 	// One MCP server process serves one agent session in practice, so a
 	// process-scoped id is what groups a task's calls. It is a proxy, and the
 	// summary documents how it can be wrong.
 	return &callLogger{
 		path:    path,
 		session: time.Now().UTC().Format("20060102T150405Z") + "-" + strconv.Itoa(os.Getpid()),
+		trace:   traceID(),
 	}
+}
+
+// traceID returns the ambient trace id, or "" when the operator set none.
+//
+// An empty trace is a legal state, not an error: a repository checked by hand
+// has no unit of work to attribute its calls to, and inventing one would make
+// every later aggregation lie about how many sessions there were.
+func traceID() string {
+	return strings.TrimSpace(os.Getenv("METRICGATE_TRACE_ID"))
 }
 
 // locatorFields is the ordered allow-list of argument fields the call log may
@@ -103,6 +120,78 @@ func locator(in any) string {
 	return strings.Join(parts, " ")
 }
 
+func (l *callLogger) recordProject(in any) (id, path, name string) {
+	if hasVirtualName(in) {
+		return "", "", ""
+	}
+	locatorPath := projectPath(in)
+	if locatorPath == "" {
+		var err error
+		locatorPath, err = os.Getwd()
+		if err != nil {
+			return "", "", ""
+		}
+	} else if !filepath.IsAbs(locatorPath) {
+		var err error
+		locatorPath, err = filepath.Abs(locatorPath)
+		if err != nil {
+			return "", "", ""
+		}
+	}
+	root := verifiedProjectRoot(locatorPath)
+	if root == "" {
+		return "", "", ""
+	}
+	return root, root, filepath.Base(root)
+}
+
+func hasVirtualName(in any) bool {
+	v := reflect.ValueOf(in)
+	if v.Kind() != reflect.Struct {
+		return false
+	}
+	name := v.FieldByName("Name")
+	return name.IsValid() && name.Kind() == reflect.String && name.String() != ""
+}
+
+func projectPath(in any) string {
+	v := reflect.ValueOf(in)
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+	field := v.FieldByName("Path")
+	if !field.IsValid() || field.Kind() != reflect.String {
+		return ""
+	}
+	return field.String()
+}
+
+func verifiedProjectRoot(path string) string {
+	if !filepath.IsAbs(path) {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return ""
+	}
+	if !info.IsDir() {
+		resolved = filepath.Dir(resolved)
+	}
+	for dir := resolved; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+	}
+}
+
 // outcomeCarrier is how the wrapper reads a handler's result without knowing
 // its static type. Only the tools that render a verdict implement it; the rest
 // log zeroed counts, which is correct — they have no verdict to record.
@@ -110,32 +199,23 @@ type outcomeCarrier interface {
 	callOutcome() (findings, errors, warnings int, verdict string)
 }
 
-// wrapTool returns h, recording every call. With logging off it returns h
-// itself, so the disabled path costs nothing.
-//
-// It is a free function rather than a method because Go does not allow type
-// parameters on methods, and the handler's In/Out types are what let the
-// wrapper stay in the typed MCP API instead of falling back to `any`.
-func wrapTool[In, Out any](l *callLogger, tool string, h mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+// wrapTool returns h with the gate preamble and call recording layered on.
+// The gate preamble rides on every response (see gate.go); recording is
+// active only when an operator enabled the call log.
+func wrapTool[In, Out any](g *gateWatcher, h mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+	return wrapGate(g, h)
+}
+
+// wrapLogged records every call to the local call log and otherwise passes
+// the handler through unchanged.
+func wrapLogged[In, Out any](l *callLogger, tool string, h mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
 	if l == nil || l.path == "" {
 		return h
 	}
 	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		start := time.Now()
 		res, out, err := h(ctx, req, in)
-		rec := calllog.Record{
-			Time:    start.UTC(),
-			Session: l.session,
-			Tool:    tool,
-			Target:  locator(in),
-			MS:      time.Since(start).Milliseconds(),
-		}
-		if oc, ok := any(out).(outcomeCarrier); ok {
-			rec.Findings, rec.Errors, rec.Warnings, rec.Verdict = oc.callOutcome()
-		}
-		if err != nil {
-			rec.Err = err.Error()
-		}
+		rec := newRecord(l, calllog.Record{Time: start.UTC(), Session: l.session, TraceID: l.trace, Tool: tool, Target: locator(in), MS: time.Since(start).Milliseconds()}, in, out, err)
 		// Fail-open on purpose. A tool call must never fail because the log
 		// could not be written; the first failure is reported once so a
 		// misconfigured path is not silent, then the log goes quiet.
@@ -144,6 +224,23 @@ func wrapTool[In, Out any](l *callLogger, tool string, h mcp.ToolHandlerFor[In, 
 		}
 		return res, out, err
 	}
+}
+
+// newRecord assembles the log entry for one finished call. Project identity
+// is taken from the input when it names a trustworthy path, else from the
+// output.
+func newRecord[In, Out any](l *callLogger, rec calllog.Record, in In, out Out, err error) calllog.Record {
+	rec.ProjectID, rec.ProjectPath, rec.ProjectName = l.recordProject(in)
+	if oc, ok := any(out).(outcomeCarrier); ok {
+		rec.Findings, rec.Errors, rec.Warnings, rec.Verdict = oc.callOutcome()
+	}
+	if rec.ProjectID == "" {
+		rec.ProjectID, rec.ProjectPath, rec.ProjectName = l.recordProject(out)
+	}
+	if err != nil {
+		rec.Err = err.Error()
+	}
+	return rec
 }
 
 func (l *callLogger) warnOnce(err error) {

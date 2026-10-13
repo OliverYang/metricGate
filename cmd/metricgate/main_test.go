@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -13,6 +14,27 @@ func newSet() *flag.FlagSet {
 	set.Bool("diff", false, "diff mode")
 	set.String("base", "HEAD", "git ref")
 	return set
+}
+
+func TestIsLoopbackAddress(t *testing.T) {
+	cases := []struct {
+		address string
+		want    bool
+	}{
+		{address: "127.0.0.1:8787", want: true},
+		{address: "[::1]:8787", want: true},
+		{address: "localhost:8787", want: false},
+		{address: "0.0.0.0:8787", want: false},
+		{address: "192.168.1.10:8787", want: false},
+		{address: "bad-address", want: false},
+	}
+	for i, tc := range cases {
+		t.Run(fmt.Sprintf("case-%d", i), func(t *testing.T) {
+			if got := isLoopbackAddress(tc.address); got != tc.want {
+				t.Errorf("isLoopbackAddress(%q) = %v, want %v", tc.address, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestParseArgsFlagsAfterPath(t *testing.T) {

@@ -19,7 +19,7 @@ import (
 // because the policy is thin?" A finding list cannot distinguish the two.
 func cmdRulesGaps(args []string) {
 	set := flag.NewFlagSet("rules gaps", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
+	configPath := set.String("config", "", "policy file")
 	format := set.String("format", "text", "text|json")
 	parseArgs(set, args)
 	root := "."
@@ -38,7 +38,7 @@ func cmdRulesGaps(args []string) {
 // runGaps runs the engine once and audits the result. The audit reads the same
 // run rather than a second pass, so what it reports is what `check` saw.
 func runGaps(configPath, root string) policygap.Report {
-	cfg, err := loadPolicy(configPath)
+	cfg, err := loadPolicyFor(configPath, root)
 	if err != nil {
 		fail(err)
 	}
@@ -157,11 +157,11 @@ func printSuppressed(rep policygap.Report) {
 	if len(rep.Suppressed) == 0 {
 		return
 	}
-	fmt.Println("silenced by inline directives — the team voted against these:")
+	fmt.Println("silenced by inline directives — per-rule count; `suppressions` lists each site and reason")
 	for _, s := range rep.Suppressed {
 		fmt.Printf("  %-24s %d\n", s.RuleID, s.Count)
 	}
-	fmt.Println()
+	fmt.Println("  the acceptance ledger is the named sibling: `suppressions` lists both")
 }
 
 // packageList renders a layer's packages, or says when a declared layer covers

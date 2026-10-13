@@ -20,15 +20,18 @@ The full inventory — every CLI subcommand, every MCP tool, every rule and
 metric, the whole policy schema, and an honest list of what it does *not* do —
 lives in **[docs/capabilities.md](docs/capabilities.md)**. The highlights:
 
-- **Languages**: Go + Java (tree-sitter). Parsing is fault-tolerant: a syntax
+- **Languages**: 10, all via tree-sitter — Go, Java, TypeScript, TSX,
+  JavaScript, Python, C, C++, C#, Rust. `.tsx` gets its own grammar (the
+  TypeScript grammar has no JSX nodes) and shares every layer above the
+  parse with TypeScript. Parsing is fault-tolerant: a syntax
   error degrades to an info finding instead of failing the run, so
   half-written generated code still gets a verdict.
 - **Rules**: `empty-block`, `todo-comment`, `print-stack-trace`,
   `unknown-dependency`; policy-compiled `banned-*`; whole-graph
   `layer-violation` / `forbidden-edge` / `import-cycle` / `sdp-violation`;
   cross-file `function-clone` / `clone-drift` / `metric-regression`.
-- **Metrics**: 6 language-level + 5 CK class metrics (Java) + a function-level
-  maintainability index + 5 package metrics
+- **Metrics**: 6 language-level + 5 CK class metrics (class-bearing
+  languages) + a function-level maintainability index + 5 package metrics
   ([definitions](docs/metrics.md)).
 - **Data-driven bans**: `banned-api:` entries in `policy.yaml` compile into the
   same deterministic pipeline — an organisation adds a constraint by editing
@@ -42,8 +45,9 @@ lives in **[docs/capabilities.md](docs/capabilities.md)**. The highlights:
   bodies, `panic("not implemented")` and `UnsupportedOperationException` with
   their exact definition sites — a repair worklist for generated code.
 - **Navigation at 0 tokens**: `symbols` / `impact` / `map` (PageRank importance)
-  / `hotspots` (churn × debt) / `stats` (min/p50/p90/p95/max + top-N). `map` and
-  `hotspots` also carry a 0–100 static risk score.
+  / `hotspots` (churn × debt) / `coupling` (files that change together) / `stats`
+  (min/p50/p90/p95/max + top-N). `map` and `hotspots` also carry a 0–100 static
+  risk score.
 - **Incremental adoption**: `check -diff` gates only new code; `-regress` also
   reports measurements that got worse than `-base`; `api snapshot` / `api diff`
   gates the exported API surface; `arch snapshot` / `arch diff` gates the
@@ -51,7 +55,12 @@ lives in **[docs/capabilities.md](docs/capabilities.md)**. The highlights:
 - **One policy, with provenance**: `policy.yaml` is the constraint model;
   `rules explain` reports where every value came from
   (`builtin | policy_file | preset:NAME`), the `agentic` preset retunes the gate
-  for model-written code, and `metricgate: ignore` suppresses in place.
+  for model-written code, and `metricgate: ignore` suppresses in place. Without
+  `-config` the policy is discovered: `.metricgate.yaml` →
+  `.metricgate/config.yaml` → `policy.yaml`, nearest ancestor first, stopping at
+  the git worktree root, falling back to built-in defaults. The cockpit's
+  configuration view shows the chain, the effective keys with provenance, and
+  saves edits back atomically.
 - **Outputs**: text, JSON, SARIF 2.1.0 (GitHub code scanning), local SQLite
   trend store.
 - **Integration**: 18 CLI subcommands and an MCP stdio server exposing 11 tools
@@ -83,9 +92,43 @@ go build -o metricgate ./cmd/metricgate
 # 6. where to read first, at 0 tokens
 ./metricgate map .                          # files ranked by PageRank importance (+ risk)
 ./metricgate hotspots . -since "90.days ago"  # churn × maintainability debt
+./metricgate coupling . -since "90.days ago"   # files that change together (cross-layer = erosion)
 ./metricgate stats . -top 5                 # per-metric distribution + worst scopes
 ./metricgate impact . -q ClonePolicy        # every call site of a symbol
 ```
+
+## CI gate (60-second setup)
+
+Add to `.github/workflows/gate.yml` in any Go/Java/TS/JS/Python/C/C++/C#/Rust
+repository — no API key, no secrets, no data ever leaves the runner:
+
+```yaml
+name: gate
+on: { pull_request: { branches: [main] } }
+permissions: { contents: read }
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # metricgate needs the merge-base
+      - uses: <this-repo>/actions/metricgate-check@v1
+        with: { base: origin/main }
+```
+
+What you get:
+
+- **Diff-scoped by default**: only lines your PR adds are gated. Legacy debt
+  never turns the gate red — the first run on an old codebase is green, and
+  the gate can only ratchet.
+- **Blocking check**: error-severity findings on changed lines fail the job;
+  wire it into branch protection as a required check.
+- **Machine-readable output**: `findings-json` / `sarif-file` / `errors` /
+  `warnings` action outputs for downstream steps (code scanning, dashboards).
+
+The full-featured version this repo runs on itself — check-run annotations,
+a self-updating PR comment, artifact upload, and a weekly whole-tree scan —
+lives in [`.github/workflows/`](.github/workflows/metricgate-pr.yml).
 
 ## MCP server (call it from your coding agent)
 
@@ -291,6 +334,11 @@ or a begin/end range. Rule list is comma-separated; `all` or omitted means
 everything; the rest is a free-form reason. Suppressed findings never trip
 the gate but are counted in the report ("N findings suppressed").
 
+`metricgate suppressions` lists every directive in the tree together with the
+author's reason, flags the ones written without one, and shows the
+acceptance ledger (named, expiring concessions) beside them — the two systems
+are complementary and neither is visible from the other's output.
+
 ## Diff-only mode (incremental adoption)
 
 Legacy codebase with thousands of pre-existing violations? Gate only the new
@@ -305,13 +353,57 @@ Semantics:
 
 - **rule findings**: kept when their line is part of the diff
 - **function-scoped metrics** (complexity, length, params, nesting): kept
-  when the touched range intersects the function — "you touched it, you own it"
+  when the touched range intersects the function **and** the value rose
+  since the base revision — see below
 - **file-length**: only brand-new files are flagged; growing legacy files do
   not re-alarm
 - **untracked (non-ignored) files** count as fully new
 
 The gate verdict uses the filtered result; the header shows how much was
-hidden. Metric snapshots stored for trends are always the full measurements.
+hidden. Add `-hidden` to list the hidden findings and the metrics dropped
+for an unchanged value, so "0 new findings" is a claim you can audit. Add
+`-format json` for the same verdict as machine-readable fields
+(`errors`, `warnings`, `verdict.accepted`, `verdict.suppressed`) — the gate
+line and the JSON come from one function and cannot disagree. Metric
+snapshots stored for trends are always the full measurements.
+
+When the gate fails, the output lists every sanctioned path out — fix,
+suppress with a `metricgate: ignore` directive, concede with
+`metricgate accept add`, adjust the threshold, or list what was hidden.
+`metricgate suppressions` shows both concession systems side by side.
+
+### Why the value test exists
+
+A line-range test alone cannot tell "you made this worse" from "you touched
+something that was already bad". Class-level metrics span the whole class
+body, so editing any method inside a class re-reports all five CK values —
+with numbers that may not have moved at all. Measured on a legacy Java
+service (a three-line null guard added to two methods):
+
+```
+before  diff-only: base=HEAD~1, 14 new findings, 9665 pre-existing hidden
+        10 errors, gate FAILED
+
+after   diff-only: base=HEAD~1, 11 new findings, 9665 pre-existing hidden,
+                    3 unchanged metric(s) dropped
+         7 errors, gate FAILED
+```
+
+Across five commits of that repository the errors dropped from 31 to 16, and
+one commit went from 4 errors to none — the three CK values it re-reported
+were byte-identical before and after. The metric findings that survive are
+the ones whose number actually rose, which is the claim a reviewer can act
+on. Findings whose scope does not exist at the base revision (new code) are
+always kept: a threshold crossed by new code is the case the gate exists for.
+
+The header reports dropped unchanged metrics separately from pre-existing
+hidden findings, because "untouched" and "touched but unchanged" are
+different facts about a change.
+
+This requires the base revision's measurements, so `-diff` runs the engine
+over a `git archive` of the touched files only. When that is not possible
+(no git repository, or the MCP server's in-memory path), the value test is
+skipped and the line-range behaviour above applies unchanged.
 
 Policy example (full reference in the generated `policy.yaml`):
 
@@ -400,7 +492,7 @@ published specs where possible; deviations are documented inline.
 |-----|-------|
 | v0  | Checker core + CLI + SARIF + gate + SQLite schema ✅ |
 | v1  | diff-only mode ✅ · banned-api as policy data ✅ · architecture constraints ✅ · duplicate-code gate ✅ · CK class metrics (Java) ✅ |
-| v1+ | symbol index ✅ · impact ✅ · repo map (PageRank) ✅ · hotspots ✅ · metric distribution ✅ · static risk score ✅ · **next: Python/TS packs** |
+| v1+ | symbol index ✅ · impact ✅ · repo map (PageRank) ✅ · hotspots ✅ · metric distribution ✅ · static risk score ✅ · 9-language packs ✅ · **next: 审美回路补全 — [docs/roadmap.md](docs/roadmap.md)（accept 账本 / 规则 DSL / metric trend / 修复建议 / deps scan）** |
 | v2  | HTTP/gRPC service (SDK), LLM adapter interface + context generator |
 | v3  | Skeleton generator (IR + render backends), end-to-end LLM repair loop demo |
 
@@ -422,4 +514,7 @@ metricgate symbols . -q ClonePolcy       # near-miss suggestion (typo)
 
 The engine dogfoods itself: `metricgate check .` on this repository must
 pass the gate (violations live under `internal/engine/testdata`, which the
-default policy excludes).
+default policy excludes). Exit codes: `0` gate passed, `1` gate failed,
+`2` usage or environment error (unknown flag, no git repository for `-diff`,
+an unresolvable `-base`). There is no `doctor` verb — a fresh checkout is
+diagnosed by `metricgate check . -diff -base HEAD`.

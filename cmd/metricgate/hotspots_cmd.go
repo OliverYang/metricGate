@@ -18,7 +18,7 @@ func cmdHotspots(args []string) {
 	since := set.String("since", "3.months ago", "git history window (e.g. 90.days ago)")
 	maxN := set.Int("max", 10, "top N files")
 	format := set.String("format", "text", "text|json")
-	configPath := set.String("config", "policy.yaml", "policy file for MI computation")
+	configPath := set.String("config", "", "policy file for MI computation")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {

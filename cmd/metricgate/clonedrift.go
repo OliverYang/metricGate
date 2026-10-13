@@ -17,7 +17,7 @@ import (
 // clones against the working tree, so it is inherently a diff-time check.
 func cmdClonedrift(args []string) {
 	set := flag.NewFlagSet("clonedrift", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
+	configPath := set.String("config", "", "policy file")
 	base := set.String("base", "HEAD", "git ref to compare against (merge-base with HEAD)")
 	format := set.String("format", "text", "text|json")
 	parseArgs(set, args)
@@ -26,7 +26,7 @@ func cmdClonedrift(args []string) {
 		root = set.Arg(0)
 	}
 
-	cfg, err := loadPolicy(*configPath)
+	cfg, err := loadPolicyFor(*configPath, root)
 	if err != nil {
 		fail(err)
 	}

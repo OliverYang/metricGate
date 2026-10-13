@@ -29,7 +29,7 @@ func cmdRank(args []string) {
 			fail(fmt.Errorf("rank: %w", err))
 		}
 	}
-	cfg, err := loadPolicy(*config)
+	cfg, err := loadPolicyFor(*config, ".")
 	if err != nil {
 		fail(err)
 	}

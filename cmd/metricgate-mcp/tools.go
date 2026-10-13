@@ -21,16 +21,19 @@ import (
 // reviewer remembering to add a line. With logging off the wrapper returns the
 // handler unchanged, so the cost of the indirection is one nil check per call.
 func addTool[In, Out any](srv *mcp.Server, svc *service, t *mcp.Tool, h mcp.ToolHandlerFor[In, Out]) {
-	mcp.AddTool(srv, t, wrapTool(svc.log, t.Name, h))
+	mcp.AddTool(srv, t, wrapTool(svc.gate, wrapLogged(svc.log, t.Name, h)))
 }
 
 // registerTools declares the MCP tool surface. It lives apart from main so the
-// whole surface reads as one list and main stays a startup sequence.
+// whole surface reads as one list and main stays a startup sequence. gate is
+// the inline-verdict watcher (see gate.go); it may be nil, which disables the
+// preamble.
 func registerTools(srv *mcp.Server, svc *service) {
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "get_constraints",
 		Description: "Get the dense constraint pack (exact signatures/imports + active policy rules and limits) for a file or directory. Call BEFORE generating code and follow it, so output aligns with the existing API surface.",
 	}, svc.getConstraints)
+	_ = svc.log // log wiring lives in addTool via wrapLogged below
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "check_code",
 		Description: "Deterministically check in-memory code (0 tokens, milliseconds) without writing to disk. Call after EVERY generated/edited snippet; fix all findings before returning the code.",

@@ -20,7 +20,7 @@ import (
 // dangerous is visible in one view.
 func cmdMap(args []string) {
 	set := flag.NewFlagSet("map", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
+	configPath := set.String("config", "", "policy file")
 	n := set.Int("n", 25, "maximum files to list")
 	maxChars := set.Int("max-chars", 4000, "output budget in bytes (0 = unlimited)")
 	format := set.String("format", "text", "text|json")
@@ -30,7 +30,7 @@ func cmdMap(args []string) {
 	if set.NArg() > 0 {
 		root = set.Arg(0)
 	}
-	cfg, err := loadPolicy(*configPath)
+	cfg, err := loadPolicyFor(*configPath, root)
 	if err != nil {
 		fail(err)
 	}

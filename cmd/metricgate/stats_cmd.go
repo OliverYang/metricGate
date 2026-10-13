@@ -16,7 +16,7 @@ import (
 // aggregates) by describing the shape of the whole population.
 func cmdStats(args []string) {
 	set := flag.NewFlagSet("stats", flag.ExitOnError)
-	configPath := set.String("config", "policy.yaml", "policy file")
+	configPath := set.String("config", "", "policy file")
 	topN := set.Int("top", 5, "worst scopes to list per metric (0 = none)")
 	format := set.String("format", "text", "text|json")
 	parseArgs(set, args)
