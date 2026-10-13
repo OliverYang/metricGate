@@ -141,19 +141,19 @@ Node kinds come from the tree-sitter-java grammar:
   separate functions
 - `a, b` style multi-name parameters count per name; varargs count as 1
 
-## wmc (Weighted Methods per Class) — Java
+## wmc (Weighted Methods per Class) — class-bearing languages
 
 Sum of the cyclomatic complexity of every method and constructor declared by
 the class or interface. A bodyless (abstract, or interface) method contributes
 the minimum of 1: the class still pays for the dispatch it promises. Defaults:
 warn >40, error >60.
 
-## nom (Number of Methods) — Java
+## nom (Number of Methods) — class-bearing languages
 
 Methods plus constructors declared directly by the class (nested types belong
 to themselves). Defaults: warn >20, error >30.
 
-## lcom (Lack of Cohesion of Methods) — Java
+## lcom (Lack of Cohesion of Methods) — class-bearing languages
 
 The original Chidamber–Kemerer definition: over all method pairs, P is the
 number of pairs sharing **no** field and Q the pairs sharing at least one;
@@ -163,14 +163,14 @@ cohesive), the conservative direction. Classes with fewer than two methods or
 no fields measure 0. Defaults: warn >20, error >40 (advisory: the strict CK
 definition flags real designs often — tune before raising the gate).
 
-## cbo (Coupling Between Objects) — Java
+## cbo (Coupling Between Objects) — class-bearing languages
 
 Distinct type names referenced by the class other than itself and the Java
 primitives (`int`, `boolean`, …). Name-based: JDK types count too (coupling
 to the platform is still coupling). Nested types are boundaries — their
 references are theirs, not the outer class's. Defaults: warn >15, error >25.
 
-## dit (Depth of Inheritance Tree) — Java
+## dit (Depth of Inheritance Tree) — class-bearing languages
 
 Depth of the inheritance chain: a superclass declared in the same file
 contributes its own depth + 1; a superclass declared elsewhere counts as one
@@ -178,12 +178,35 @@ level (cross-file resolution belongs to the symbol index, not the per-file
 pass). Implementing an interface never adds depth; an interface extending one
 does. Cycles terminate defensively. Defaults: warn >5, error >8.
 
+### Which languages produce the CK family
+
+Java, TypeScript, TSX, JavaScript, Python, C++, C, C# and Rust each declare
+classes or structs in their own grammar; `internal/metrics/classes_lang.go` holds
+the per-language spelling table and `HasClasses(lang)` decides whether the five
+are advertised for a language. **Go produces none** — it has no class construct,
+so listing WMC there would tell a Go project it has rules it can never fire. The
+caveats below were written for the Java implementation and still hold; where a
+language has no distinct type-reference node kind (JavaScript, Python, C#) CBO is
+restricted to what the grammar actually names.
+
 ### Deviations from strict CK (all deliberate, all conservative)
 
 - Everything is name-based: no type resolution, no symbol tables.
 - `this.field` and bare `field` are equal field shares; shadowing can only
   *lower* reported LCOM.
-- CBO includes the JDK by design — a name-based pass cannot tell a project
+- CBO includes the platform by design — a name-based pass cannot tell a project
   class from a platform one, and coupling to the platform is still coupling.
 - DIT outside the file under-counts (1 instead of the true depth), never
   over-counts.
+
+### Language notes: TypeScript / TSX
+
+- function units are `function_declaration`, `generator_function_declaration`,
+  `method_definition` and the class/interface declarations themselves; **arrow
+  functions are not measured as separate units** (they are folded into the
+  enclosing scope, like Go func literals), so `const C = () => {…}` contributes
+  no function-level snapshot — only file-length and the class-level CK family
+  see it
+- TSX is the same census as TypeScript: JSX elements appear inside method
+  bodies and are walked as ordinary subtrees, so they add fan-out (the `.map`
+  call) but no decision points

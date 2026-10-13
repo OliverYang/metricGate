@@ -22,7 +22,7 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 
 ## 1. 语言与解析
 
-- **支持语言**：Go、Java（tree-sitter 语法）。
+- **支持语言**：Go、Java、TypeScript、TSX、JavaScript、Python、C、C++、C#、Rust（tree-sitter 语法，十种）。`.tsx` 使用独立语法（TypeScript 语法不带 JSX 节点），解析层之上与 TypeScript 共用同一套表。
 - **容错解析**：语法错误降级成 info 级 `parse-error` 而不中断整轮——刚生成的、还没写完的代码也要能给出部分结论。
 - **单次遍历**：度量、规则、事实（facts）、跨文件引用索引、clone 指纹、类型普查都来自同一次 parse，没有第二次扫描。
 - **唯一的进程边界**：`internal/git`。策略里 `os/exec` 的禁用规则只给它和 CLI 开白名单。
@@ -177,6 +177,7 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 | 影响面 | `impact -q NAME` · MCP `get_impact` | 改这个符号会波及谁？（全部调用点/类型引用 + 受影响文件） |
 | 仓库重要性地图 | `map` · MCP `get_repo_map` | 先读哪些文件？（引用图 + PageRank，逐字节稳定） |
 | 热点 | `hotspots` · MCP `get_hotspots` | 改动最频繁 × 债务最重的文件在哪？（Tornhill 热点分析） |
+| 共变 | `coupling` | 哪些文件无依赖却总一起改？（Tornhill change coupling；跨层对=腐蚀进行中，`-diff` 可开闸） |
 | 分布统计 | `stats` · MCP `get_metric_stats` | 整体有多糟、最糟的是谁？（min/p50/p90/p95/max/mean + top-N） |
 
 **风险聚合分**（`internal/risk`）：把 findings 按严重度加权（error 10 / warning 3 / info 1）做饱和归一，再与最差 MI 债务按 7:3 混合成 0–100。低于 1.0 不报（几乎每个文件都有点 MI 债务，不设下限就是噪声）。`hotspots` 与 `map` 都会带上它——**只做标注，不改变原有排序**。
@@ -203,6 +204,16 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 ## 9. 策略文件（约束模型）
 
 `policy.yaml` 是项目的约束模型；**同一份文件**今天驱动闸门，将来驱动上下文/骨架生成。
+
+**发现链（eslint 式退化）**：不带 `-config` 时，从运行根（或文件所在目录）逐级上溯，按
+`.metricgate.yaml` → `.metricgate/config.yaml` → `policy.yaml` 的顺序取第一个存在的文件，
+命中即停；上溯到 Git 工作树根为止，根上仍没有则用内置默认值。非 Git 目录只搜起始目录，
+避免把上层目录的习惯配置静默推到别的仓库。组合仍是显式的 `extends:`。
+显式 `-config <path>` 优先且不查存在性（打错名字应当报错，而不是静默退化）。
+
+Cockpit 的「扫描配置」视图把这条链变成可查可解析可改：候选链（哪个生效、哪个未命中）、
+文档原文（注释保留）、顶层分节与行号、`extends` 父文档、生效键与每个键的出处。
+保存只写发现链上已存在的文件，落盘前用同一套 loader 校验，替换是临时文件 + rename 的原子操作。
 
 | 段 | 字段 | 作用 |
 |---|---|---|
@@ -260,6 +271,7 @@ func Parse(a, b, c, d, e, f, g int) int { ... }
 | `impact [path]` | 引用点与影响面 | `-q` `-max` `-format` |
 | `map [path]` | 重要性排序（+风险分） | `-n` `-max-chars` `-risk` `-format` |
 | `hotspots [path]` | 改动×债务热点（+风险分） | `-since` `-max` `-format` |
+| `coupling [path]` | 共变对：无依赖却总一起改的文件；跨层对=腐蚀进行中（需 git 仓，浅克隆拒绝） | `-since` `-max` `-min-count` `-max-commit-files` `-allow-shallow` `-format` `-config` |
 | `stats` / `metrics` / `trends` / `clonedrift` / `nearclones` | 见各节 | — |
 | `trends` | 从趋势库读严重度趋势 + 高频规则 | `-runs` `-format` |
 | `calls` | 把 MCP 本地调用日志压成一张表：按阶段/工具的调用次数、耗时中位数、拦截率、收敛率 | `-log` `-since` `-format` |
@@ -309,7 +321,7 @@ CLI 与 MCP **共用同一份实现**（`facts.RankedFiles`、`hotspots.FromSumm
 - **没有类型系统**：约束族 E（空指针/资源泄漏/类型错误）**不做**，按计划走外部 CLI 适配器（golangci-lint / SpotBugs / PMD），保持松耦合与许可证干净。
 - **不做服务端**：明确不采用 CodeQL（需建库、分钟级、服务化）与 SonarQube（服务端重），与本地的轻量定位冲突。
 - **不调用 LLM、不发网络请求**：`bundle` 只产出信封，推理交给宿主 agent。
-- **只有 Go 与 Java**：Python/TS 语言包框架已验证，但排在约束族补齐之后。
+- **类级度量（CK 家族）覆盖所有有类语义的语言**：Java、TypeScript、JavaScript、Python、C++、C、C#、Rust 都会产出 WMC/NOM/LCOM/CBO/DIT（每种语言的类/结构体/成员/继承拼写见 `internal/metrics/classes_lang.go`）。Go 没有类，因此不产出这五项，也不会在它的规则目录里列出它们。
 - **不做 autofix/codemod**：信任成本最高，等闸门建立信任后再评估。
 
 ## 12. 如何自证
