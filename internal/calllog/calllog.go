@@ -96,17 +96,28 @@ func IsVerify(tool string) bool { return PhaseOf(tool) == PhaseVerify }
 // Record is one MCP tool call. Field names are short because the file is read
 // by eye as often as by this package.
 type Record struct {
-	Time     time.Time `json:"time"`
-	Session  string    `json:"session"`
-	Tool     string    `json:"tool"`
-	Phase    Phase     `json:"phase"`
-	Target   string    `json:"target,omitempty"` // locator only, never source
-	MS       int64     `json:"ms"`
-	Findings int       `json:"findings,omitempty"`
-	Errors   int       `json:"errors,omitempty"`
-	Warnings int       `json:"warnings,omitempty"`
-	Verdict  string    `json:"verdict,omitempty"`
-	Err      string    `json:"error,omitempty"`
+	Time time.Time `json:"time"`
+	// Session is the process that produced this call, so a log assembled from
+	// two interleaved servers still yields per-session numbers.
+	Session string `json:"session"`
+	// TraceID groups calls that belong to the same unit of work — one LLM
+	// session, one PR, one task — across however many processes it took. It is
+	// read from $METRICGATE_TRACE_ID and defaults to empty, which is a legal
+	// state: "no trace" must be indistinguishable from "no data" only in that
+	// both are aggregated under everything else, never silently dropped.
+	TraceID     string `json:"traceId,omitempty"`
+	Tool        string `json:"tool"`
+	Phase       Phase  `json:"phase"`
+	Target      string `json:"target,omitempty"` // locator only, never source
+	ProjectID   string `json:"projectId,omitempty"`
+	ProjectPath string `json:"projectPath,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
+	MS          int64  `json:"ms"`
+	Findings    int    `json:"findings,omitempty"`
+	Errors      int    `json:"errors,omitempty"`
+	Warnings    int    `json:"warnings,omitempty"`
+	Verdict     string `json:"verdict,omitempty"`
+	Err         string `json:"error,omitempty"`
 }
 
 // Passed reports whether a verify record's verdict was a clean pass. A record

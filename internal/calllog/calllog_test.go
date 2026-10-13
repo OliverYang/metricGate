@@ -1,6 +1,7 @@
 package calllog
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,5 +210,66 @@ func TestParseSince(t *testing.T) {
 	_, err := ParseSince("last tuesday")
 	if err == nil || !strings.Contains(err.Error(), "unrecognised") {
 		t.Errorf("garbage since = %v, want an explicit rejection", err)
+	}
+}
+
+// TestTraceIDRoundTripsAndGroupsSessions pins the third attribution key. A
+// session is a process and a trace is a unit of work: one trace spans several
+// sessions, so neither can substitute for the other and both must survive a
+// round trip.
+func TestTraceIDRoundTripsAndGroupsSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "calls.jsonl")
+	in := []Record{
+		func() Record { r := rec("s1", "check_code", "PASS", 3); r.TraceID = "trace-7"; return r }(),
+		func() Record { r := rec("s2", "check_code", "PASS", 4); r.TraceID = "trace-7"; return r }(),
+		func() Record { r := rec("s2", "get_trends", "", 5); return r }(),
+	}
+	appendAll(t, path, in)
+
+	got, _, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("read %d records, want 3", len(got))
+	}
+	if got[0].TraceID != "trace-7" || got[1].TraceID != "trace-7" {
+		t.Errorf("trace ids = %q, %q; want trace-7", got[0].TraceID, got[1].TraceID)
+	}
+	// An empty trace is a legal state, not a dropped record.
+	if got[2].TraceID != "" {
+		t.Errorf("a record without a trace must keep an empty one, got %q", got[2].TraceID)
+	}
+
+	s := Summarize(got)
+	// Two sessions, one shared trace: the trace is the unit of work, the
+	// sessions are the processes that did it, and collapsing either into the
+	// other loses the distinction.
+	if s.Sessions != 2 {
+		t.Errorf("sessions = %d, want 2", s.Sessions)
+	}
+}
+
+// TestTraceIDIsOmittedWhenEmpty keeps the log file byte-identical for a
+// repository that never set a trace: an operator diffing two log files must
+// not see a new key appear out of nowhere.
+func TestTraceIDIsOmittedWhenEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "calls.jsonl")
+	appendAll(t, path, []Record{rec("s1", "check_code", "PASS", 3)})
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("traceId")) {
+		t.Errorf("an empty trace must not appear in the log:\n%s", raw)
+	}
+	withTrace := func() Record { r := rec("s1", "check_code", "PASS", 3); r.TraceID = "t"; return r }
+	appendAll(t, path, []Record{withTrace()})
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"traceId":"t"`)) {
+		t.Errorf("a set trace must appear in the log:\n%s", raw)
 	}
 }

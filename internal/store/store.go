@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -32,7 +33,11 @@ CREATE TABLE IF NOT EXISTS runs (
 	files INTEGER NOT NULL,
 	error_count INTEGER NOT NULL,
 	warning_count INTEGER NOT NULL,
-	info_count INTEGER NOT NULL
+	info_count INTEGER NOT NULL,
+	project_root TEXT,
+	archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+	policy_digest TEXT,
+	trace_id TEXT
 );
 CREATE TABLE IF NOT EXISTS findings (
 	run_id INTEGER NOT NULL REFERENCES runs(id),
@@ -44,7 +49,8 @@ CREATE TABLE IF NOT EXISTS findings (
 	start_column INTEGER NOT NULL,
 	end_line INTEGER NOT NULL,
 	end_column INTEGER NOT NULL,
-	message TEXT NOT NULL
+	message TEXT NOT NULL,
+	trace_id TEXT
 );
 CREATE TABLE IF NOT EXISTS metric_snapshots (
 	run_id INTEGER NOT NULL REFERENCES runs(id),
@@ -53,7 +59,8 @@ CREATE TABLE IF NOT EXISTS metric_snapshots (
 	metric TEXT NOT NULL,
 	value INTEGER NOT NULL,
 	warn_threshold INTEGER NOT NULL,
-	err_threshold INTEGER NOT NULL
+	err_threshold INTEGER NOT NULL,
+	trace_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_findings_run ON findings(run_id);
@@ -76,15 +83,262 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrateRunsProjectRoot(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	if err := migrateRunsArchived(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	if err := migrateRunsPolicyDigest(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	if err := migrateRunsTraceID(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrateRunsPolicyDigest adds the nullable policy fingerprint column. Older
+// databases keep working: a row written before this column exists simply
+// reports an empty digest, which is what "we do not know" looks like.
+func migrateRunsPolicyDigest(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(runs)`)
+	if err != nil {
+		return err
+	}
+	hasPolicyDigest := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "policy_digest" {
+			hasPolicyDigest = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if hasPolicyDigest {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE runs ADD COLUMN policy_digest TEXT`)
+	return err
+}
+
+// migrateRunsTraceID adds the nullable trace column shared by runs, findings
+// and metric_snapshots, so a run can later be tied back to the LLM session,
+// PR or task that produced it. An absent trace is a legal state: the column is
+// simply empty and every query treats it as "unknown".
+func migrateRunsTraceID(db *sql.DB) error {
+	for _, table := range []string{"runs", "findings", "metric_snapshots"} {
+		rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+		if err != nil {
+			return err
+		}
+		hasTrace := false
+		for rows.Next() {
+			var cid, notNull, primaryKey int
+			var name, columnType string
+			var defaultValue any
+			if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+				rows.Close()
+				return err
+			}
+			if name == "trace_id" {
+				hasTrace = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if hasTrace {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN trace_id TEXT`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateRunsArchived(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(runs)`)
+	if err != nil {
+		return err
+	}
+	hasArchived := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "archived" {
+			hasArchived = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if hasArchived {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE runs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))`)
+	return err
+}
+
+func migrateRunsProjectRoot(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(runs)`)
+	if err != nil {
+		return err
+	}
+	hasProjectRoot := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "project_root" {
+			hasProjectRoot = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if hasProjectRoot {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE runs ADD COLUMN project_root TEXT`)
+	return err
 }
 
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
 // SaveRun writes one run with its findings and metric snapshots, returning
-// the run id.
+// the run id. Runs saved through this legacy entry point remain unassigned.
 func (s *Store) SaveRun(summary *model.RunSummary, toolVersion, commit string) (int64, error) {
+	return s.saveRun(summary, toolVersion, commit, "", RunMeta{})
+}
+
+// SaveRunForProject writes a run associated with a verified Git worktree root.
+func (s *Store) SaveRunForProject(summary *model.RunSummary, toolVersion, commit, projectRoot string) (int64, error) {
+	return s.saveRun(summary, toolVersion, commit, projectRoot, RunMeta{})
+}
+
+// SaveRunFull writes a run with every piece of provenance the gate knows: the
+// verified project root, the policy fingerprint and the trace id. Callers that
+// have no trace pass RunMeta{} and get exactly the old behaviour.
+func (s *Store) SaveRunFull(summary *model.RunSummary, toolVersion, commit, projectRoot string, meta RunMeta) (int64, error) {
+	return s.saveRun(summary, toolVersion, commit, projectRoot, meta)
+}
+
+func (s *Store) SetArchived(runID int64, projectRoot string, archived bool) error {
+	return s.SetRunsArchived([]int64{runID}, projectRoot, archived)
+}
+
+// SetRunsArchived atomically changes archive state for runs in one project scope.
+func (s *Store) SetRunsArchived(runIDs []int64, projectRoot string, archived bool) error {
+	if len(runIDs) == 0 || len(runIDs) > 100 {
+		return fmt.Errorf("run selection must contain between 1 and 100 IDs")
+	}
+	if projectRoot != "" && !filepath.IsAbs(projectRoot) {
+		return fmt.Errorf("project root must be absolute")
+	}
+	unique := make(map[int64]struct{}, len(runIDs))
+	for _, id := range runIDs {
+		if id <= 0 {
+			return fmt.Errorf("run IDs must be positive")
+		}
+		if _, exists := unique[id]; exists {
+			return fmt.Errorf("run IDs must be unique")
+		}
+		unique[id] = struct{}{}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current := boolToInt(!archived)
+	for _, runID := range runIDs {
+		query := `UPDATE runs SET archived = ? WHERE id = ? AND archived = ?`
+		args := []any{boolToInt(archived), runID, current}
+		if projectRoot == "" {
+			query += ` AND (project_root IS NULL OR project_root = '')`
+		} else {
+			query += ` AND project_root = ?`
+			args = append(args, projectRoot)
+		}
+		result, err := tx.Exec(query, args...)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return fmt.Errorf("run not found in requested scope or archive state already changed")
+		}
+	}
+	return tx.Commit()
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+// RunMeta carries the optional provenance attached to one stored run: the
+// policy fingerprint (which version of the rules produced this verdict) and
+// the trace id (which session/PR/task produced the run). Both are optional and
+// both are plain strings, so an absent one is simply empty.
+type RunMeta struct {
+	PolicyDigest string
+	TraceID      string
+}
+
+// nullableText maps an empty optional string to SQL NULL.
+func nullableText(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func (s *Store) saveRun(summary *model.RunSummary, toolVersion, commit, projectRoot string, meta RunMeta) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -92,11 +346,12 @@ func (s *Store) SaveRun(summary *model.RunSummary, toolVersion, commit string) (
 	defer tx.Rollback()
 
 	res, err := tx.Exec(`INSERT INTO runs
-		(started_at, duration_ms, tool_version, git_commit, files, error_count, warning_count, info_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		(started_at, duration_ms, tool_version, git_commit, files, error_count, warning_count, info_count, project_root, policy_digest, trace_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Now().UTC().Format(time.RFC3339), summary.Duration.Milliseconds(),
 		toolVersion, commit, summary.Files,
-		summary.Count(model.SevError), summary.Count(model.SevWarning), summary.Count(model.SevInfo))
+		summary.Count(model.SevError), summary.Count(model.SevWarning), summary.Count(model.SevInfo),
+		nullableProjectRoot(projectRoot), nullableText(meta.PolicyDigest), nullableText(meta.TraceID))
 	if err != nil {
 		return 0, err
 	}
@@ -107,22 +362,29 @@ func (s *Store) SaveRun(summary *model.RunSummary, toolVersion, commit string) (
 
 	for _, f := range summary.Findings {
 		if _, err := tx.Exec(`INSERT INTO findings
-			(run_id, rule_id, severity, source, file, start_line, start_column, end_line, end_column, message)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(run_id, rule_id, severity, source, file, start_line, start_column, end_line, end_column, message, trace_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			runID, f.RuleID, string(f.Severity), string(f.Source), f.File,
-			f.StartLine, f.StartCol, f.EndLine, f.EndCol, f.Message); err != nil {
+			f.StartLine, f.StartCol, f.EndLine, f.EndCol, f.Message, nullableText(meta.TraceID)); err != nil {
 			return 0, err
 		}
 	}
 	for _, m := range summary.Metrics {
 		if _, err := tx.Exec(`INSERT INTO metric_snapshots
-			(run_id, file, scope, metric, value, warn_threshold, err_threshold)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			runID, m.File, m.Scope, m.Metric, m.Value, m.Warn, m.Err); err != nil {
+			(run_id, file, scope, metric, value, warn_threshold, err_threshold, trace_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			runID, m.File, m.Scope, m.Metric, m.Value, m.Warn, m.Err, nullableText(meta.TraceID)); err != nil {
 			return 0, err
 		}
 	}
 	return runID, tx.Commit()
+}
+
+func nullableProjectRoot(root string) any {
+	if root == "" {
+		return nil
+	}
+	return root
 }
 
 // Runs returns the number of stored runs; used by tests and diagnostics.
@@ -148,9 +410,13 @@ type RunRecord struct {
 	ToolVersion  string
 	GitCommit    string
 	Files        int
+	ProjectRoot  string
+	PolicyDigest string
+	TraceID      string
 	ErrorCount   int
 	WarningCount int
 	InfoCount    int
+	Archived     bool
 }
 
 // TrendPoint is one step of a per-run severity series.
@@ -224,18 +490,145 @@ func (s *Store) Report(limit int) (TrendReport, error) {
 	return out, nil
 }
 
+func (s *Store) ReportForProject(limit int, projectRoot string) (TrendReport, error) {
+	return s.reportForScope(limit, projectRoot, false)
+}
+
+// ReportArchivedForProject folds archived runs for one project into a report.
+func (s *Store) ReportArchivedForProject(limit int, projectRoot string) (TrendReport, error) {
+	return s.reportForScope(limit, projectRoot, true)
+}
+
+func (s *Store) ReportUnassigned(limit int) (TrendReport, error) {
+	return s.reportForScope(limit, "", false)
+}
+
+func (s *Store) ReportArchivedUnassigned(limit int) (TrendReport, error) {
+	return s.reportForScope(limit, "", true)
+}
+
+func (s *Store) reportForScope(limit int, projectRoot string, archived bool) (TrendReport, error) {
+	archiveMode := 0
+	if archived {
+		archiveMode = 1
+	}
+	records, err := s.latestRunsState(limit, projectRoot, true, archiveMode)
+	if err != nil {
+		return TrendReport{}, err
+	}
+	if projectRoot == "" {
+		return s.reportForRecords(records, fmt.Sprintf("archived = %d AND (project_root IS NULL OR project_root = '')", archiveMode), nil, limit)
+	}
+	return s.reportForRecords(records, fmt.Sprintf("archived = %d AND project_root = ?", archiveMode), []any{projectRoot}, limit)
+}
+
+func (s *Store) reportForRecords(records []RunRecord, projectClause string, projectArgs []any, limit int) (TrendReport, error) {
+	out := TrendReport{Runs: len(records), Series: make([]TrendPoint, 0, len(records)), TopRules: []RuleCount{}}
+	for i := len(records) - 1; i >= 0; i-- {
+		run := records[i]
+		out.Series = append(out.Series, TrendPoint{StartedAt: run.StartedAt, Errors: run.ErrorCount, Warnings: run.WarningCount, Infos: run.InfoCount})
+	}
+	if len(records) > 0 {
+		out.Range = &TrendRange{Start: records[len(records)-1].StartedAt, End: records[0].StartedAt}
+	}
+	query := `SELECT rule_id, COUNT(*) FROM findings WHERE run_id IN (
+		SELECT id FROM runs WHERE ` + projectClause + ` ORDER BY started_at DESC, id DESC`
+	args := append([]any{}, projectArgs...)
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	query += `) GROUP BY rule_id ORDER BY COUNT(*) DESC, rule_id ASC`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return TrendReport{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rule RuleCount
+		if err := rows.Scan(&rule.RuleID, &rule.Count); err != nil {
+			return TrendReport{}, err
+		}
+		out.TopRules = append(out.TopRules, rule)
+	}
+	return out, rows.Err()
+}
+
+// ProjectRoots returns all non-empty project roots in the run history.
+func (s *Store) ProjectRoots() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT project_root FROM runs
+		WHERE project_root IS NOT NULL AND project_root != '' ORDER BY project_root`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var roots []string
+	for rows.Next() {
+		var root string
+		if err := rows.Scan(&root); err != nil {
+			return nil, err
+		}
+		roots = append(roots, root)
+	}
+	return roots, rows.Err()
+}
+
 // LatestRuns returns the most recent runs, newest first. limit <= 0 means
 // "every run" (still capped at the database size; this is for tests and the
 // `metricgate trends` default window of 20).
 func (s *Store) LatestRuns(limit int) ([]RunRecord, error) {
+	return s.latestRunsState(limit, "", false, 2)
+}
+
+// LatestRunsForProject returns recent runs for exactly one verified project root.
+func (s *Store) LatestRunsForProject(limit int, projectRoot string) ([]RunRecord, error) {
+	return s.latestRunsState(limit, projectRoot, true, 0)
+}
+
+// LatestArchivedRunsForProject returns archived runs for exactly one project.
+func (s *Store) LatestArchivedRunsForProject(limit int, projectRoot string) ([]RunRecord, error) {
+	return s.latestRunsState(limit, projectRoot, true, 1)
+}
+
+// LatestUnassignedRuns returns active runs without a project identity.
+func (s *Store) LatestUnassignedRuns(limit int) ([]RunRecord, error) {
+	return s.latestRunsState(limit, "", true, 0)
+}
+
+// LatestArchivedUnassignedRuns returns archived runs without a project identity.
+func (s *Store) LatestArchivedUnassignedRuns(limit int) ([]RunRecord, error) {
+	return s.latestRunsState(limit, "", true, 1)
+}
+
+func (s *Store) latestRuns(limit int, projectRoot string, filter bool) ([]RunRecord, error) {
+	return s.latestRunsState(limit, projectRoot, filter, 0)
+}
+
+// archiveMode: 0 active, 1 archived, 2 any.
+func (s *Store) latestRunsState(limit int, projectRoot string, filter bool, archiveMode int) ([]RunRecord, error) {
 	q := `SELECT id, started_at, duration_ms, tool_version, COALESCE(git_commit, ''),
-	             files, error_count, warning_count, info_count
-	      FROM runs ORDER BY started_at DESC, id DESC`
+	             files, error_count, warning_count, info_count, COALESCE(project_root, ''),
+	             COALESCE(policy_digest, ''), COALESCE(trace_id, ''), archived
+	      FROM runs`
+	args := []any{}
+	conditions := []string{}
+	if archiveMode < 2 {
+		conditions = append(conditions, fmt.Sprintf("archived = %d", archiveMode))
+	}
+	if filter {
+		if projectRoot == "" {
+			conditions = append(conditions, `(project_root IS NULL OR project_root = '')`)
+		} else {
+			conditions = append(conditions, `project_root = ?`)
+			args = append(args, projectRoot)
+		}
+	}
+	if len(conditions) > 0 {
+		q += ` WHERE ` + strings.Join(conditions, ` AND `)
+	}
+	q += ` ORDER BY started_at DESC, id DESC`
 	if limit > 0 {
 		q += ` LIMIT ?`
-	}
-	args := []any{}
-	if limit > 0 {
 		args = append(args, limit)
 	}
 	rows, err := s.db.Query(q, args...)
@@ -246,10 +639,13 @@ func (s *Store) LatestRuns(limit int) ([]RunRecord, error) {
 	var out []RunRecord
 	for rows.Next() {
 		var r RunRecord
+		var archivedValue int
 		if err := rows.Scan(&r.ID, &r.StartedAt, &r.DurationMs, &r.ToolVersion, &r.GitCommit,
-			&r.Files, &r.ErrorCount, &r.WarningCount, &r.InfoCount); err != nil {
+			&r.Files, &r.ErrorCount, &r.WarningCount, &r.InfoCount, &r.ProjectRoot,
+			&r.PolicyDigest, &r.TraceID, &archivedValue); err != nil {
 			return nil, err
 		}
+		r.Archived = archivedValue != 0
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -260,7 +656,7 @@ func (s *Store) LatestRuns(limit int) ([]RunRecord, error) {
 func (s *Store) RunFindings(runID int64) ([]model.Finding, error) {
 	rows, err := s.db.Query(`SELECT rule_id, severity, source, file, start_line, start_column,
 	                                end_line, end_column, message
-	                         FROM findings WHERE run_id = ? ORDER BY id`, runID)
+	                         FROM findings WHERE run_id = ? ORDER BY rowid`, runID)
 	if err != nil {
 		return nil, err
 	}

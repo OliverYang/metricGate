@@ -215,3 +215,138 @@ func TestParseNameStatusRejectsMalformedRecords(t *testing.T) {
 		t.Fatal("expected missing path error")
 	}
 }
+
+// TestLoadChangesFromSubdirectoryKeepsHunks pins the silent-failure mode a
+// subdirectory cwd used to cause: git resolves pathspecs against the worktree
+// root, so `git diff -- internal/core/core.go` run inside internal/core matched
+// nothing and every change lost its hunks. -diff then hid every finding as
+// pre-existing and the gate reported green on a violating change.
+func TestLoadChangesFromSubdirectoryKeepsHunks(t *testing.T) {
+	root := initGitRepo(t)
+	writeRepoFile(t, root, "internal/core/core.go", "package core\n\nfunc Simple() int { return 1 }\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-qm", "base")
+	writeRepoFile(t, root, "internal/core/core.go", "package core\n\nfunc Simple() int {\n\tif true {\n\t\treturn 1\n\t}\n\treturn 2\n}\n")
+
+	for _, dir := range []string{root, filepath.Join(root, "internal", "core")} {
+		changes, err := LoadChanges(dir, ChangeRequest{Mode: ModeWorkspace, Base: "HEAD"})
+		if err != nil {
+			t.Fatalf("LoadChanges(%s): %v", dir, err)
+		}
+		if len(changes) != 1 || len(changes[0].Hunks) == 0 {
+			t.Fatalf("LoadChanges(%s) changes=%+v, want one change with hunks", dir, changes)
+		}
+		if changes[0].Path != "internal/core/core.go" {
+			t.Errorf("LoadChanges(%s) path=%q, want the worktree-relative path", dir, changes[0].Path)
+		}
+	}
+}
+
+// TestChangedLinesForRebasesOntoCheckRoot: git speaks worktree-relative paths
+// while a report is scoped to the check root, so the gate needs the rebased
+// form for every spelling of the same scope.
+func TestChangedLinesForRebasesOntoCheckRoot(t *testing.T) {
+	root := initGitRepo(t)
+	writeRepoFile(t, root, "internal/core/core.go", "package core\n\nfunc Simple() int { return 1 }\n")
+	writeRepoFile(t, root, "other/other.go", "package other\n\nfunc Other() int { return 1 }\n")
+	gitRun(t, root, "add", "-A")
+	gitRun(t, root, "commit", "-qm", "base")
+	writeRepoFile(t, root, "internal/core/core.go", "package core\n\nfunc Simple() int {\n\treturn 2\n}\n")
+	writeRepoFile(t, root, "other/other.go", "package other\n\nfunc Other() int {\n\treturn 2\n}\n")
+
+	cases := []struct {
+		root string
+		want []string
+	}{
+		{root, []string{"internal/core/core.go", "other/other.go"}},
+		{filepath.Join(root, "internal", "core"), []string{"core.go"}},
+		{filepath.Join(root, "internal", "core", "core.go"), []string{"core.go"}},
+	}
+	for _, tc := range cases {
+		changed, err := ChangedLinesFor(tc.root, "HEAD")
+		if err != nil {
+			t.Fatalf("ChangedLinesFor(%s): %v", tc.root, err)
+		}
+		if len(changed) != len(tc.want) {
+			t.Fatalf("ChangedLinesFor(%s) keys=%v, want %v", tc.root, changed, tc.want)
+		}
+		for _, key := range tc.want {
+			if len(changed[key]) == 0 {
+				t.Errorf("ChangedLinesFor(%s) missing key %q (got %v)", tc.root, key, changed)
+			}
+		}
+	}
+}
+
+// TestChangedLinesForOutsideRepoFailsLoudly: -diff needs a repository, and a
+// silent empty map would read as "nothing changed".
+func TestChangedLinesForOutsideRepoFailsLoudly(t *testing.T) {
+	if _, err := ChangedLinesFor(t.TempDir(), "HEAD"); err == nil {
+		t.Fatal("ChangedLinesFor outside a worktree succeeded, want an error")
+	}
+}
+
+// TestArchivePathsSkipsFilesAbsentAtRef covers the reason ArchivePaths exists:
+// `git archive` aborts the whole command on one unmatched pathspec, so a file
+// the change adds would otherwise take the entire base snapshot down with it.
+func TestArchivePathsSkipsFilesAbsentAtRef(t *testing.T) {
+	root := initGitRepo(t)
+	writeRepoFile(t, root, "keep/a.go", "package keep\n")
+	writeRepoFile(t, root, "added/b.go", "package added\n")
+	gitRun(t, root, "add", ".")
+	gitRun(t, root, "commit", "-q", "-m", "base")
+	gitRun(t, root, "rm", "-q", "added/b.go")
+	gitRun(t, root, "commit", "-q", "-m", "remove added")
+
+	dir, cleanup, err := ArchivePaths(root, "HEAD", []string{"keep/a.go", "added/b.go"})
+	if err != nil {
+		t.Fatalf("ArchivePaths: %v", err)
+	}
+	defer cleanup()
+	if _, err := os.Stat(filepath.Join(dir, "keep", "a.go")); err != nil {
+		t.Errorf("present path missing from the archive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "added", "b.go")); !os.IsNotExist(err) {
+		t.Errorf("removed path should not be in the archive, stat err = %v", err)
+	}
+}
+
+// TestArchivePathsWithNoSurvivingPathsIsEmptyNotAnError pins the degradation
+// the filter depends on: when every touched file is new there is nothing to
+// compare against, and that is a fact rather than a failure.
+func TestArchivePathsWithNoSurvivingPathsIsEmptyNotAnError(t *testing.T) {
+	root := initGitRepo(t)
+	writeRepoFile(t, root, "a.go", "package a\n")
+	gitRun(t, root, "add", ".")
+	gitRun(t, root, "commit", "-q", "-m", "base")
+
+	dir, cleanup, err := ArchivePaths(root, "HEAD", []string{"brand/new.go"})
+	if err != nil {
+		t.Fatalf("ArchivePaths: %v", err)
+	}
+	defer cleanup()
+	if dir != "" {
+		t.Errorf("dir = %q, want empty when nothing exists at the ref", dir)
+	}
+}
+
+// TestRepoRelativeMapsCheckRootOntoWorktree pins the join the base snapshot
+// needs: diff keys are check-root-relative while the archive is worktree
+// shaped, so a subdirectory check must not look up paths that do not exist.
+func TestRepoRelativeMapsCheckRootOntoWorktree(t *testing.T) {
+	root := initGitRepo(t)
+	writeRepoFile(t, root, "internal/core/core.go", "package core\n")
+	gitRun(t, root, "add", ".")
+	gitRun(t, root, "commit", "-q", "-m", "base")
+
+	sub := filepath.Join(root, "internal", "core")
+	if got, ok := RepoRelative(sub, "core.go"); !ok || got != "internal/core/core.go" {
+		t.Errorf("RepoRelative(sub, core.go) = %q,%v, want internal/core/core.go,true", got, ok)
+	}
+	if got, ok := RepoRelative(root, "internal/core/core.go"); !ok || got != "internal/core/core.go" {
+		t.Errorf("RepoRelative(root, ...) = %q,%v, want the path unchanged", got, ok)
+	}
+	if _, ok := RepoRelative(t.TempDir(), "a.go"); ok {
+		t.Error("RepoRelative outside a worktree reported success")
+	}
+}

@@ -49,44 +49,59 @@ type FileChange struct {
 
 // LoadChanges returns a deterministic change set for a workspace, merge-base
 // range, or single commit. Git process execution stays in this adapter.
+//
+// dir may be any path inside the worktree (including a subdirectory or a
+// single file): the query runs from the worktree root, because git reports
+// root-relative paths and resolves pathspecs against the root, so a subdirectory
+// cwd would silently match nothing.
 func LoadChanges(dir string, req ChangeRequest) ([]FileChange, error) {
-	normalized, err := resolveRequest(dir, req)
+	root := gitDir(dir)
+	normalized, err := resolveRequest(root, req)
 	if err != nil {
 		return nil, err
 	}
-	out, err := gitBytes(dir, nameStatusArgs(normalized)...)
+	out, err := gitBytes(root, nameStatusArgs(normalized)...)
 	if err != nil {
-		return nil, changedPathsError(dir, normalized, err)
+		return nil, changedPathsError(root, normalized, err)
 	}
 	changes, err := parseNameStatusZ(out)
 	if err != nil {
 		return nil, err
 	}
 	if normalized.Mode == ModeWorkspace {
-		changes, err = addUntracked(dir, changes)
+		changes, err = addUntracked(root, changes)
 		if err != nil {
 			return nil, err
 		}
 	}
 	for i := range changes {
-		if changes[i].Untracked {
-			data, readErr := os.ReadFile(joinPath(dir, changes[i].Path))
-			if readErr != nil {
-				return nil, fmt.Errorf("read untracked %s: %w", changes[i].Path, readErr)
-			}
-			changes[i].Hunks = wholeFileHunk(string(data))
-			continue
+		if err := fillHunks(root, normalized, &changes[i]); err != nil {
+			return nil, err
 		}
-		paths := changePaths(changes[i])
-		args := patchArgs(normalized, paths)
-		patch, patchErr := gitBytes(dir, args...)
-		if patchErr != nil {
-			return nil, fmt.Errorf("git diff %s: %w", changes[i].Path, patchErr)
-		}
-		changes[i].Hunks = parseUnifiedHunks(string(patch))
 	}
 	sortChanges(changes)
 	return changes, nil
+}
+
+// fillHunks attaches the added-line hunks of one change. An untracked file is
+// read from disk (its whole content is new); a tracked one is diffed against
+// the request base. Kept out of LoadChanges so the list loop stays flat under
+// the fan-out gate.
+func fillHunks(root string, req ChangeRequest, c *FileChange) error {
+	if c.Untracked {
+		data, err := os.ReadFile(joinPath(root, c.Path))
+		if err != nil {
+			return fmt.Errorf("read untracked %s: %w", c.Path, err)
+		}
+		c.Hunks = wholeFileHunk(string(data))
+		return nil
+	}
+	patch, err := gitBytes(root, patchArgs(req, changePaths(*c))...)
+	if err != nil {
+		return fmt.Errorf("git diff %s: %w", c.Path, err)
+	}
+	c.Hunks = parseUnifiedHunks(string(patch))
+	return nil
 }
 
 func resolveRequest(dir string, req ChangeRequest) (ChangeRequest, error) {
@@ -347,6 +362,17 @@ func ChangedLinesFromChanges(changes []FileChange) map[string][]diff.Range {
 	return out
 }
 
+// gitDir resolves dir to the worktree root so git queries always run from the
+// repository root. A path outside any worktree is returned unchanged, which
+// keeps the "not a git repository" error the caller expects.
+func gitDir(dir string) string {
+	if root := Root(dir); root != "" {
+		return root
+	}
+	return dir
+}
+
+// gitBytes runs git in dir ("" = process cwd).
 func gitBytes(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	if dir != "" {

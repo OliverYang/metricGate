@@ -59,6 +59,11 @@ type Finding struct {
 	// Evidence rides in result.properties and is revalidated after an edit
 	// by hashing the same byte range.
 	Evidence *Evidence `json:"evidence,omitempty"`
+	// Accepted marks a warning covered by the acceptance ledger
+	// (.metricgate/accepted.yaml): a named owner conceded it with a reason.
+	// Accepted warnings stay visible and stored but do not fail the gate.
+	// Only the CLI check path sets it; errors are never acceptable.
+	Accepted bool `json:"accepted,omitempty"`
 }
 
 // AnchorStatus records how precisely a finding's location was captured.

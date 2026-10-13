@@ -90,7 +90,7 @@ languages:
 func TestExplainPath_UnsupportedLanguage(t *testing.T) {
 	cfg, _ := LoadWithSource([]byte("version: 1\nlanguages:\n  go: {}\n"), "builtin", "")
 
-	decision := cfg.ExplainPath("foo.js")
+	decision := cfg.ExplainPath("foo.pl") // .pl is not a supported language
 	if decision.Status != "unsupported" {
 		t.Errorf("status = %q, want unsupported", decision.Status)
 	}

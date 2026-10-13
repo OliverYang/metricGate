@@ -48,6 +48,128 @@ func ChangedLines(dir, base string) (map[string][]diff.Range, error) {
 	return ChangedLinesFromChanges(changes), nil
 }
 
+// ChangedLinesFor returns added-line ranges keyed by paths relative to
+// checkRoot, for any checkRoot inside a worktree (a directory, a subdirectory,
+// or a single file). It exists because two coordinate systems meet here: git
+// reports worktree-root-relative paths, while a report scopes its file paths to
+// the check root. ChangedLines' repo-relative contract is unchanged for callers
+// that want it; this wrapper rebases each path onto checkRoot so a
+// `check <subdir> -diff` gate compares like with like instead of silently
+// hiding every finding as pre-existing.
+func ChangedLinesFor(checkRoot, base string) (map[string][]diff.Range, error) {
+	repoRoot := Root(checkRoot)
+	if repoRoot == "" {
+		return nil, fmt.Errorf("%s is not inside a git worktree (a repository is required for -diff)", checkRoot)
+	}
+	changes, err := LoadChanges(repoRoot, ChangeRequest{Mode: ModeWorkspace, Base: ResolveBase(repoRoot, base)})
+	if err != nil {
+		return nil, err
+	}
+	checkBase, err := checkBaseDir(checkRoot)
+	if err != nil {
+		return nil, err
+	}
+	return rebaseChanges(changes, repoRoot, checkBase), nil
+}
+
+// checkBaseDir resolves the directory a check root reports paths against,
+// in the same canonical space as Root: a file root reports from its parent,
+// and symlinks are resolved so the two sides of a filepath.Rel agree.
+//
+// macOS is the reason the second step is not optional: Root returns
+// /private/tmp/... while a plain filepath.Abs gives /tmp/..., and a Rel
+// between those two has no common ancestor beyond /.
+func checkBaseDir(checkRoot string) (string, error) {
+	checkBase := checkRoot
+	if info, err := os.Stat(checkRoot); err == nil && !info.IsDir() {
+		checkBase = filepath.Dir(checkRoot)
+	}
+	abs, err := filepath.Abs(checkBase)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	return abs, nil
+}
+
+// RepoRelative maps a check-root-relative path onto the worktree root, so a
+// caller that has both coordinate systems (the diff keys and a base archive)
+// can join them. It reports false when the path is not inside the worktree.
+func RepoRelative(checkRoot, path string) (string, bool) {
+	repoRoot := Root(checkRoot)
+	if repoRoot == "" {
+		return "", false
+	}
+	checkBase, err := checkBaseDir(checkRoot)
+	if err != nil {
+		return "", false
+	}
+	joined, err := filepath.Rel(repoRoot, filepath.Join(checkBase, filepath.FromSlash(path)))
+	if err != nil || filepath.IsAbs(joined) || joined == ".." || strings.HasPrefix(joined, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(joined), true
+}
+
+// rebaseChanges rewrites worktree-root-relative change paths into paths
+// relative to checkBase, dropping anything outside the check scope. Paths use
+// forward slashes so they match the engine's report paths on every platform.
+func rebaseChanges(changes []FileChange, repoRoot, checkBase string) map[string][]diff.Range {
+	out := map[string][]diff.Range{}
+	for _, c := range changes {
+		rel, ok := rebaseOne(c.NewPath, repoRoot, checkBase)
+		if !ok {
+			continue
+		}
+		for _, h := range c.Hunks {
+			if h.NewCount > 0 {
+				out[rel] = append(out[rel], diff.Range{Start: h.NewStart, End: h.NewStart + h.NewCount - 1})
+			}
+		}
+	}
+	return out
+}
+
+// rebaseOne maps one worktree-relative path onto checkBase, reporting false
+// when the path escapes the check scope (a sibling subtree, or a root that is
+// not the worktree itself).
+func rebaseOne(rel, repoRoot, checkBase string) (string, bool) {
+	if rel == "" {
+		return "", false
+	}
+	joined, err := filepath.Rel(checkBase, filepath.Join(repoRoot, filepath.FromSlash(rel)))
+	if err != nil || filepath.IsAbs(joined) || joined == ".." || strings.HasPrefix(joined, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(joined), true
+}
+
+// Root returns the canonical Git worktree root containing path, or "" when
+// path is not inside a readable Git worktree.
+func Root(path string) string {
+	if path == "" {
+		path = "."
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	if !info.IsDir() {
+		path = filepath.Dir(path)
+	}
+	root, err := run(path, "rev-parse", "--show-toplevel")
+	if err != nil || root == "" {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(resolved)
+}
+
 // parseDiff collects the "+"-side hunk ranges of unified diff text. The
 // per-line decisions (filename tracker, hunk header matcher) live in a
 // helper so this loop stays flat under the cognitive-complexity gate.
@@ -101,6 +223,58 @@ func joinPath(dir, name string) string {
 		return name
 	}
 	return dir + "/" + name
+}
+
+// ArchivePaths exports only the named repo-relative paths at ref into a fresh
+// temp directory, preserving their layout.
+//
+// It exists because the diff-aware filter only needs the base values of the
+// files the change touched. Archiving the whole tree to answer a question
+// about a handful of files costs a full second analysis of a repository that
+// may be thousands of files.
+//
+// Paths that do not exist at ref (a file added by the change) are skipped by
+// asking git which of them it knows, because `git archive` aborts the entire
+// command on one unmatched pathspec. An empty result is not an error: it
+// means every touched file is new, so there is nothing to compare against.
+func ArchivePaths(dir, ref string, paths []string) (string, func(), error) {
+	existing, err := treePaths(dir, ref, paths)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(existing) == 0 {
+		return "", func() {}, nil
+	}
+	args := append([]string{"archive", "--format=tar", ref, "--"}, existing...)
+	data, err := gitBytes(dir, args...)
+	if err != nil {
+		return "", nil, fmt.Errorf("git archive %s: %w", ref, err)
+	}
+	tmp, err := os.MkdirTemp("", "metricgate-base-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { os.RemoveAll(tmp) }
+	if err := extractTar(data, tmp); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return tmp, cleanup, nil
+}
+
+// treePaths filters paths down to the ones present in ref's tree. ls-tree
+// tolerates unmatched pathspecs (it reports them by omission), which is what
+// makes it the right pre-filter for ArchivePaths.
+func treePaths(dir, ref string, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	args := append([]string{"ls-tree", "-r", "--name-only", ref, "--"}, paths...)
+	out, err := run(dir, args...)
+	if err != nil {
+		return nil, fmt.Errorf("git ls-tree %s: %w", ref, err)
+	}
+	return strings.Fields(out), nil
 }
 
 // Archive exports the tree at ref into a fresh temp directory (repo-relative

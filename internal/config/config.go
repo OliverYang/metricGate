@@ -41,6 +41,31 @@ func (c *Config) Bans(lang string) []BanConfig {
 	return sec.Banned
 }
 
+// CustomRules returns the project's DSL rule assertions for one language:
+// rules whose languages list is empty apply to every language. Entries that
+// do not name this language are filtered out here, so the rules layer only
+// sees assertions that mean to apply.
+func (c *Config) CustomRules(lang string) []DslRuleConfig {
+	sec, ok := langSection(c, lang)
+	if !ok {
+		return nil
+	}
+	var out []DslRuleConfig
+	for _, r := range sec.CustomRules {
+		if len(r.Languages) == 0 {
+			out = append(out, r)
+			continue
+		}
+		for _, l := range r.Languages {
+			if l == lang {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // RuleConfig overrides one rule. A nil Enabled means "use the rule default".
 type RuleConfig struct {
 	Enabled  *bool          `yaml:"enabled,omitempty"`
@@ -114,11 +139,42 @@ func (m *MetricConfig) UnmarshalYAML(value *yaml.Node) error {
 type LanguageConfig struct {
 	Rules   map[string]RuleConfig   `yaml:"rules,omitempty"`
 	Metrics map[string]MetricConfig `yaml:"metrics,omitempty"`
-	Banned  []BanConfig             `yaml:"banned-api,omitempty"`
+	// TestMetrics overrides thresholds for test files only (_test.go,
+	// Test.java, test*/ dirs — the same heuristic as the gate's test
+	// detection). Tests legitimately run long and take many parameters, so
+	// a project can relax baselines here instead of excluding the files
+	// from measurement entirely.
+	TestMetrics map[string]MetricConfig `yaml:"test_metrics,omitempty"`
+	Banned      []BanConfig             `yaml:"banned-api,omitempty"`
 	// BannedSeverity is the severity every banned-api rule of this language
 	// falls back to when the rule has no severity of its own. Empty means
 	// "use each ban rule's built-in default".
 	BannedSeverity string `yaml:"banned-api-severity,omitempty"`
+	// CustomRules are the project's own pattern assertions (the rule DSL):
+	// name a tree-sitter node kind, optionally narrow it to a child field,
+	// and assert a regex over the captured text. See internal/rules/dsl.go.
+	CustomRules []DslRuleConfig `yaml:"custom_rules,omitempty"`
+}
+
+// DslRuleConfig is one user-authored rule assertion in policy.yaml.
+type DslRuleConfig struct {
+	ID           string   `yaml:"id"`
+	Title        string   `yaml:"title,omitempty"`
+	Severity     string   `yaml:"severity,omitempty"`      // error|warning|note; default warning
+	Node         string   `yaml:"node"`                    // tree-sitter node kind, e.g. call_expression
+	Field        string   `yaml:"field,omitempty"`         // child field to capture, e.g. "function"; empty = whole node
+	MatchRegex   string   `yaml:"match_regex,omitempty"`   // fire when the captured text matches (default: always)
+	ExcludeRegex string   `yaml:"exclude_regex,omitempty"` // suppress when the captured text matches this
+	Languages    []string `yaml:"languages,omitempty"`     // restrict to these languages; empty = every parsed language
+	// Files restricts the rule to matching paths. The vocabulary is the same
+	// one banned rules use for except_files/allowed_files: an exact path, a
+	// prefix ("cmd/app/"), a suffix ("_test.go"), a glob matched against
+	// the whole path or the base name, or a leading "**/" for "at any
+	// depth" ("**/*_test.go"). Empty = every file, so an existing policy
+	// behaves exactly as before.
+	Files  []string `yaml:"files,omitempty"`
+	Reason string   `yaml:"reason,omitempty"`
+	Use    string   `yaml:"use,omitempty"` // suggested replacement, shown in the finding
 }
 
 // CloneConfig tunes the duplicate-code pass (function-level Type-2 clone
@@ -150,6 +206,40 @@ type ArchConfig struct {
 	SDPTolerance float64       `yaml:"sdp_tolerance,omitempty"`
 	Layers       []arch.Layer  `yaml:"layers,omitempty"`
 	Forbid       []arch.Forbid `yaml:"forbid,omitempty"`
+	// CouplingExclude are extra path patterns the change-coupling analysis
+	// ignores on top of its built-in lock/generated/mirrored defaults. It is
+	// the project's own list of files whose co-change means nothing.
+	CouplingExclude []string `yaml:"coupling_exclude,omitempty"`
+	// Coupling gates on change coupling in -diff mode: a pair of changed files
+	// that habitually change together across a declared layer boundary. It is
+	// the erosion signal the dependency graph cannot see — the layering rule
+	// still passes while the two files already move as one unit.
+	Coupling CouplingGate `yaml:"coupling,omitempty"`
+}
+
+// CouplingGate configures the change-coupling gate. The zero value is the
+// documented off switch: no coupling gate runs unless a policy asks for one.
+type CouplingGate struct {
+	// Enabled turns the check on. It is off by default because coupling is a
+	// process signal, not a code defect, and a team should opt in after
+	// looking at its own ranking once.
+	Enabled bool `yaml:"enabled"`
+	// MinCount is how many shared commits make a pair habitual (0 = 5).
+	MinCount int `yaml:"min_count,omitempty"`
+	// Since limits the history window ("3.months ago"; empty = all history).
+	Since string `yaml:"since,omitempty"`
+	// MaxCommitFiles drops sweep commits (0 = 12).
+	MaxCommitFiles int `yaml:"max_commit_files,omitempty"`
+	// Severity of a cross-layer coupling finding (default warning).
+	Severity string `yaml:"severity,omitempty"`
+}
+
+// CouplingSeverity resolves the configured severity for a coupling finding.
+func (c *Config) CouplingSeverity() model.Severity {
+	if c.Architecture.Coupling.Severity == "" {
+		return model.SevWarning
+	}
+	return model.Severity(c.Architecture.Coupling.Severity)
 }
 
 // DepsConfig declares the dependencies a repository has already accepted, so
@@ -188,6 +278,17 @@ type Config struct {
 	// presetKeys are the dotted keys the active preset supplied. They are the
 	// preset's half of provenance: ValueSource reports them as "preset:<name>".
 	presetKeys map[string]bool
+	// inherited is the dotted-key attribution of the documents this policy
+	// extends, keyed by key and pointing at the nearest parent that wrote it.
+	// It exists so provenance stays honest once inheritance lands: a threshold
+	// the repository never wrote must not be reported as the repository's.
+	inherited map[string]string
+	// extendsChain is the chain of parent documents, nearest first.
+	extendsChain []ExtendsSource
+	// effective is the document actually in force after inheritance is folded
+	// in. It is nil unless this policy extends another, and it is the bytes
+	// the policy digest is taken over — see PolicyDocument.
+	effective []byte
 }
 
 // Default returns the built-in policy. It always parses; the error return
@@ -206,6 +307,17 @@ func Load(data []byte) (*Config, error) {
 // explain/report consumers. Existing Config values and YAML semantics are
 // unchanged; provenance is metadata, not a second policy layer.
 func LoadWithSource(data []byte, source, sourcePath string) (*Config, error) {
+	// Inheritance is resolved before anything looks at the document, so every
+	// later step (parse, key collection, provenance, the preset overlay) sees
+	// one document: the effective one. A policy with no `extends:` key takes an
+	// untouched path through here and produces byte-identical behaviour.
+	ext, err := resolveExtends(data, sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	if ext.effective != nil {
+		data = ext.effective
+	}
 	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse policy: %w", err)
@@ -229,8 +341,27 @@ func LoadWithSource(data []byte, source, sourcePath string) (*Config, error) {
 	c.SourceKind = source
 	c.SourcePath = sourcePath
 	c.ExplicitKeys = map[string]bool{}
+	c.inherited = map[string]string{}
+	c.effective = ext.effective
+	for _, parent := range ext.parents {
+		c.extendsChain = append(c.extendsChain, ExtendsSource{Path: parent.path})
+		for key := range parent.keys {
+			// Nearest parent wins: that is the document a reader will open to
+			// find out why this value is what it is.
+			if _, seen := c.inherited[key]; !seen {
+				c.inherited[key] = parent.path
+			}
+		}
+	}
 	if len(doc.Content) > 0 {
 		collectYAMLKeys(doc.Content[0], "", c.ExplicitKeys)
+	}
+	// A key the repository wrote itself always beats any parent, even one the
+	// effective document also carries through a merge. ownKeys is the leaf's
+	// own contribution to the effective document, so an overridden parent key
+	// is attributed to the child that overrode it and not to the parent.
+	for key := range ext.ownKeys {
+		delete(c.inherited, key)
 	}
 	// The preset is overlaid after the explicit keys are known, so it can tell
 	// "the repository wrote this" from "nobody wrote this yet".
@@ -266,11 +397,19 @@ func (c *Config) Explicit(key string) bool { return c != nil && c.ExplicitKeys[k
 
 // ValueSource returns the configured source if the key was explicitly
 // present, otherwise the supplied built-in source label. A key supplied by the
-// active preset reports "preset:<name>", so a preset can never masquerade as a
-// built-in default.
+// active preset reports "preset:<name>", and a key carried in from a parent
+// document reports that parent's path, so a preset or an inheritred policy can
+// never masquerade as something it is not.
 func (c *Config) ValueSource(key, builtin string) (source, path string, explicit bool) {
 	if c == nil {
 		return builtin, "", false
+	}
+	// Inheritance is checked before the document's own keys because an
+	// inherited value is the more specific provenance: the effective document
+	// carries a parent's key verbatim, so an "explicit" test alone would credit
+	// the child for a threshold it never wrote.
+	if parent, ok := c.inherited[key]; ok {
+		return "extends", parent, true
 	}
 	if c.SourceKind != "builtin" && c.Explicit(key) {
 		return c.SourceKind, c.SourcePath, true
@@ -279,6 +418,38 @@ func (c *Config) ValueSource(key, builtin string) (source, path string, explicit
 		return "preset:" + c.Preset, "", true
 	}
 	return builtin, "", false
+}
+
+// Extends returns the chain of documents this policy extends, nearest parent
+// first, with the keys each one contributed. A policy that extends nothing
+// returns nil, so callers never have to distinguish "no inheritance" from
+// "inheritance with an empty parent".
+func (c *Config) Extends() []ExtendsSource {
+	if c == nil {
+		return nil
+	}
+	return c.extendsChain
+}
+
+// ExtendsSource is one parent document in a chain, for `rules explain` to
+// report where an inherited value came from.
+type ExtendsSource struct {
+	Path string `json:"path"`
+}
+
+// PolicyDocument returns the effective policy document — the bytes actually in
+// force after `extends:` inheritance is folded in — or nil when no inheritance
+// happened (in which case the loaded file itself is the effective document).
+//
+// Callers that fingerprint a policy should prefer this over re-reading the
+// source path, because a child policy and its parent enforce different rules
+// and must therefore fingerprint differently. See bundle.PolicyDigest, which
+// already does this.
+func (c *Config) PolicyDocument() []byte {
+	if c == nil {
+		return nil
+	}
+	return c.effective
 }
 
 // LoadFile reads and parses a policy file from disk, preserving its path for
@@ -441,4 +612,36 @@ func (c *Config) ArchSeverity(kind string) model.Severity {
 		return model.SevWarning
 	}
 	return model.Severity(value)
+}
+
+// TestMetricThresholds returns the configured thresholds for a metric on
+// test files. Zero values mean "no test override; the regular resolution
+// (default, then metrics override) applies". A test_metrics entry never
+// *tightens* semantics away from the regular path — it is resolved first by
+// the engine, which falls back to EffectiveThresholds when no override
+// exists for a level.
+func (c *Config) TestMetricThresholds(lang, metricID string) (warn, errAt int, enabled *bool) {
+	sec, ok := langSection(c, lang)
+	if !ok {
+		return 0, 0, nil
+	}
+	mc, ok := sec.TestMetrics[metricID]
+	if !ok {
+		return 0, 0, nil
+	}
+	return mc.Warn, mc.Error, mc.Enabled
+}
+
+// TestMetricOff reports an explicit `warn: off` / `error: off` under
+// test_metrics for the metric.
+func (c *Config) TestMetricOff(lang, metricID string) (warnOff, errOff bool) {
+	sec, ok := langSection(c, lang)
+	if !ok {
+		return false, false
+	}
+	mc, ok := sec.TestMetrics[metricID]
+	if !ok {
+		return false, false
+	}
+	return mc.WarnOff, mc.ErrorOff
 }

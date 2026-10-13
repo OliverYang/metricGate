@@ -121,6 +121,22 @@ func detectLanguage(relPath string) string {
 		return "go"
 	case ".java":
 		return "java"
+	case ".ts", ".mts", ".cts":
+		return "typescript"
+	case ".tsx":
+		return "tsx"
+	case ".js", ".mjs", ".cjs", ".jsx":
+		return "javascript"
+	case ".py":
+		return "python"
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx":
+		return "cpp"
+	case ".cs":
+		return "csharp"
+	case ".rs":
+		return "rust"
 	default:
 		return ""
 	}
@@ -169,7 +185,31 @@ func (c *Config) ExplainRule(lang, ruleID string) RuleExplain {
 	if strings.HasPrefix(ruleID, "banned-") {
 		return c.explainBanEntry(lang)
 	}
+	// Custom DSL rules live under custom_rules, not rules.<id>; report the
+	// assertion's own fields so `rules explain` stays a complete inventory.
+	for _, cr := range sec.CustomRules {
+		if "custom."+strings.TrimSpace(cr.ID) == ruleID {
+			// The prose documents where an inherited rule came from, but the
+			// structured field keeps the same vocabulary as every other entry:
+			// "policy_file" is what a JSON consumer must see for a real rule.
+			return RuleExplain{
+				Enabled: true, Reason: "custom_rule", PolicySource: "policy_file",
+				Severity: firstNonEmpty(cr.Severity, "warning"),
+				Note:     c.extendsNote(),
+			}
+		}
+	}
 	return RuleExplain{Reason: "rule_not_found"}
+}
+
+// firstNonEmpty returns the first string that is not empty.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // explainRuleEntry reports a rule configured under rules.<id>. A listed rule is
@@ -236,6 +276,10 @@ type RuleExplain struct {
 	Severity     string
 	Thresholds   MetricThresholds
 	PolicySource string
+	// Note is free text that qualifies PolicySource without replacing it: the
+	// custom-rule entry uses it to name the parent documents an inherited rule
+	// came from, which PolicySource's fixed vocabulary cannot express.
+	Note string
 }
 
 // MetricThresholds holds the warn/error thresholds for a metric. A WarnOff
@@ -254,4 +298,19 @@ func (c *Config) ExplainAllPaths(root string) ([]*ExplainDecision, error) {
 	// This will be implemented in engine layer to avoid importing filepath.Walk here
 	// For now, return empty slice
 	return []*ExplainDecision{}, nil
+}
+
+// extendsNote names the parent documents this policy inherits from, or "" when
+// it extends nothing. It is prose, because the structured PolicySource
+// vocabulary is fixed and adding "extends" to it would break every consumer
+// that switches on the existing values.
+func (c *Config) extendsNote() string {
+	paths := make([]string, 0, len(c.Extends()))
+	for _, p := range c.Extends() {
+		paths = append(paths, p.Path)
+	}
+	if len(paths) == 0 {
+		return ""
+	}
+	return "inherits from: " + strings.Join(paths, ", ")
 }

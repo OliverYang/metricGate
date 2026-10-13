@@ -10,6 +10,36 @@ import (
 	"metricgate/internal/diff"
 )
 
+func TestRootReturnsCanonicalGitRoot(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	file := filepath.Join(dir, "source.go")
+	if err := os.WriteFile(file, []byte("package sample"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Root(file)
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != resolved {
+		t.Fatalf("Root(%q) = %q, want %q", file, got, resolved)
+	}
+}
+
+func TestRootUnassignedOutsideGit(t *testing.T) {
+	if got := Root(t.TempDir()); got != "" {
+		t.Fatalf("Root outside git = %q", got)
+	}
+}
+
 // TestChangedLines builds a real git repo: a base commit, then a working tree
 // that replaces one base line with three lines and adds an untracked file. The
 // changed-line ranges must reflect exactly that.
