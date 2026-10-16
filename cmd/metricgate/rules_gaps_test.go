@@ -20,7 +20,7 @@ const gapsGoSource = "package main\n\nfunc main() {\n\tprintln(1)\n}\n"
 func writeGapsFixture(t *testing.T, policy string) (dir, policyPath string) {
 	t.Helper()
 	dir = t.TempDir()
-	policyPath = filepath.Join(dir, "policy.yaml")
+	policyPath = filepath.Join(dir, ".metricgate.yaml")
 	writeGapsFile(t, policyPath, policy)
 	writeGapsFile(t, filepath.Join(dir, "main.go"), gapsGoSource)
 	return dir, policyPath

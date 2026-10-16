@@ -158,7 +158,7 @@
 
 ### 文档资料收集清单
 
-- [ ] policy.yaml (现有策略文件)
+- [ ] .metricgate.yaml (现有策略文件)
 - [ ] README.md (项目说明)
 - [ ] docs/architecture.md (架构文档)
 - [ ] SECURITY.md (安全规范)

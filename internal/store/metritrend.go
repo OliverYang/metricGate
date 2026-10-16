@@ -83,7 +83,12 @@ func (s *Store) scanMetricTrend(t *MetricTrend, w Window) error {
 	      FROM metric_snapshots s JOIN runs r ON r.id = s.run_id
 	      WHERE s.run_id IN (` + runsQ + `)
 	      ORDER BY r.started_at ASC, r.id ASC`
-	args := append(append([]any{}, filterArgs...))
+	// Copied before extending: the LIMIT ? value is appended to this list, and
+	// appending onto filterArgs itself would write through the slice runFilter
+	// handed back. The one-append-per-line shape is also what keeps
+	// `go vet ./...` quiet -- `append(filterArgs...)` with no values is the
+	// "append with no values" defect this line used to carry.
+	args := append([]any{}, filterArgs...)
 	if w.Limit > 0 {
 		args = append(args, w.Limit)
 	}

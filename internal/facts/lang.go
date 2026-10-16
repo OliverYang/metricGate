@@ -1,4 +1,4 @@
-// Symbol extraction for the seven languages whose declaration shapes differ
+// Symbol extraction for the ten languages whose declaration shapes differ
 // from Go's and Java's (see extractGo/extractJava in facts.go).
 //
 // The extraction is table-driven: each language declares which node kinds are
@@ -38,6 +38,19 @@ type declSpec struct {
 	// function. It keeps `const helper = () => …` in the index without
 	// indexing every other module-level constant as API surface.
 	FuncValue bool
+	// NameFunc resolves the name when the grammar keeps it outside a field:
+	// inside a wrapper node (SQL's object_reference, Verilog's module_header),
+	// or absent altogether. It takes precedence over Name.
+	NameFunc func(src []byte, n *sitter.Node) string
+	// Recurse descends into the declaration as well as recording it, for
+	// grammars whose container is itself a declaration: a Verilog module holds
+	// functions and tasks, a VB class holds methods. The declaration's own
+	// name becomes the receiver of everything inside it.
+	Recurse bool
+	// BodyFunc locates the body when the grammar has no `body` field, so the
+	// signature can stop where the body starts. SQL and Verilog wrap the body
+	// in a named child; VB simply follows the header with `statement` nodes.
+	BodyFunc func(n *sitter.Node) *sitter.Node
 }
 
 // langSpec is one language's extraction table.
@@ -139,6 +152,60 @@ func cppDecls() map[string]declSpec {
 	return d
 }
 
+// sqlDecls is SQL's table: the DDL objects that name something plus the two
+// procedural units. A column is not API surface of a database the way a
+// function is, so table contents are not indexed. Both `create_function` and
+// `create_procedure` keep their name in an object_reference child and their
+// body in a sibling node, hence NameFunc/BodyFunc.
+func sqlDecls() map[string]declSpec {
+	return map[string]declSpec{
+		"create_function":  {Kind: "function", NameFunc: sqlDeclName, BodyFunc: sqlBodyOf},
+		"create_procedure": {Kind: "procedure", NameFunc: sqlDeclName, BodyFunc: sqlBodyOf},
+		"create_table":     {Kind: "table", NameFunc: sqlDeclName},
+		"create_view":      {Kind: "view", NameFunc: sqlDeclName},
+		"create_schema":    {Kind: "schema", NameFunc: sqlSchemaName},
+		"create_index":     {Kind: "index", NameFunc: sqlIndexName},
+	}
+}
+
+// verilogDecls is SystemVerilog's table. The grammar attaches no name field to
+// any declaration, so every name comes from NameFunc. Modules, packages,
+// programs, interfaces and classes recurse: they hold the functions and tasks
+// that are the units of behaviour.
+func verilogDecls() map[string]declSpec {
+	return map[string]declSpec{
+		"module_declaration":            {Kind: "module", NameFunc: verilogDeclName, Recurse: true},
+		"interface_declaration":         {Kind: "interface", NameFunc: verilogDeclName, Recurse: true},
+		"package_declaration":           {Kind: "package", NameFunc: verilogDeclName, Recurse: true},
+		"program_declaration":           {Kind: "program", NameFunc: verilogDeclName, Recurse: true},
+		"class_declaration":             {Kind: "class", NameFunc: verilogDeclName, Recurse: true},
+		"function_declaration":          {Kind: "function", NameFunc: verilogDeclName, BodyFunc: verilogBodyOf},
+		"task_declaration":              {Kind: "task", NameFunc: verilogDeclName, BodyFunc: verilogBodyOf},
+		"class_constructor_declaration": {Kind: "constructor", NameFunc: verilogCtorName, BodyFunc: verilogBodyOf},
+	}
+}
+
+// vbDecls is VB.NET's table. Blocks are declarations that recurse, so a class's
+// methods are indexed with the class as their receiver; a field's name is one
+// level down in its variable_declarator, which varDeclaratorName reaches.
+func vbDecls() map[string]declSpec {
+	return map[string]declSpec{
+		"class_block":             {Kind: "class", Name: "name", Recurse: true},
+		"module_block":            {Kind: "module", Name: "name", Recurse: true},
+		"structure_block":         {Kind: "struct", Name: "name", Recurse: true},
+		"interface_block":         {Kind: "interface", Name: "name", Recurse: true},
+		"enum_block":              {Kind: "enum", Name: "name", Recurse: true},
+		"enum_member":             {Kind: "field", Name: "name"},
+		"method_declaration":      {Kind: "function", Name: "name", BodyFunc: vbBodyOf},
+		"constructor_declaration": {Kind: "constructor", NameFunc: vbCtorName, BodyFunc: vbBodyOf},
+		"property_declaration":    {Kind: "property", Name: "name"},
+		"field_declaration":       {Kind: "field"},
+		"delegate_declaration":    {Kind: "delegate", Name: "name"},
+		"event_declaration":       {Kind: "event", Name: "name"},
+		"const_declaration":       {Kind: "const", Name: "name"},
+	}
+}
+
 // langSpecs is the extraction table for every language that has one. Go and
 // Java keep their dedicated extractors (they carry receiver and modifier
 // semantics a table cannot express).
@@ -187,6 +254,30 @@ var langSpecs = map[parser.LanguageID]langSpec{
 		Containers: setOf("declaration_list", "impl_item"),
 		OwnerKinds: map[string]string{"impl_item": "type"},
 		Vis:        rustVis,
+	},
+	// SQL is DDL plus a thin procedural layer (see sqlDecls). A declaration is
+	// wrapped in a `statement` node, so that has to be a container or the
+	// walker never reaches `create_function`.
+	parser.LangSQL: {
+		Decls:      sqlDecls(),
+		Containers: setOf("statement"),
+		Vis:        sqlVis,
+	},
+	// SystemVerilog has no name fields at all (see verilogDecls).
+	parser.LangVerilog: {
+		Decls: verilogDecls(),
+		Containers: setOf(
+			"module_or_generate_item", "package_or_generate_item_declaration",
+			"non_port_program_item", "interface_or_generate_item",
+			"module_common_item", "class_item", "class_method", "generate_region",
+		),
+		Vis: verilogVis,
+	},
+	// VB.NET blocks recurse, so a class's members carry the class as receiver.
+	parser.LangVB: {
+		Decls:      vbDecls(),
+		Containers: setOf("namespace_block", "type_declaration", "declaration_list"),
+		Vis:        vbVis,
 	},
 }
 
@@ -243,6 +334,14 @@ func (w *langWalker) descend(n *sitter.Node, owner string) {
 			if sym, keep := w.symbol(c, d, owner); keep {
 				w.f.Symbols = append(w.f.Symbols, sym)
 			}
+			if d.Recurse {
+				// The container is itself a declaration: its name owns the
+				// declarations inside it (a Verilog module's functions, a VB
+				// class's methods).
+				if name := w.name(c, d); name != "" {
+					w.descend(c, name)
+				}
+			}
 			continue
 		}
 		if w.spec.Containers[c.Kind()] {
@@ -276,7 +375,7 @@ func (w *langWalker) symbol(n *sitter.Node, d declSpec, owner string) (Symbol, b
 		Kind:       d.Kind,
 		Name:       name,
 		Receiver:   owner,
-		Signature:  w.signature(n),
+		Signature:  w.signature(n, d),
 		Visibility: w.spec.Vis(w.src, n, name),
 		StartLine:  line(n),
 	}
@@ -320,11 +419,15 @@ func (w *langWalker) members(body *sitter.Node, owner string) []Symbol {
 	return out
 }
 
-// name resolves a declaration's name: the named field when the grammar has
-// one, the `type` field for owner containers, the declarator chain for C/C++
+// name resolves a declaration's name: a language-supplied resolver when the
+// grammar keeps it outside a field, the named field when the grammar has one,
+// the `type` field for owner containers, the declarator chain for C/C++
 // (where the name lives inside a nested declarator), and the first variable
-// declarator for C# fields (whose declaration node has no fields at all).
+// declarator for C#/VB fields (whose declaration node has no fields at all).
 func (w *langWalker) name(n *sitter.Node, d declSpec) string {
+	if d.NameFunc != nil {
+		return d.NameFunc(w.src, n)
+	}
 	if d.NameFromType {
 		return oneline(text(w.src, n.ChildByFieldName("type")), 60)
 	}
@@ -357,10 +460,14 @@ func varDeclaratorName(src []byte, n *sitter.Node) string {
 }
 
 // signature is the declaration text up to (excluding) its body, on one line.
-func (w *langWalker) signature(n *sitter.Node) string {
+func (w *langWalker) signature(n *sitter.Node, d declSpec) string {
 	end := n.EndByte()
 	if body := n.ChildByFieldName("body"); body != nil {
 		end = body.StartByte()
+	} else if d.BodyFunc != nil {
+		if body := d.BodyFunc(n); body != nil {
+			end = body.StartByte()
+		}
 	}
 	return oneline(string(w.src[n.StartByte():end]), 160)
 }
@@ -474,4 +581,146 @@ func rustVis(src []byte, n *sitter.Node, name string) string {
 		}
 	}
 	return "private"
+}
+
+// sqlVis: SQL has no visibility modifiers. Every object the grammar names at
+// the top level is part of the schema's surface, so nothing is hidden.
+func sqlVis(src []byte, n *sitter.Node, name string) string { return "exported" }
+
+// sqlDeclName reads the name of a SQL declaration. `CREATE FUNCTION pick …`
+// puts the name in an object_reference child rather than in a field of the
+// declaration, and object_reference itself keeps it in the `name` field
+// (schema and database are separate fields).
+func sqlDeclName(src []byte, n *sitter.Node) string {
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		if c.Kind() == "object_reference" {
+			if name := text(src, c.ChildByFieldName("name")); name != "" {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// sqlSchemaName reads the name of `CREATE SCHEMA app`, which the grammar
+// stores as a bare identifier child.
+func sqlSchemaName(src []byte, n *sitter.Node) string {
+	return firstKind(src, n, "identifier")
+}
+
+// sqlIndexName reads the name of `CREATE INDEX idx ON t (c)`. The grammar puts
+// the index's own name in the `column` field of create_index, which reads
+// oddly but is the field the name is in; the table it indexes is a separate
+// object_reference.
+func sqlIndexName(src []byte, n *sitter.Node) string {
+	return text(src, n.ChildByFieldName("column"))
+}
+
+// verilogVis: SystemVerilog's only access control is the `local`/`protected`
+// qualifier on a class member. `localparam` is a constant, not a qualifier on a
+// declaration, so it is deliberately not matched here.
+func verilogVis(src []byte, n *sitter.Node, name string) string {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		switch c := n.Child(i); c.Kind() {
+		case "class_item_qualifier", "method_qualifier":
+			switch text(src, c) {
+			case "local", "protected":
+				return "private"
+			}
+		}
+	}
+	return "exported"
+}
+
+// verilogDeclName reads the name of a SystemVerilog declaration. The grammar
+// attaches no name field to any of them: the name sits one or two wrapper
+// levels down in a `simple_identifier`, and each declaration kind has its own
+// wrapper (`module_header`, `function_identifier`, `task_identifier`,
+// `class_identifier`, `interface_identifier`, …). Rather than enumerate the
+// wrappers this takes the first simple_identifier in the subtree, which is
+// always the declaration's own name: ports and body items come later.
+func verilogDeclName(src []byte, n *sitter.Node) string {
+	return firstKind(src, n, "simple_identifier")
+}
+
+// firstKind returns the text of the first node of the given kind anywhere
+// below n, in source order.
+func firstKind(src []byte, n *sitter.Node, kind string) string {
+	if n == nil {
+		return ""
+	}
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		if c.Kind() == kind {
+			return text(src, c)
+		}
+		if name := firstKind(src, c, kind); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// vbVis: VB's modifiers. `Friend` is assembly-scoped, which maps onto the
+// package visibility the other languages use. An unmarked declaration is
+// reported as exported rather than guessed at, for the same reason csVis does
+// it.
+func vbVis(src []byte, n *sitter.Node, name string) string {
+	mods := modifiersText(src, n)
+	switch {
+	case strings.Contains(mods, "Private"):
+		return "private"
+	case strings.Contains(mods, "Protected"), strings.Contains(mods, "Friend"):
+		return "package"
+	default:
+		return "exported"
+	}
+}
+
+// vbCtorName names a VB constructor. `Sub New` carries no name field, so the
+// convention `New` is used; the receiver (the enclosing class) already
+// disambiguates it, which is how the other languages' constructors read too.
+func vbCtorName(src []byte, n *sitter.Node) string { return "New" }
+
+// verilogCtorName names a SystemVerilog class constructor. `function new(…)`
+// has no name of its own, so the convention `new` is used; the receiver (the
+// class) disambiguates it.
+func verilogCtorName(src []byte, n *sitter.Node) string { return "new" }
+
+// sqlBodyOf returns the body child of a SQL routine: the grammar puts the
+// body in a `function_body`/`procedure_body` child rather than in a field.
+func sqlBodyOf(n *sitter.Node) *sitter.Node {
+	return firstChildOfKind(n, "function_body", "procedure_body")
+}
+
+// verilogBodyOf returns the first body item of a SystemVerilog routine. The
+// declaration wraps a `*_body_declaration` that holds both the header (data
+// type, name, ports) and the statements, so the signature must start inside it:
+// returning the wrapper itself would cut the signature off before the name.
+func verilogBodyOf(n *sitter.Node) *sitter.Node {
+	decl := firstChildOfKind(n, "function_body_declaration", "task_body_declaration")
+	if decl == nil {
+		return nil
+	}
+	return firstChildOfKind(decl, "function_statement_or_null", "statement_or_null", "block_item_declaration")
+}
+
+// vbBodyOf returns the first statement of a VB routine. VB has no body node:
+// a method is its header followed by a flat list of `statement` children.
+func vbBodyOf(n *sitter.Node) *sitter.Node {
+	return firstChildOfKind(n, "statement")
+}
+
+// firstChildOfKind returns the first child of one of the given kinds.
+func firstChildOfKind(n *sitter.Node, kinds ...string) *sitter.Node {
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		for _, k := range kinds {
+			if c.Kind() == k {
+				return c
+			}
+		}
+	}
+	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -25,7 +26,14 @@ import (
 	"metricgate/internal/symbols"
 )
 
-const toolVersion = "0.1.0"
+// toolVersion is the declared release version. It is a var, not a const, so a
+// release build can override it with
+// -ldflags "-X main.toolVersion=v1.5.0" (the symbol is main.toolVersion — the
+// package is `main` even though it lives in cmd/metricgate) without editing
+// source; a local build keeps the fallback below. `metricgate version` prints
+// this alongside buildStamp(), which reports the VCS revision actually linked
+// in — the constant alone could not distinguish two builds of the same version.
+var toolVersion = "0.1.0"
 
 // commands maps each subcommand to its entry point. A table keeps main a
 // three-branch dispatcher no matter how many subcommands accumulate, instead
@@ -52,6 +60,7 @@ var commands = map[string]func([]string){
 	"coupling":     cmdCoupling,
 	"reachability": cmdReachability,
 	"trends":       cmdTrends,
+	"trace":        cmdTrace,
 	"calls":        cmdCalls,
 	"deps":         cmdDeps,
 	"accept":       cmdAccept,
@@ -76,7 +85,53 @@ func main() {
 
 // cmdVersion prints the tool version.
 func cmdVersion([]string) {
-	fmt.Println("metricgate", toolVersion)
+	fmt.Println("metricgate", toolVersion, buildStamp())
+}
+
+// buildStamp identifies the build that is actually running, not the one the
+// version constant claims.
+//
+// toolVersion is a source-level fallback, so every local build prints the same
+// version string. That made "am I running the binary I just built?" unanswerable from
+// the outside: a stale binary in PATH and a fresh one in the repo root report
+// identically, and the only visible difference is the symptom - an old UI, or
+// a check that does not know about a rule you just added. Go already records
+// the VCS revision at link time, so the answer is to print it.
+//
+// The revision is suffixed with "+dirty" when the working tree had uncommitted
+// changes at build time, because a revision alone would otherwise suggest the
+// binary matches that commit exactly.
+func buildStamp() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "(unknown build)"
+	}
+	revision, dirty := "", false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			dirty = setting.Value == "true"
+		}
+	}
+	return formatBuildStamp(revision, dirty)
+}
+
+// formatBuildStamp is the pure half, split out so the truncation and the dirty
+// suffix are testable without controlling how the test binary was linked.
+func formatBuildStamp(revision string, dirty bool) string {
+	if revision == "" {
+		// `go run` and `go test` build without VCS stamping.
+		return "(no vcs stamp)"
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if dirty {
+		return revision + "+dirty"
+	}
+	return revision
 }
 
 func fail(err error) {
@@ -104,7 +159,7 @@ func dispatch(name, usage string, args []string, subs map[string]func([]string))
 // The path is either an explicit -config value or empty. An empty value starts
 // the discovery search at root (see configpath), so a command run against
 // another repository reads that repository's policy instead of whatever
-// "policy.yaml" happens to sit in the process working directory.
+// ".metricgate.yaml" happens to sit in the process working directory.
 func loadPolicy(path string) (*config.Config, error) {
 	return loadPolicyFor(path, ".")
 }
@@ -283,7 +338,7 @@ func cmdInit(args []string) {
 	set := flag.NewFlagSet("init", flag.ExitOnError)
 	preset := set.String("preset", "", "start from a built-in gate tuning (see: metricgate rules presets)")
 	parseArgs(set, args)
-	target := "policy.yaml"
+	target := ".metricgate.yaml"
 	if set.NArg() > 0 {
 		target = set.Arg(0)
 	}

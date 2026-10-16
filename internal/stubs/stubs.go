@@ -59,6 +59,17 @@ func Detect(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID) 
 		items = detectCS(file, src, root)
 	case parser.LangRust:
 		items = detectRust(file, src, root)
+	case parser.LangVB:
+		items = detectVB(file, src, root)
+	case parser.LangVerilog:
+		items = detectVerilog(file, src, root)
+	case parser.LangSQL:
+		// SQL has no stub surface this grammar can see: the routine body is a
+		// single query, there is no `throw` equivalent, and the PL/pgSQL
+		// `RAISE EXCEPTION` form does not parse (it lands in an ERROR node).
+		// Spelled out rather than left to the missing default so that "not
+		// implemented" stays distinguishable from "nothing found".
+		return nil
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Line < items[j].Line })
 	return items
@@ -122,6 +133,40 @@ func text(src []byte, n *sitter.Node) string {
 }
 
 func line(n *sitter.Node) int { return int(n.StartPosition().Row) + 1 }
+
+// firstChildOfKind returns the first child of one of the given kinds.
+func firstChildOfKind(n *sitter.Node, kinds ...string) *sitter.Node {
+	if n == nil {
+		return nil
+	}
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		for _, k := range kinds {
+			if c.Kind() == k {
+				return c
+			}
+		}
+	}
+	return nil
+}
+
+// firstDescendantText returns the text of the first node of the given kind
+// anywhere below n, in source order.
+func firstDescendantText(src []byte, n *sitter.Node, kind string) string {
+	if n == nil {
+		return ""
+	}
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		if c.Kind() == kind {
+			return text(src, c)
+		}
+		if s := firstDescendantText(src, c, kind); s != "" {
+			return s
+		}
+	}
+	return ""
+}
 
 // compact strips all whitespace so multi-line empty bodies normalize to "{}".
 func compact(s string) string {
@@ -463,6 +508,130 @@ func detectCS(file string, src []byte, root *sitter.Node) []Item {
 // detectRust is the Rust arm: a function whose block body is empty is an
 // empty stub, and a body with an unimplemented!/todo! macro is the Rust
 // placeholder idiom.
+// detectVB finds VB placeholders: a routine whose header is followed by no
+// statements at all, and the `Throw New NotImplementedException()` idiom.
+//
+// VB has no body node, so "empty" means "no `statement` children" — the same
+// flat list the metrics and clone passes read.
+func detectVB(file string, src []byte, root *sitter.Node) []Item {
+	var items []Item
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		switch n.Kind() {
+		case "method_declaration", "constructor_declaration":
+			sym := text(src, n.ChildByFieldName("name"))
+			if sym == "" && n.Kind() == "constructor_declaration" {
+				sym = "New"
+			}
+			if noStatementChildren(n) {
+				items = append(items, Item{File: file, Line: line(n), Symbol: sym, Kind: KindEmpty})
+			}
+		case "throw_statement":
+			if msg := vbThrowStubMessage(src, n); msg != "" {
+				items = append(items, Item{File: file, Line: line(n), Kind: KindUnsupported, Detail: msg})
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return items
+}
+
+// noStatementChildren reports whether a VB routine has an empty body.
+func noStatementChildren(n *sitter.Node) bool {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if n.Child(i).Kind() == "statement" {
+			return false
+		}
+	}
+	return true
+}
+
+// vbThrowStubMessage returns the exception name when a Throw statement names
+// one of the placeholder exceptions.
+func vbThrowStubMessage(src []byte, n *sitter.Node) string {
+	bt := text(src, n)
+	for _, name := range []string{"NotImplementedException", "NotSupportedException"} {
+		if strings.Contains(bt, name) {
+			return name
+		}
+	}
+	return ""
+}
+
+// detectVerilog finds SystemVerilog placeholders: a routine whose body
+// declaration holds no statements, and the `$fatal`/`$error` stub idiom.
+//
+// A routine with no statements is legal and common in interface and class
+// bodies, which is exactly why it is worth reporting.
+func detectVerilog(file string, src []byte, root *sitter.Node) []Item {
+	var items []Item
+	var walk func(n *sitter.Node)
+	walk = func(n *sitter.Node) {
+		switch n.Kind() {
+		case "function_declaration", "task_declaration", "class_constructor_declaration":
+			sym := verilogSymbolName(src, n)
+			if decl := firstChildOfKind(n, "function_body_declaration", "task_body_declaration"); decl != nil {
+				if noVerilogStatements(decl) {
+					items = append(items, Item{File: file, Line: line(decl), Symbol: sym, Kind: KindEmpty})
+				}
+			}
+		case "system_tf_call":
+			if msg := verilogFatalMessage(src, n); msg != "" {
+				items = append(items, Item{File: file, Line: line(n), Kind: KindUnsupported, Detail: msg})
+			}
+		}
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(root)
+	return items
+}
+
+// noVerilogStatements reports whether a body declaration holds no statements.
+// The header lives in the same node, so the test is on the statement kinds
+// rather than on the child count.
+func noVerilogStatements(decl *sitter.Node) bool {
+	for i := uint(0); i < decl.ChildCount(); i++ {
+		switch decl.Child(i).Kind() {
+		case "function_statement_or_null", "statement_or_null", "block_item_declaration":
+			return false
+		}
+	}
+	return true
+}
+
+// verilogFatalMessage returns the system task name when a call is one of the
+// simulation-fatal placeholders.
+func verilogFatalMessage(src []byte, n *sitter.Node) string {
+	name := text(src, firstChildOfKind(n, "system_tf_identifier"))
+	switch name {
+	case "$fatal", "$error", "$stop":
+		return name
+	}
+	return ""
+}
+
+// verilogSymbolName reads the identifier out of a SystemVerilog declaration,
+// which nests it behind a wrapper node rather than a field.
+func verilogSymbolName(src []byte, n *sitter.Node) string {
+	if n.Kind() == "class_constructor_declaration" {
+		return "new"
+	}
+	decl := firstChildOfKind(n, "function_body_declaration", "task_body_declaration")
+	if decl == nil {
+		return ""
+	}
+	if id := firstChildOfKind(decl, "function_identifier", "task_identifier"); id != nil {
+		return firstDescendantText(src, id, "simple_identifier")
+	}
+	return ""
+}
+
+// detectRust scans one parsed file for stubs.
 func detectRust(file string, src []byte, root *sitter.Node) []Item {
 	var items []Item
 	var walk func(n *sitter.Node)

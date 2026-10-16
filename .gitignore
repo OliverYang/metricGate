@@ -6,3 +6,6 @@
 .pi/
 .workbuddy-ai/
 .data/
+
+# cmuxterm tool state, created by the terminal multiplexer in the repo root
+~/

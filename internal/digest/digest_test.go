@@ -124,16 +124,18 @@ func assertDigestNotContains(t *testing.T, got, unwanted, what string) {
 }
 
 // No policy at all: builtin defaults + everything degrades gracefully —
-// no layer section, no bans beyond builtin, thresholds from defaults.
+// no layer section, builtin bans still listed, thresholds from defaults.
 func TestBuildNoPolicy(t *testing.T) {
 	cfg := testConfig(t, "version: 1\ngate:\n  fail_on: error\n")
 	res := Build(cfg, Options{Package: "internal/engine", Lang: "go", PackageResolved: true})
 	if strings.Contains(res.Rendered, "分层契约") {
 		t.Errorf("empty arch policy → no layer section, got:\n%s", res.Rendered)
 	}
-	if strings.Contains(res.Rendered, "禁用 API/导入") {
-		t.Errorf("no bans configured → no ban section, got:\n%s", res.Rendered)
-	}
+	// A policy that never mentions banned-api must not lose the built-in bans:
+	// the floor is what keeps a policy file from being *less* constrained than
+	// no policy file at all.
+	assertDigestContains(t, res.Rendered, "禁止调用 fmt.Print*", "builtin ban floor")
+	assertDigestContains(t, res.Rendered, "禁止调用 panic", "builtin ban floor")
 	if !strings.Contains(res.Rendered, "圈复杂度 ≤10") {
 		t.Errorf("builtin thresholds should still render, got:\n%s", res.Rendered)
 	}
@@ -374,14 +376,18 @@ func TestBuildTaskFilteredBans(t *testing.T) {
 			got = s.Lines
 		}
 	}
+	// Independent ifs, not a switch: the note is prefixed onto the fmt line, so
+	// that one line matches two needles and a switch would stop at the first,
+	// reporting a fmt ban as missing.
 	foundNote, foundFmt, foundMD5 := false, false, false
 	for _, l := range got {
-		switch {
-		case strings.Contains(l, "已按任务文本相关度筛选"):
+		if strings.Contains(l, "已按任务文本相关度筛选") {
 			foundNote = true
-		case strings.Contains(l, "fmt.Print*"):
+		}
+		if strings.Contains(l, "fmt.Print*") {
 			foundFmt = true
-		case strings.Contains(l, "crypto/md5"):
+		}
+		if strings.Contains(l, "crypto/md5") {
 			foundMD5 = true
 		}
 	}

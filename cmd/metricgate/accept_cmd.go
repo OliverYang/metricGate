@@ -235,7 +235,7 @@ func gateNextSteps(human io.Writer) {
 	fmt.Fprint(human, "  suppress put `// metricgate: ignore <ruleID> [reason]` on the line above a one-off site\n")
 	fmt.Fprint(human, "  concede  metricgate accept add <ruleID> <file> -line N -owner NAME -reason TEXT\n")
 	fmt.Fprint(human, "           records a named, expiring concession for a warning, visible in every later run\n")
-	fmt.Fprint(human, "  adjust   change the threshold or severity in policy.yaml (languages.<lang>.metrics.<id>)\n")
+	fmt.Fprint(human, "  adjust   change the threshold or severity in .metricgate.yaml (languages.<lang>.metrics.<id>)\n")
 	fmt.Fprint(human, "  hidden   re-run with -diff -hidden to list the pre-existing findings that were not reported\n")
 }
 

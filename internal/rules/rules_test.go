@@ -26,14 +26,10 @@ func runRules(t *testing.T, lang parser.LanguageID, src string) []model.Finding 
 		t.Fatal(err)
 	}
 	defer p.Close()
-	var rs []*Rule
-	switch lang {
-	case parser.LangGo:
-		rs = GoRules()
-	case parser.LangJava:
-		rs = JavaRules()
-	}
-	runner, err := NewRunner(string(lang), p.Lang, rs)
+	// ForLanguage, not a per-language switch: the dispatch is what a new
+	// language is most likely to be forgotten in, so the tests have to
+	// exercise it rather than route around it.
+	runner, err := NewRunner(string(lang), p.Lang, ForLanguage(lang))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +47,51 @@ func findingsByRule(fs []model.Finding, id string) []model.Finding {
 		}
 	}
 	return out
+}
+
+// --- unknown-dependency (python stdlib dotted submodule) --------------------
+
+// A dotted import is stdlib when its FIRST segment is. Looking the whole path
+// up in the top-level module set flagged every submodule import — this
+// workspace alone had 80 of them (concurrent.futures, os.path, urllib.request,
+// xml.etree.ElementTree, unittest.mock …) all misreported as undeclared
+// dependencies.
+const pyDottedImportSrc = `import concurrent.futures
+import os.path
+import urllib.request
+from xml.etree import ElementTree
+from unittest import mock
+
+import tornado.web
+import MySQLdb
+`
+
+func TestPyUnknownDependencyDottedStdlib(t *testing.T) {
+	fs := findingsByRule(runRules(t, parser.LangPy, pyDottedImportSrc), "unknown-dependency")
+	if len(fs) != 2 {
+		t.Fatalf("unknown-dependency = %d, want 2 (only tornado.web and MySQLdb); got %+v",
+			len(fs), fs)
+	}
+	for _, f := range fs {
+		if !(contains(f.Message, "tornado") || contains(f.Message, "MySQLdb")) {
+			t.Errorf("flagged %q, want only the third-party imports", f.Message)
+		}
+	}
+}
+
+// A first segment that merely happens to equal a stdlib name must not hide a
+// third-party import: the dottedness test keeps the whole path under
+// comparison, it does not collapse to the root.
+func TestPyStdlibImportRootOnly(t *testing.T) {
+	if !pyStdlibImport("concurrent.futures") {
+		t.Error("concurrent.futures is stdlib via its root segment")
+	}
+	if !pyStdlibImport("os") {
+		t.Error("a bare top-level stdlib module must stay allowed")
+	}
+	if pyStdlibImport("tornado.web") {
+		t.Error("tornado is third-party; a dotted path does not inherit stdlib-ness")
+	}
 }
 
 // --- call-chain-depth -------------------------------------------------------

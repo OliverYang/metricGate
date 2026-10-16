@@ -4,8 +4,8 @@
 // into a patched policy YAML. It deliberately lives under scripts/ — the
 // metricgate binary never grows a feed subcommand; this is an ops glue tool.
 //
-//	go run ./scripts/osv2policy -in report.json -config policy.yaml
-//	go run ./scripts/osv2policy -in report.json -config policy.yaml -out patch.yaml
+//	go run ./scripts/osv2policy -in report.json -config .metricgate.yaml
+//	go run ./scripts/osv2policy -in report.json -config .metricgate.yaml -out patch.yaml
 //
 // The orchestrating shell wrapper (scripts/osv2policy.sh) invokes the
 // external CLIs and hands their output here. Human gates are preserved:
@@ -30,7 +30,7 @@ import (
 func main() {
 	var in, configPath, out, format string
 	flag.StringVar(&in, "in", "", "JSON input: osv-scanner report or OSV advisory ('-' = stdin)")
-	flag.StringVar(&configPath, "config", "policy.yaml", "policy file to dedup against")
+	flag.StringVar(&configPath, "config", ".metricgate.yaml", "policy file to dedup against")
 	flag.StringVar(&out, "out", "", "write the merged policy to this path (plan-only when omitted)")
 	flag.StringVar(&format, "format", "text", "text|json plan output")
 	flag.Parse()

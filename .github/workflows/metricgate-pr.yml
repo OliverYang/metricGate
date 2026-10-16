@@ -8,7 +8,7 @@
 # could not resolve rather than reporting a clean tree.
 #
 # paths: keep in sync with internal/parser/parser.go LanguageForFile. Only
-# listed paths trigger the gate; policy.yaml changes re-gate everything.
+# listed paths trigger the gate; .metricgate.yaml changes re-gate everything.
 name: metricGate PR Gate
 
 on:
@@ -35,7 +35,7 @@ on:
       - '**.hxx'
       - '**.cs'
       - '**.rs'
-      - 'policy.yaml'
+      - '.metricgate.yaml'
       - '.github/workflows/metricgate-pr.yml'
 
 permissions:

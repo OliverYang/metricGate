@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"metricgate/internal/arch"
+	"metricgate/internal/baseline"
 	"metricgate/internal/bundle"
 	"metricgate/internal/config"
 	"metricgate/internal/diff"
@@ -23,6 +24,7 @@ import (
 	"metricgate/internal/report"
 	"metricgate/internal/scorecard"
 	"metricgate/internal/store"
+	"metricgate/internal/trace"
 )
 
 // checkFlags is the flag set of `check`, extracted so cmdCheck stays a
@@ -159,22 +161,20 @@ func runCheckAddOns(cfg *config.Config, eng *engine.Engine, root, base string, s
 // runDiffMode filters the summary to changed lines and applies the optional
 // -diff add-ons. It returns the (possibly replaced) filtered summary.
 func runDiffMode(cfg *config.Config, root, base string, add diffExtrasOpts, summary *model.RunSummary, human io.Writer) *model.RunSummary {
-	changed, err := git.ChangedLinesFor(root, base)
+	// One shared call: changed ranges, base-revision values and the split are
+	// the same three steps the MCP server runs, from the same function.
+	split, err := baseline.Split(cfg, root, base, summary)
 	if err != nil {
 		fail(err)
 	}
-	baseValues, err := touchedMetricSnapshot(cfg, root, base, changed)
-	if err != nil {
-		fail(err)
-	}
-	split := engine.SplitSummary(summary, changed, baseValues)
+	changed := split.Changed
 	fmt.Fprintf(human, "diff-only: base=%s, %d new findings, %d pre-existing hidden", base, len(split.Kept), len(split.PreExisting))
 	if len(split.Unchanged) > 0 {
 		fmt.Fprintf(human, ", %d unchanged metric(s) dropped", len(split.Unchanged))
 	}
 	fmt.Fprint(human, "\n\n")
 	if add.wantHidden {
-		listHiddenFindings(human, split)
+		listHiddenFindings(human, split.DiffSplit)
 	}
 	if err := diffExtras(cfg, root, split.RunSummary, changed, add, human); err != nil {
 		fail(err)
@@ -448,6 +448,7 @@ func storeRun(cfg *config.Config, root string, summary *model.RunSummary, human 
 	meta := store.RunMeta{
 		PolicyDigest: bundle.PolicyDigest(cfg),
 		TraceID:      traceID(),
+		Attrs:        traceAttrs(),
 	}
 	id, err := st.SaveRunFull(summary, toolVersion, gitCommit(), git.Root(root), meta)
 	st.Close()
@@ -462,6 +463,26 @@ func storeRun(cfg *config.Config, root string, summary *model.RunSummary, human 
 // run to a unit of work, which is not the same as the run not existing.
 func traceID() string {
 	return strings.TrimSpace(os.Getenv("METRICGATE_TRACE_ID"))
+}
+
+// traceAttrs reads the ambient trace attributes from $METRICGATE_TRACE_ATTRS.
+// Unknown keys are dropped; a drop is worth a note on stderr because a host
+// that set "modle=gpt-5" would otherwise see its grouping silently vanish.
+func traceAttrs() []store.Attr {
+	raw := os.Getenv(trace.Env)
+	if raw == "" {
+		return nil
+	}
+	attrs, dropped := trace.Parse(raw)
+	if dropped > 0 {
+		fmt.Fprintf(os.Stderr, "note: %d trace attribute(s) dropped (unknown key, empty value, or missing '='); allowed keys: %s\n",
+			dropped, strings.Join(trace.Keys(), ", "))
+	}
+	out := make([]store.Attr, 0, len(attrs))
+	for _, a := range attrs {
+		out = append(out, store.Attr{Key: a.Key, Value: a.Value})
+	}
+	return out
 }
 
 // enforceGate exits 1 when findings at or above the policy threshold exist.

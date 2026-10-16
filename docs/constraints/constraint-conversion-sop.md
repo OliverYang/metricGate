@@ -17,14 +17,14 @@ SOP 的输入不要求格式统一，实测覆盖过的形态：人工手册章�
 - 从源文档抽取**原子条款**：一条 = 一个编号 + 一个可判定要求 + 优先级（强制/推荐）。
 - 每条标注来源引用（手册章节 / 事故编号），进 policy 的 `reason` 字段——溯源是硬要求。
 - 产出：条款清单（分册保持原始编号体系，如 NAMING-01、EXC-03）。
-- 工具面（2026-09-30 落地）：`metricgate constraints extract -file <规范文档> -lang go|java -config policy.yaml` 自动条款化+三档判型+查重，输出候选 YAML 供人工复核后进 policy；要求半句（必须/统一使用…）不会误当禁令目标（required 切分），语义精确型条款诚实分诊 ⚠️ 而非硬转。
+- 工具面（2026-09-30 落地）：`metricgate constraints extract -file <规范文档> -lang go|java -config .metricgate.yaml` 自动条款化+三档判型+查重，输出候选 YAML 供人工复核后进 policy；要求半句（必须/统一使用…）不会误当禁令目标（required 切分），语义精确型条款诚实分诊 ⚠️ 而非硬转。
 
 ### 第 2 步：转化（Translate）— 三档分类
 逐条判定可检性并归类，**如实标注，不许为了覆盖率硬转**：
 
 | 档 | 判定标准 | 动作 |
 |---|---|---|
-| ✅ 直接落地 | 现有规则类型可表达：禁 API/import（A）、分层/禁止方向（B）、度量阈值（C）、克隆（D） | 写入 policy.yaml，`reason` 带来源 |
+| ✅ 直接落地 | 现有规则类型可表达：禁 API/import（A）、分层/禁止方向（B）、度量阈值（C）、克隆（D） | 写入 .metricgate.yaml，`reason` 带来源 |
 | ⚠️ 近似 | 需要参数感知/数据流/自定义 DSL 才能精确；手写规则只能近似（参数感知 args_ban、构造器禁令 kind: constructor、静默 catch 内置 silent-catch 均已落地 2026-09-30，见 constraint-pipeline-design.md 缺口2） | 先用近似规则落地 + 在转换对照表记"近似"与已知偏差，进 DSL 待办 |
 | ❌ 不可检 | 命名风格、语义正确性、跨文件业务一致性等静态不可判 | 明确记"未转化"，指派给外部适配器（PMD/SpotBugs ingest）或 CR，**不写进 policy** |
 

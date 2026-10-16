@@ -12,8 +12,11 @@ import (
 // how many pre-existing findings were hidden.
 //
 // It is the no-base-values form of FilterSummaryWithBase: without a base
-// revision every metric verdict that a changed range intersects is kept, so
-// the caller that has no base tree (the MCP server) behaves as before.
+// revision every metric verdict that a changed range intersects is kept. Both
+// gate entry points go through baseline.Split, which always supplies base
+// values, so this form is for callers that genuinely have no base tree (an
+// editor working on a directory that is not a worktree) — not the default an
+// entry point may choose when it is convenient.
 //
 // Semantics (documented in README "Diff-only mode"):
 //   - rule findings are kept when their reported range intersects a changed

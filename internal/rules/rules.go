@@ -83,12 +83,16 @@ type Rule struct {
 	Alternate *Rule
 }
 
-// queries returns the rule's own query plus any alternates, so the runner can
-// treat a multi-shaped rule as one rule with several patterns.
-func (r *Rule) queries() []string {
-	out := []string{r.Query}
+// patterns returns the rule itself plus any alternates, so the runner can
+// treat a multi-shaped rule as one rule with several patterns. Each shape
+// keeps its own OnMatch: an alternate exists precisely because the spelling
+// it matches needs a different comparison than the primary one ($display
+// against a ban on "display"), so running it through the primary's callback
+// would leave the alternate matching nothing.
+func (r *Rule) patterns() []*Rule {
+	out := []*Rule{r}
 	for alt := r.Alternate; alt != nil; alt = alt.Alternate {
-		out = append(out, alt.Query)
+		out = append(out, alt)
 	}
 	return out
 }
@@ -107,7 +111,10 @@ type Policy interface {
 // query. The names are per query, not per rule: a rule's alternate shape may
 // capture a different set (a receiver, say, that the bare shape has no node
 // for), and reusing the first query's names would silently rename the rest.
+// rule is the shape's own rule (the primary, or one of its alternates), so a
+// match is judged by the callback written for that spelling.
 type compiledPattern struct {
+	rule   *Rule
 	query  *sitter.Query
 	capIdx []string
 }
@@ -130,12 +137,12 @@ func NewRunner(lang string, langPtr *sitter.Language, all []*Rule) (*Runner, err
 	r := &Runner{lang: lang}
 	for _, rule := range all {
 		cr := &compiledRule{rule: rule}
-		for _, pattern := range rule.queries() {
-			q, err := sitter.NewQuery(langPtr, pattern)
+		for _, shape := range rule.patterns() {
+			q, err := sitter.NewQuery(langPtr, shape.Query)
 			if err != nil {
 				return nil, err
 			}
-			cr.patterns = append(cr.patterns, compiledPattern{query: q, capIdx: q.CaptureNames()})
+			cr.patterns = append(cr.patterns, compiledPattern{rule: shape, query: q, capIdx: q.CaptureNames()})
 		}
 		r.compiled = append(r.compiled, cr)
 	}
@@ -190,7 +197,7 @@ func (r *Runner) Run(file string, src []byte, tree *sitter.Tree, p Policy) []mod
 		if p != nil {
 			opts = p.RuleOptions(r.lang, rule.ID)
 		}
-		findings = append(findings, runOneRule(rule, cr, root, src, file, sev, opts)...)
+		findings = append(findings, runOneRule(cr, root, src, file, sev, opts)...)
 	}
 	return findings
 }
@@ -218,15 +225,16 @@ func dedupeSpans(in []model.Finding) []model.Finding {
 // runOneRule drives the tree-sitter cursor for one compiled rule and
 // collects the findings produced. Cursor lifetime is owned here so the
 // caller never has to remember to Close it.
-func runOneRule(rule *Rule, cr *compiledRule, root *sitter.Node, src []byte, file string, sev model.Severity, opts map[string]any) []model.Finding {
+func runOneRule(cr *compiledRule, root *sitter.Node, src []byte, file string, sev model.Severity, opts map[string]any) []model.Finding {
 	var out []model.Finding
 	for _, p := range cr.patterns {
-		out = append(out, runOneQuery(rule, p, root, src, file, sev, opts)...)
+		out = append(out, runOneQuery(p, root, src, file, sev, opts)...)
 	}
 	return dedupeSpans(out)
 }
 
-func runOneQuery(rule *Rule, p compiledPattern, root *sitter.Node, src []byte, file string, sev model.Severity, opts map[string]any) []model.Finding {
+func runOneQuery(p compiledPattern, root *sitter.Node, src []byte, file string, sev model.Severity, opts map[string]any) []model.Finding {
+	rule := p.rule
 	var out []model.Finding
 	cursor := sitter.NewQueryCursor()
 	matches := cursor.Matches(p.query, root, src)
@@ -238,6 +246,9 @@ func runOneQuery(rule *Rule, p compiledPattern, root *sitter.Node, src []byte, f
 		caps := collectCaps(m, p.capIdx)
 		ctx := &MatchCtx{File: file, Src: src, Severity: sev, Options: opts, Captures: caps}
 		if f := rule.OnMatch(ctx); f != nil {
+			// Alternates carry the same RuleID as the primary (callRule
+			// builds them from the same ban), so a ban still reports as one
+			// rule however it was spelled.
 			f.RuleID = rule.ID
 			f.Severity = sev
 			f.Source = model.SrcRule
@@ -328,6 +339,12 @@ func ForLanguage(id parser.LanguageID) []*Rule {
 		return CSRules()
 	case parser.LangRust:
 		return RustRules()
+	case parser.LangSQL:
+		return SQLRules()
+	case parser.LangVerilog:
+		return VerilogRules()
+	case parser.LangVB:
+		return VBRules()
 	default:
 		return nil
 	}
@@ -394,6 +411,15 @@ func todoCommentRule(commentQuery string) *Rule {
 // per-language query: both grammars flag the same way, only the query and
 // the block kinds they reach differ.
 func newEmptyBlockRule(query string) *Rule {
+	return emptyBlockRule(query, func(blk *sitter.Node) bool { return blk.NamedChildCount() == 0 })
+}
+
+// emptyBlockRule builds an empty-block rule with a caller-supplied notion of
+// emptiness. The default (no named children) is wrong wherever the construct
+// that owns the block is not a separate node: a VB `If` keeps its condition
+// as a named child of the statement, and a SQL `WHILE` keeps its condition
+// and its BEGIN/END keywords, so neither can be tested by child count.
+func emptyBlockRule(query string, isEmpty func(*sitter.Node) bool) *Rule {
 	return &Rule{
 		ID:              "empty-block",
 		Title:           "Empty control-flow block",
@@ -403,7 +429,7 @@ func newEmptyBlockRule(query string) *Rule {
 		AnchorCapture:   "blk",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
 			blk := ctx.Captures["blk"]
-			if blk.NamedChildCount() != 0 {
+			if !isEmpty(blk) {
 				return nil
 			}
 			return &model.Finding{

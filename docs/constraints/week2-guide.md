@@ -8,15 +8,15 @@
 
 ## 📋 Day 1-2: A-002 banned-md5-encryption
 
-### Step 1: 查看现有 policy.yaml 结构
+### Step 1: 查看现有 .metricgate.yaml 结构
 
 ```bash
-cat policy.yaml | grep -A10 "banned-api"
+cat .metricgate.yaml | grep -A10 "banned-api"
 ```
 
 ### Step 2: 添加 MD5 规则
 
-编辑 `policy.yaml`,在 `banned-api` 部分添加:
+编辑 `.metricgate.yaml`,在 `banned-api` 部分添加:
 
 ```yaml
 banned-api:
@@ -113,7 +113,7 @@ rules:
       except_files: ["*_test.go"]
 ```
 
-### Step 3: 写入 policy.yaml
+### Step 3: 写入 .metricgate.yaml
 
 找到 `rules:` 部分，添加新规则:
 
@@ -230,13 +230,13 @@ tree-sitter parse test_file.go --query your_query.scm
 ## ✅ 完成标准
 
 Day 1-2 (A-002):
-- [ ] MD5 规则已添加到 policy.yaml
+- [ ] MD5 规则已添加到 .metricgate.yaml
 - [ ] 测试文件能正确触发警告
 - [ ] 没有明显的误报
 - [ ] 消息提示清晰易懂
 
 Day 3-4 (B-001):
-- [ ] Service 层 DB 规则已添加到 policy.yaml
+- [ ] Service 层 DB 规则已添加到 .metricgate.yaml
 - [ ] 测试文件能正确触发警告
 - [ ] 非 Service 层不会被误判
 - [ ] 测试文件被正确排除

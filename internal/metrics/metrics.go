@@ -29,8 +29,14 @@ type FuncStats struct {
 	MaxNesting int
 	NPath      uint64
 	// Maintainability (B-2): Halstead volume of the body and this
-	// function's MI. Body is retained for the census walk only.
-	Body   *sitter.Node `json:"-"`
+	// function's MI. Bodies is retained for the census walk only.
+	//
+	// It is a slice because not every grammar wraps a body in one node:
+	// VB.NET follows a method header with a flat run of `statement`
+	// children and SystemVerilog splits its body across several
+	// function_statement_or_null children. Measuring only the first would
+	// silently under-count both fan-out and Halstead volume.
+	Bodies []*sitter.Node `json:"-"`
 	Volume int
 	MI     float64
 }
@@ -194,8 +200,8 @@ func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.Languag
 		if n == nil {
 			return
 		}
-		if prof.FuncKinds.Has(n) {
-			fs.Functions = append(fs.Functions, measureFunc(lang, prof, src, n))
+		if prof.HasFunc(n) {
+			fs.Functions = append(fs.Functions, measureFunc(lang, src, n))
 		}
 		for i := uint(0); i < n.ChildCount(); i++ {
 			walk(n.Child(i))
@@ -212,10 +218,10 @@ func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.Languag
 	worst := 100.0
 	for i := range fs.Functions {
 		fn := &fs.Functions[i]
-		if fn.Body == nil {
+		if len(fn.Bodies) == 0 {
 			continue
 		}
-		hal := CountHalstead(src, fn.Body)
+		hal := CountHalstead(src, fn.Bodies...)
 		fn.Volume = int(hal.Volume() + 0.5)
 		fn.MI = MaintainabilityIndex(fn.Volume, fn.Cyclomatic, fn.Length)
 		if fn.MI < worst {
@@ -232,9 +238,9 @@ func AnalyzeFile(file string, src []byte, tree *sitter.Tree, lang parser.Languag
 }
 
 // measureFunc computes all function-level metrics for one declaration.
-func measureFunc(lang parser.LanguageID, prof *LangProfile, src []byte, fn *sitter.Node) FuncStats {
+func measureFunc(lang parser.LanguageID, src []byte, fn *sitter.Node) FuncStats {
 	st := FuncStats{
-		Name:      funcName(src, fn),
+		Name:      measureName(lang, src, fn),
 		StartLine: int(fn.StartPosition().Row) + 1,
 		EndLine:   int(fn.EndPosition().Row) + 1,
 	}
@@ -249,30 +255,126 @@ func measureFunc(lang parser.LanguageID, prof *LangProfile, src []byte, fn *sitt
 
 // fillBodyMetrics records the measures that need the function body: the
 // callee count and the four control-flow scores. A declaration without a
-// body (an interface method, a C prototype) contributes none of them.
+// body (an interface method, a C prototype) contributes none of them, and so
+// does a language that registers neither a call spelling nor an IR lowerer.
 func fillBodyMetrics(st *FuncStats, lang parser.LanguageID, src []byte, fn *sitter.Node) {
-	body := fn.ChildByFieldName("body")
-	if body == nil {
+	bodies := declBodies(lang, fn)
+	if len(bodies) == 0 {
 		return
 	}
-	st.Body = body
-	st.FanOut = fanOut(lang, src, body)
-	st.Cyclomatic, st.Cognitive, st.MaxNesting = irScore(lang, src, fn)
-	st.NPath = irNPath(lang, src, fn)
+	st.Bodies = bodies
+	if sp := callSpellingFor(lang); sp != nil {
+		st.FanOut = fanOut(*sp, src, bodies...)
+	}
+	lowerer := lowererFor(lang)
+	if lowerer == nil {
+		return
+	}
+	st.Cyclomatic, st.Cognitive, st.MaxNesting = irScore(lowerer, src, fn)
+	st.NPath = irNPath(lowerer, src, fn)
 }
 
-// paramsNode resolves the parameter list of a function declaration. C/C++
-// keep it inside the declarator chain, not on the function_definition itself.
-func paramsNode(lang parser.LanguageID, fn *sitter.Node) *sitter.Node {
-	if params := fn.ChildByFieldName("parameters"); params != nil {
-		return params
+// declBodies resolves the body containers of a declaration. Most grammars
+// expose one node through the `body` field. SQL keeps it in a child instead.
+// Verilog and VB.NET have no body node at all — their body is the run of
+// statement children — so they return that run, because measuring only its
+// first element would under-count fan-out and Halstead volume.
+func declBodies(lang parser.LanguageID, fn *sitter.Node) []*sitter.Node {
+	if body := fn.ChildByFieldName("body"); body != nil {
+		return []*sitter.Node{body}
 	}
-	if lang == parser.LangC || lang == parser.LangCpp {
-		return cParamsNode(fn)
+	switch lang {
+	case parser.LangSQL:
+		if body := sqlBody(fn); body != nil {
+			return []*sitter.Node{body}
+		}
+	case parser.LangVerilog:
+		return verilogBodyNodes(fn)
+	case parser.LangVB:
+		return vbBodyNodes(fn)
 	}
 	return nil
 }
 
+// verilogBodyNodes returns the statement runs of a SystemVerilog declaration.
+// The grammar has no body field. A function keeps its statements in
+// function_statement_or_null children and a task in statement_or_null ones,
+// both under the *_body_declaration child that also holds the header — except
+// for a class constructor, which has no *_body_declaration at all and holds
+// its statements directly.
+func verilogBodyNodes(n *sitter.Node) []*sitter.Node {
+	if direct := childKinds(n, "function_statement_or_null", "statement_or_null"); len(direct) > 0 {
+		return direct
+	}
+	decl := firstChildKind(n, "function_body_declaration", "task_body_declaration")
+	if decl == nil {
+		return nil
+	}
+	return childKinds(decl, "function_statement_or_null", "statement_or_null")
+}
+
+// vbBodyNodes returns the statement run of a VB.NET method or constructor.
+// The grammar has no body field at all: the header is followed by a flat list
+// of `statement` children.
+func vbBodyNodes(n *sitter.Node) []*sitter.Node {
+	return childKinds(n, "statement")
+}
+
+// firstChildKind returns the first named child whose kind is one of kinds.
+func firstChildKind(n *sitter.Node, kinds ...string) *sitter.Node {
+	if n == nil {
+		return nil
+	}
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		for _, k := range kinds {
+			if c.Kind() == k {
+				return c
+			}
+		}
+	}
+	return nil
+}
+
+// childKinds returns every named child whose kind is one of kinds, in source
+// order.
+func childKinds(n *sitter.Node, kinds ...string) []*sitter.Node {
+	if n == nil {
+		return nil
+	}
+	var out []*sitter.Node
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		for _, k := range kinds {
+			if c.Kind() == k {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// paramsNode resolves the parameter list of a function declaration. C/C++
+// keep it inside the declarator chain, not on the function_definition itself;
+// SQL keeps it in the function_arguments child node.
+func paramsNode(lang parser.LanguageID, fn *sitter.Node) *sitter.Node {
+	if params := fn.ChildByFieldName("parameters"); params != nil {
+		return params
+	}
+	switch lang {
+	case parser.LangC, parser.LangCpp:
+		return cParamsNode(fn)
+	case parser.LangSQL:
+		return sqlParamsNode(fn)
+	case parser.LangVerilog:
+		return verilogParamsNode(fn)
+	}
+	return nil
+}
+
+// funcName resolves the declared name of a function-like unit from the `name`
+// field, with the C/C++ declarator chain as the fallback.
 func funcName(src []byte, fn *sitter.Node) string {
 	name := text(src, fn.ChildByFieldName("name"))
 	if name == "" {
@@ -284,6 +386,32 @@ func funcName(src []byte, fn *sitter.Node) string {
 		return "<anonymous>"
 	}
 	return goReceiverName(src, fn, name)
+}
+
+// measureName is the naming entry point of the measurement walk. It prefers
+// the language's own name resolution and only then falls back to funcName, so
+// a grammar that keeps the name in a child node (SQL) is named the same way
+// its IR lowerer names it.
+func measureName(lang parser.LanguageID, src []byte, fn *sitter.Node) string {
+	if name := langDeclName(lang, src, fn); name != "" {
+		return name
+	}
+	return funcName(src, fn)
+}
+
+// langDeclName is the per-language fallback for grammars that keep a
+// declaration's name in a child node rather than a field. Returning "" means
+// "this language has no such fallback", and the caller keeps looking.
+func langDeclName(lang parser.LanguageID, src []byte, fn *sitter.Node) string {
+	switch lang {
+	case parser.LangSQL:
+		return sqlDeclName(src, fn)
+	case parser.LangVerilog:
+		return verilogDeclName(src, fn)
+	case parser.LangVB:
+		return vbDeclName(src, fn)
+	}
+	return ""
 }
 
 // goReceiverName formats a Go method name as "T.Name" from the receiver
@@ -341,6 +469,10 @@ func countParams(lang parser.LanguageID, list *sitter.Node) int {
 		return int(list.NamedChildCount())
 	case parser.LangJava:
 		return countParamsJava(list)
+	case parser.LangSQL:
+		return countParamsSQL(list)
+	case parser.LangVerilog:
+		return countParamsVerilog(list)
 	}
 	return countParamsGo(list)
 }
@@ -418,6 +550,18 @@ func countBoolParams(lang parser.LanguageID, src []byte, list *sitter.Node) int 
 		return countBoolParamsRust(src, list)
 	case parser.LangCS:
 		return countBoolParamsCS(src, list)
+	case parser.LangSQL:
+		// SQL's boolean is a column type, not a call-site flag: the smell the
+		// metric models does not exist in a language without boolean arguments
+		// that a caller chooses between.
+		return 0
+	case parser.LangVerilog:
+		// SystemVerilog has no boolean parameter type at all.
+		return countBoolParamsVerilog(list)
+	case parser.LangVB:
+		// VB spells a type as `As Boolean` inside an as_clause, and its
+		// case-insensitivity means the spelling can be any casing.
+		return countBoolParamsVB(src, list)
 	default:
 		return countBoolParamsClassic(lang, src, list)
 	}
@@ -594,8 +738,11 @@ func tsTypeName(src []byte, param *sitter.Node) string {
 // method_invocation (chained calls x.a().b() contribute a and b).
 // Function-literal invocations (Go) and constructor calls (Java) are not
 // behavior-of-another-unit calls and are excluded.
-func fanOut(lang parser.LanguageID, src []byte, body *sitter.Node) int {
-	return len(callsOf(callSpellingFor(lang), src, body))
+// fanOut counts the distinct call targets across every body node of a
+// declaration. A declaration with a single body node is the common case; the
+// slice covers the grammars that split a body across several statements.
+func fanOut(sp callSpelling, src []byte, bodies ...*sitter.Node) int {
+	return len(callsOf(sp, src, bodies...))
 }
 
 // callSpelling is how one grammar spells a call and a construction.
@@ -605,33 +752,61 @@ type callSpelling struct {
 	newKind     string
 }
 
-// callSpellingFor resolves the node kinds a language uses for a call site and
-// for a constructor invocation. Go and Java construct through call sites
-// already covered, so newKind stays empty for them.
-func callSpellingFor(lang parser.LanguageID) callSpelling {
-	sp := callSpelling{callKind: "call_expression", calleeField: "function"}
-	switch lang {
-	case parser.LangJava:
-		sp.callKind, sp.calleeField = "method_invocation", "name"
-	case parser.LangCS:
-		sp.callKind, sp.calleeField, sp.newKind = "invocation_expression", "function", "object_creation_expression"
-	case parser.LangTS, parser.LangTSX, parser.LangJS:
-		sp.newKind = "new_expression" // `new Foo()` has constructor field, no function field
-	case parser.LangPy:
-		sp.newKind = "call" // Python constructs via `Foo(...)`: same call kind
+// callSpellings maps a language to how its grammar spells a call and a
+// construction. A language missing here has no call spelling: fan-out is not
+// measured for it rather than being counted with Go's node kinds.
+var callSpellings = map[parser.LanguageID]callSpelling{
+	parser.LangGo:   {callKind: "call_expression", calleeField: "function"},
+	parser.LangJava: {callKind: "method_invocation", calleeField: "name"},
+	parser.LangCS: {callKind: "invocation_expression", calleeField: "function",
+		newKind: "object_creation_expression"},
+	parser.LangTS: {callKind: "call_expression", calleeField: "function",
+		newKind: "new_expression"},
+	parser.LangTSX: {callKind: "call_expression", calleeField: "function",
+		newKind: "new_expression"},
+	parser.LangJS: {callKind: "call_expression", calleeField: "function",
+		newKind: "new_expression"},
+	parser.LangPy: {callKind: "call_expression", calleeField: "function",
+		newKind: "call"},
+	parser.LangC:    {callKind: "call_expression", calleeField: "function"},
+	parser.LangCpp:  {callKind: "call_expression", calleeField: "function"},
+	parser.LangRust: {callKind: "call_expression", calleeField: "function"},
+	// SQL spells a call as an `invocation` whose target is the `unit` field.
+	// The grammar only fills `unit` for the `fn(a) FROM t` form; the plain
+	// `fn(a)` form leaves it empty, so callsOf falls back to the child
+	// object_reference (see sqlCallee).
+	parser.LangSQL: {callKind: "invocation", calleeField: "unit"},
+	// SystemVerilog's function call has no fields: the callee is the first
+	// named child (simple_identifier) and the arguments follow. The method
+	// call form is not registered here because the grammar only parses it for
+	// a parenthesised receiver, which real code rarely writes.
+	parser.LangVerilog: {callKind: "tf_call", calleeField: ""},
+	// VB's call is an `invocation` whose target is the callee; construction is
+	// `New X()`, a new_expression whose type field names the type.
+	parser.LangVB: {callKind: "invocation", calleeField: "target",
+		newKind: "new_expression"},
+}
+
+// callSpellingFor returns how a language spells a call site and a constructor
+// invocation, or nil when the language registers no spelling. Go and Java
+// construct through call sites already covered, so newKind stays empty there.
+func callSpellingFor(lang parser.LanguageID) *callSpelling {
+	sp, ok := callSpellings[lang]
+	if !ok {
+		return nil
 	}
-	return sp
+	return &sp
 }
 
 // callsOf collects the distinct call targets of one body. Function-literal
 // invocations (Go) and constructor calls through a function field (Java) are
 // not behavior-of-another-unit calls and are excluded.
-func callsOf(sp callSpelling, src []byte, body *sitter.Node) map[string]bool {
+func callsOf(sp callSpelling, src []byte, bodies ...*sitter.Node) map[string]bool {
 	seen := map[string]bool{}
 	var walk func(node *sitter.Node)
 	walk = func(node *sitter.Node) {
 		if node.Kind() == sp.callKind {
-			if callee := node.ChildByFieldName(sp.calleeField); isCallTarget(callee) {
+			if callee := callCallee(sp, node); isCallTarget(callee) {
 				seen[flattenWS(text(src, callee))] = true
 			}
 		}
@@ -644,8 +819,39 @@ func callsOf(sp callSpelling, src []byte, body *sitter.Node) map[string]bool {
 			walk(node.NamedChild(i))
 		}
 	}
-	walk(body)
+	for _, body := range bodies {
+		if body != nil {
+			walk(body)
+		}
+	}
 	return seen
+}
+
+// callCallee resolves a call site's target. The field named by the spelling is
+// the usual answer; SQL's invocation only fills `unit` for one of its two
+// syntactic forms, so a missing field falls back to the first named child,
+// which is the object_reference in both.
+func callCallee(sp callSpelling, node *sitter.Node) *sitter.Node {
+	if sp.calleeField != "" {
+		if callee := node.ChildByFieldName(sp.calleeField); callee != nil {
+			return callee
+		}
+	}
+	switch sp.callKind {
+	case "invocation":
+		// SQL only fills `unit` for the `fn(a) FROM t` form; VB always fills
+		// `target`. The first named child is the callee in both.
+		if node.NamedChildCount() > 0 {
+			return node.NamedChild(0)
+		}
+	case "tf_call":
+		// SystemVerilog has no fields on a call: the callee is the leading
+		// simple_identifier and the argument list follows.
+		if node.NamedChildCount() > 0 {
+			return node.NamedChild(0)
+		}
+	}
+	return nil
 }
 
 // isCallTarget reports whether a call's callee names another unit. A
@@ -676,36 +882,37 @@ func flattenWS(s string) string {
 // cyclomatic, cognitive and the deepest nesting reached. All decision-point
 // knowledge lives in the language adapters and the engine; this package only
 // knows which node kinds open a function.
-func irScore(lang parser.LanguageID, src []byte, fn *sitter.Node) (cyc, cog, maxNest int) {
-	rep := analyzeFunction(lowererFor(lang).lowerFunc(fn, src))
+func irScore(lowerer nodeLowerer, src []byte, fn *sitter.Node) (cyc, cog, maxNest int) {
+	rep := analyzeFunction(lowerer.lowerFunc(fn, src))
 	return int(rep.Cyclomatic), int(rep.Cognitive), int(rep.MaxNesting)
 }
 
 // irNPath lowers one declaration and returns its NPATH path count.
-func irNPath(lang parser.LanguageID, src []byte, fn *sitter.Node) uint64 {
-	return analyzeFunction(lowererFor(lang).lowerFunc(fn, src)).NPath
+func irNPath(lowerer nodeLowerer, src []byte, fn *sitter.Node) uint64 {
+	return analyzeFunction(lowerer.lowerFunc(fn, src)).NPath
 }
 
-// lowererFor returns the IR lowerer of a language.
+// langLowerers maps a language to its IR lowerer. A language missing here has
+// no control-flow lowering: it contributes no cyclomatic, cognitive, nesting
+// or NPATH score rather than being scored with Go's node kinds. An omission
+// is a red test in TestLanguageParity, not a silent degradation.
+var langLowerers = map[parser.LanguageID]nodeLowerer{
+	parser.LangGo:      goLowerer{},
+	parser.LangJava:    javaLowerer{},
+	parser.LangTS:      jsLowerer{ts: true},
+	parser.LangTSX:     jsLowerer{ts: true},
+	parser.LangJS:      jsLowerer{},
+	parser.LangPy:      pyLowerer{},
+	parser.LangC:       cLowerer{},
+	parser.LangCpp:     cLowerer{cpp: true},
+	parser.LangCS:      csLowerer{},
+	parser.LangRust:    rustLowerer{},
+	parser.LangSQL:     sqlLowerer{},
+	parser.LangVerilog: verilogLowerer{},
+	parser.LangVB:      vbLowerer{},
+}
+
+// lowererFor returns the IR lowerer of a language, or nil when it has none.
 func lowererFor(lang parser.LanguageID) nodeLowerer {
-	switch lang {
-	case parser.LangJava:
-		return javaLowerer{}
-	case parser.LangTS, parser.LangTSX:
-		return jsLowerer{ts: true}
-	case parser.LangJS:
-		return jsLowerer{}
-	case parser.LangPy:
-		return pyLowerer{}
-	case parser.LangC:
-		return cLowerer{}
-	case parser.LangCpp:
-		return cLowerer{cpp: true}
-	case parser.LangCS:
-		return csLowerer{}
-	case parser.LangRust:
-		return rustLowerer{}
-	default:
-		return goLowerer{}
-	}
+	return langLowerers[lang]
 }

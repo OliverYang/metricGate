@@ -27,6 +27,17 @@ type Window struct {
 	// two questions are opposite: "every project" vs "only the unassigned runs".
 	// When both are set, Unassigned wins, and that pairing is a caller bug.
 	Unassigned bool
+	// TraceIDs keeps only runs attributed to one of these traces. A host that
+	// wants "everything I did for prompt v3" first resolves the attribute to a
+	// set of trace ids (Store.ResolveTraceAttr) and then scopes the report to
+	// them.
+	//
+	// nil means "every trace" (the common case). A non-nil slice means "only
+	// these traces" — including an empty non-nil slice, which means the caller
+	// asked to scope by trace and nothing matched. That distinction is the
+	// whole point: a -model filter that resolves to no trace must answer "no
+	// runs", never silently widen back to every run.
+	TraceIDs []string
 }
 
 // String renders the window for a report header, so the number a reader sees is
@@ -35,7 +46,7 @@ type Window struct {
 func (w Window) String() string {
 	parts := []string{}
 	if w.Limit > 0 {
-		parts = append(parts, "last "+itoa(w.Limit)+" run(s)")
+		parts = append(parts, "last "+itoa(w.Limit)+" "+runNoun(w.Limit))
 	}
 	if !w.Since.IsZero() {
 		parts = append(parts, "since "+w.Since.UTC().Format(time.RFC3339))
@@ -46,10 +57,27 @@ func (w Window) String() string {
 	if w.Unassigned {
 		parts = append(parts, "unassigned runs")
 	}
+	if w.TraceIDs != nil {
+		if len(w.TraceIDs) == 0 {
+			parts = append(parts, "no matching trace")
+		} else {
+			parts = append(parts, "trace "+strings.Join(w.TraceIDs, ","))
+		}
+	}
 	if len(parts) == 0 {
 		return "all runs"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// runNoun is the pluralised unit of a window limit: one run is "run", every
+// other count is "runs". Without it a window of 1 rendered as "last 1 run(s)",
+// a form no other sentence in the UI uses.
+func runNoun(n int) string {
+	if n == 1 {
+		return "run"
+	}
+	return "runs"
 }
 
 // itoa keeps the header free of a strconv import for one integer.
@@ -116,6 +144,22 @@ func (w Window) runScope(archiveMode int) (clause string, args []any) {
 	}
 	if w.Unassigned {
 		conds = append(conds, `(project_root IS NULL OR project_root = '')`)
+	}
+	if w.TraceIDs != nil {
+		// A non-nil slice scopes to exactly these traces. An empty one means
+		// "no trace matched", which must select nothing: the literal predicate
+		// `trace_id IN ()` is invalid SQL, so the always-false form is used
+		// instead. trace_id is nullable, so an IN over real ids correctly
+		// excludes pre-column runs rather than matching NULL.
+		if len(w.TraceIDs) == 0 {
+			return strings.Join(append(conds, `1 = 0`), ` AND `), args
+		}
+		placeholders := make([]string, len(w.TraceIDs))
+		for i, id := range w.TraceIDs {
+			placeholders[i] = `?`
+			args = append(args, id)
+		}
+		conds = append(conds, `trace_id IN (`+strings.Join(placeholders, `, `)+`)`)
 	}
 	return strings.Join(conds, ` AND `), args
 }

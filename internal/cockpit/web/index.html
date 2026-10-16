@@ -7,72 +7,58 @@
   <link rel="stylesheet" href="/web/style.css">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="app-shell" id="app-shell">
+    <div class="brand">
+      <button class="brand-home" data-action="scope.clear" title="回到项目总览">
+        <span class="brand-mark">M</span><span class="brand-text"><strong>metricGate</strong><small>Audit cockpit</small></span>
+      </button>
+    </div>
+    <header class="topbar">
+      <nav class="breadcrumbs" id="shellCrumb" aria-label="当前位置" hidden></nav>
+      <div class="topbar-heading">
+        <p class="eyebrow">DETERMINISTIC AUDIT</p>
+        <h1 id="pageTitle">项目总览</h1>
+      </div>
+      <div class="top-actions">
+        <span class="updated" id="updatedAt">尚未同步</span>
+        <button class="button" id="refreshBtn" data-action="refresh">↻ 刷新数据</button>
+      </div>
+    </header>
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">M</span><div><strong>metricGate</strong><small>Audit cockpit</small></div></div>
-      <nav aria-label="主导航">
-        <button class="nav-item active" data-view="projects"><span>◈</span>项目总览</button>
-        <button class="nav-item" data-view="overview" hidden><span>⌂</span>项目概览</button>
-        <button class="nav-item" data-view="runs" hidden><span>↗</span>质量运行</button>
-        <button class="nav-item" data-view="calls" hidden><span>≡</span>工具活动</button>
-        <button class="nav-item" data-view="policy"><span>⚙</span>扫描配置</button>
+      <p class="nav-group">工作区</p>
+      <nav aria-label="工作区" id="primaryNav">
+        <button class="nav-item active" data-action="nav.view" data-view="projects"><span>◈</span>项目总览</button>
+        <button class="nav-item" data-action="nav.view" data-view="overview"><span>⌂</span>项目概览</button>
+        <button class="nav-item" data-action="nav.view" data-view="issues"><span>≡</span>问题分诊</button>
+        <button class="nav-item" data-action="nav.view" data-view="gate"><span>⛨</span>质量门禁</button>
+        <button class="nav-item" data-action="nav.view" data-view="calls"><span>▤</span>工具活动</button>
+        <button class="nav-item" data-action="nav.view" data-view="runs"><span>◷</span>运行历史</button>
+      </nav>
+      <p class="nav-group">审计记录</p>
+      <nav aria-label="审计记录">
+        <button class="nav-item" data-action="nav.view" data-view="rules"><span>§</span>规则</button>
+        <button class="nav-item" data-action="nav.view" data-view="activity"><span>◷</span>活动</button>
+        <button class="nav-item" data-action="nav.view" data-view="policy"><span>✎</span>扫描配置</button>
       </nav>
       <div class="sidebar-foot"><span class="pulse"></span><span>本地数据源</span><small id="logPath">读取中…</small></div>
     </aside>
     <main class="main">
-      <header class="topbar">
-        <div><p class="eyebrow">DETERMINISTIC AUDIT</p><h1 id="pageTitle">项目总览</h1><p class="subtitle" id="pageSubtitle">从本地调用记录识别仓库；无法验证归属的数据会单独保留。</p></div>
-        <div class="top-actions"><button class="button ghost" id="refreshBtn">↻ 刷新数据</button><span class="updated" id="updatedAt">尚未同步</span></div>
-      </header>
-      <div class="breadcrumbs" id="breadcrumbs"><span>项目总览</span></div>
+      <p class="page-subtitle" id="pageSubtitle">从本地调用记录识别仓库；无法验证归属的数据单独保留。</p>
       <div id="errorBanner" class="error-banner" role="alert" hidden></div>
-      <section id="policyPane" class="view-pane policy-pane" hidden>
-        <div class="section-heading"><div><p class="eyebrow">CONFIGURATION</p><h2>扫描配置</h2></div><span class="subtle" id="policyPathNote">发现中…</span></div>
-        <p class="subtle policy-intro">扫描时按 <code>.metricgate.yaml</code> → <code>.metricgate/config.yaml</code> → <code>policy.yaml</code> 的顺序就近查找，命中即停；全部未命中则使用内置默认值。</p>
-        <div id="policyNotice" class="unassigned-notice" hidden></div>
-        <div class="policy-layout">
-          <aside class="policy-side">
-            <div class="panel-head"><h2>结构</h2><span class="subtle" id="policyStatus">—</span></div>
-            <div class="policy-chain" id="policyChain"></div>
-            <div class="policy-sections" id="policySections"></div>
-          </aside>
-          <div class="policy-editor">
-            <div class="policy-editor-bar">
-              <label class="policy-file-label" for="policyContent">文档内容</label>
-              <span class="subtle" id="policyModTime"></span>
-              <div class="policy-editor-actions"><button class="button ghost" id="policyReloadBtn" type="button">↻ 重新载入</button><button class="button primary" id="policySaveBtn" type="button" disabled>保存配置</button></div>
-            </div>
-            <textarea id="policyContent" class="policy-textarea" spellcheck="false" aria-label="策略文件内容"></textarea>
-            <p class="policy-hint" id="policyDirtyHint" hidden>有未保存的修改</p>
-            <div class="panel policy-keys-panel"><div class="panel-head"><div><p class="eyebrow">EFFECTIVE</p><h2>生效配置与出处</h2></div><span class="subtle">每个键的来源都可追溯</span></div><div class="table-wrap"><table><thead><tr><th>键</th><th>来源</th></tr></thead><tbody id="policyKeys"></tbody></table></div></div>
-          </div>
-        </div>
-      </section>
-      <section id="projectOverview" class="project-overview">
-        <div class="section-heading"><div><p class="eyebrow">WORKSPACES</p><h2>识别到的项目</h2></div><span class="subtle" id="projectCount">—</span></div>
-        <div id="projectList" class="project-list"></div>
-        <button id="unassignedButton" class="unassigned-card" data-view="unassigned">未归属记录 <strong id="unassignedCount">0</strong><span>目标路径缺失、相对路径或无法验证 Git 仓库边界的记录</span></button>
-        <section id="acceptedPanel" class="panel accepted-panel" hidden><div class="panel-head"><div><p class="eyebrow">CONCESSION LEDGER</p><h2>审美让步账本</h2></div><span class="subtle" id="acceptedCount">—</span></div><p class="subtle">被明确接受（有主、有理由、可过期）的 warning；记录在 .metricgate/accepted.yaml，仍可见可回溯。</p><div id="acceptedList" class="accepted-list"></div></section>
-      </section>
-      <div id="workspaceNav" class="workspace-nav" hidden><button class="button active" data-view="overview">项目概览</button><button class="button" data-view="runs">质量运行</button><button class="button" data-view="calls">工具活动</button></div>
-      <div id="overviewPane" class="view-pane" hidden>
-        <section id="overview" class="metrics-grid" aria-label="关键指标">
-          <article class="metric-card accent"><div class="metric-label">项目调用</div><div class="metric-value" id="totalCalls">—</div><div class="metric-note" id="rangeText">等待本地日志</div></article>
-          <article class="metric-card"><div class="metric-label">门禁拦截率</div><div class="metric-value" id="interceptRate">—</div><div class="metric-note" id="interceptNote">等待验证记录</div></article>
-          <article class="metric-card"><div class="metric-label">收敛率</div><div class="metric-value" id="convergeRate">—</div><div class="metric-note" id="convergeNote">按 MCP 会话近似统计</div></article>
-          <article class="metric-card"><div class="metric-label">工具错误</div><div class="metric-value" id="toolErrors">—</div><div class="metric-note" id="skippedText">完整记录优先</div></article>
-        </section>
-        <section class="layout-grid">
-          <article class="panel flow-panel"><div class="panel-head"><div><p class="eyebrow">AUDIT LOOP</p><h2>审计流程</h2></div><span class="live-badge"><i></i> LIVE LOCAL</span></div><div id="flow" class="flow"></div></article>
-          <article class="panel trend-panel"><div class="panel-head"><div><p class="eyebrow">QUALITY TREND</p><h2>最近运行</h2></div><span class="subtle" id="runCount">—</span></div><div id="trendChart" class="trend-chart"></div><div class="legend"><span><i class="dot error"></i> errors</span><span><i class="dot warning"></i> warnings</span><span><i class="dot info"></i> info</span></div></article>
-          <article class="panel metric-trend-panel"><div class="panel-head"><div><p class="eyebrow">METRIC EXPERIMENT</p><h2>度量分布趋势</h2></div><select id="metricSelect" class="button"></select></div><p class="subtle">每次运行的 p50/p90/max 与当时阈值；调阈值后对比 violated 列即可检验收紧是否值得。</p><div id="metricTrendBody"></div></article>
-        </section>
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+        <span id="toastText"></span>
+        <button type="button" class="text-button" id="toastUndo" hidden>撤销</button>
       </div>
-      <section id="callsPane" class="panel calls-panel view-pane" hidden><div class="panel-head"><div><p class="eyebrow">TRACE LOG</p><h2>工具调用轨迹</h2></div><span class="subtle" id="resultCount">—</span></div><div class="filters"><label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="搜索工具、路径或错误…"></label><select id="phaseFilter"><option value="">全部阶段</option><option value="before">生成前</option><option value="explore">探索</option><option value="verify">验证</option><option value="review">复核</option><option value="other">其他</option></select><select id="statusFilter"><option value="">全部状态</option><option value="pass">PASS</option><option value="flagged">FLAGGED</option><option value="error">ERROR</option></select></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>工具</th><th>阶段</th><th>定位</th><th>耗时</th><th>结果</th><th></th></tr></thead><tbody id="callsTable"></tbody></table></div></section>
-      <section id="runsPane" class="panel runs-panel view-pane" hidden><div class="panel-head"><div><p class="eyebrow">RUN HISTORY</p><h2>检查运行</h2></div><span class="subtle" id="runsScopeNote"></span></div><div id="runsNotice" class="unassigned-notice" hidden>这些历史运行没有保存项目路径，无法安全归入当前项目。</div><div class="history-toolbar"><div class="history-tabs"><button class="button active" id="activeRunsBtn" type="button">活跃记录</button><button class="button" id="archivedRunsBtn" type="button">已归档</button></div><button class="button primary" id="archiveSelectedBtn" type="button" disabled>归档所选</button><button class="button" id="restoreSelectedBtn" type="button" hidden disabled>恢复所选</button><span class="subtle" id="historyCount"></span></div><div id="runsList" class="runs-list"></div></section>
+      <div id="viewStage"></div>
     </main>
   </div>
-  <dialog id="detailDialog"><div class="dialog-head"><div><p class="eyebrow">DETAIL</p><h2 id="detailTitle">详情</h2></div><button class="icon-button" id="closeDialog" aria-label="关闭">×</button></div><div id="detailBody"></div></dialog>
-  <script src="/web/app.js"></script>
+  <dialog id="detailDialog" aria-labelledby="detailTitle">
+    <header class="dialog-head">
+      <h2 id="detailTitle">详情</h2>
+      <button class="icon-button" id="closeDialog" data-action="dialog.close" aria-label="关闭">×</button>
+    </header>
+    <div id="detailBody"></div>
+  </dialog>
+  <script type="module" src="/web/app.js"></script>
 </body>
 </html>

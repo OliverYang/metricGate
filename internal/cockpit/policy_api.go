@@ -11,6 +11,7 @@ import (
 
 	"metricgate/internal/config"
 	"metricgate/internal/configpath"
+	"metricgate/internal/store"
 )
 
 // policyRequest is what the UI sends to write a policy file.
@@ -100,18 +101,29 @@ type policyKey struct {
 // the chain already found (so no command line ever names a path the tool then
 // reinterprets), validates the document parses before touching the disk, and
 // replaces it atomically so a crash mid-write cannot leave a half policy.
-func policyAPI() http.HandlerFunc {
+func policyAPI(logPath, dbPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			servePolicyView(w, r)
+			servePolicyView(w, r, logPath, dbPath)
 		case http.MethodPut:
-			writePolicy(w, r)
+			writePolicy(w, r, logPath, dbPath)
 		default:
 			w.Header().Set("Allow", "GET, PUT")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	}
+}
+
+// policyScopeWindow resolves a request's scope into the run window it names.
+//
+// The call-log roots belong in the whitelist because the project picker renders
+// its cards from them: a card the operator can plainly click must not lead to a
+// 400. Being called under a directory without ever having been checked is a real
+// state on a shared machine, and the honest answer there is "this project has no
+// runs", not "no such project".
+func policyScopeWindow(r *http.Request, logPath, dbPath string) (store.Window, error) {
+	return resolveScope(r, dbPath, callLogProjectRoots(logPath)...)
 }
 
 // policyRoot answers "which repository is this dashboard looking at". The
@@ -126,15 +138,43 @@ func policyRoot() string {
 	return root
 }
 
-// discoveredPolicy runs the discovery chain and records what it saw.
+// discoveredPolicy runs the discovery chain from the process working directory.
 func discoveredPolicy() configpath.Found {
 	return configpath.Discover("", policyRoot())
 }
 
+// discoveredPolicyIn runs the same chain from one repository. It is the scoped
+// form: the policy in force is a property of the directory being audited, so
+// answering for another project has to read that project's file.
+func discoveredPolicyIn(root string) configpath.Found {
+	return configpath.Discover("", root)
+}
+
+// scopePolicyPath is the policy file in force for one scope, or "" when the
+// defaults apply. The gate and the measures table read through it so the
+// thresholds they grade against are the scoped project's own.
+func scopePolicyPath(window store.Window) string {
+	found := discoveredPolicyIn(scopeOrigin(window))
+	if !found.FoundAny() {
+		return ""
+	}
+	return found.Path
+}
+
 // servePolicyView answers GET: the discovered file, its raw text, its parsed
 // shape, and the effective values with provenance.
-func servePolicyView(w http.ResponseWriter, r *http.Request) {
-	view := policyViewOf(discoveredPolicy())
+//
+// The `root` field names the directory the answer came from rather than echoing
+// the query parameter: an operator reading a policy has to know whose policy it
+// is, and a token that normalised to a different spelling (/tmp/x versus
+// /private/tmp/x) must be reported as the one actually read.
+func servePolicyView(w http.ResponseWriter, r *http.Request, logPath, dbPath string) {
+	window, err := policyScopeWindow(r, logPath, dbPath)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	view := policyViewOf(discoveredPolicyIn(scopeOrigin(window)))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(view)
 }

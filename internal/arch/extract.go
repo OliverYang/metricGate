@@ -49,6 +49,13 @@ func Extract(lang parser.LanguageID, src []byte, root *sitter.Node) Raw {
 		return extractCS(src, root)
 	case parser.LangRust:
 		return extractRust(src, root)
+	case parser.LangSQL, parser.LangVerilog, parser.LangVB:
+		// No package or import graph. SQL routines are addressed by schema
+		// path, SystemVerilog modules are compiled together rather than
+		// imported, and VB's `Imports` clause is not part of this pass yet.
+		// Spelled out rather than left to the default so the deliberate gap
+		// stays visible in the source.
+		return Raw{}
 	default:
 		return Raw{}
 	}
@@ -58,6 +65,9 @@ func Extract(lang parser.LanguageID, src []byte, root *sitter.Node) Raw {
 // import path names the package, and how the path is punctuated. It lives here
 // rather than at each call site so a new language cannot be added to the
 // extractor and forgotten by the graph.
+//
+// The three newest languages have no import graph at all (see Extract), so the
+// value is unused for them; they land on the leading-identifier default.
 func ImportStyle(lang parser.LanguageID) string {
 	switch lang {
 	case parser.LangGo:

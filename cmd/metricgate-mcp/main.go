@@ -5,7 +5,7 @@
 //
 // Configure in an MCP client, e.g. Claude Code:
 //
-//	claude mcp add metricgate -- /path/to/metricgate-mcp -config /path/to/policy.yaml
+//	claude mcp add metricgate -- /path/to/metricgate-mcp -config /path/to/.metricgate.yaml
 package main
 
 import (
@@ -31,7 +31,23 @@ import (
 	"metricgate/internal/symbols"
 )
 
-const toolVersion = "0.1.0"
+// toolVersion is the version the MCP server announces to the host. A var so a
+// release build can inject the real value with
+// -ldflags "-X main.toolVersion=v1.5.0"; it must agree with cmd/metricgate's,
+// since a host may see both.
+//
+// The symbol is main.toolVersion even though this file lives in
+// cmd/metricgate-mcp: -ldflags -X addresses the *link* symbol, and every `package
+// main` binary links it as main.<name>. The package-qualified form
+// (-X metricgate/cmd/metricgate-mcp.toolVersion=...) matches nothing and Go does
+// not warn — the build succeeds and the server still announces the fallback
+// below, which is how a fixed version can silently stay 0.1.0. cmd/metricgate-mcp
+// has no test of its own, so internal/cockpit and the parity test do not cover
+// this; verify a release build by initializing over stdio and checking that
+// serverInfo.version equals the injected value:
+//
+//	go build -ldflags "-X main.toolVersion=9.9.9-test" -o /tmp/mgmcp ./cmd/metricgate-mcp
+var toolVersion = "0.1.0"
 
 func main() {
 	configPath := flag.String("config", "", "policy file (loaded once at startup)")
@@ -65,7 +81,7 @@ func main() {
 // loadPolicy resolves the server's policy. An empty -config starts the
 // discovery search at the server's working directory (see configpath), so the
 // MCP server picks up .metricgate.yaml the same way the CLI does instead of
-// only honouring a literal policy.yaml next to wherever the agent started it.
+// only honouring a literal .metricgate.yaml next to wherever the agent started it.
 func loadPolicy(path string) (*config.Config, error) {
 	found := configpath.Discover(path, ".")
 	if !found.FoundAny() {

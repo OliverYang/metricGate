@@ -160,6 +160,14 @@ var importQueries = map[parser.LanguageID]importQueryFunc{
 	parser.LangCS: langQuery(parser.LangCS, `
 		[(using_directive (qualified_name) @path)]`),
 	parser.LangRust: rustImporter(),
+	parser.LangVB: langQuery(parser.LangVB, `
+		[(imports_statement namespace: (namespace_name) @path)]`),
+	parser.LangVerilog: langQuery(parser.LangVerilog, `
+		(include_compiler_directive
+			[
+				(double_quoted_string) @path
+				(include_compiler_directive_standard) @path
+			])`),
 }
 
 // rustImporter reduces Rust use trees to their crate root: the scan drafts

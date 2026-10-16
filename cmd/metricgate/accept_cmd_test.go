@@ -17,7 +17,7 @@ import (
 // cares about.
 func policyFixture(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "policy.yaml")
+	path := filepath.Join(t.TempDir(), ".metricgate.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

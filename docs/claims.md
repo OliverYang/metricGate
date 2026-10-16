@@ -82,7 +82,7 @@
 一台真实审查会话与一个 LLM 审查器各看同一批提交，输出如何分工。
 
 **装置**：`gitee-scan-2.0-portal`（Java，1187 文件，5636 提交）5 个提交；
-MetricGate 侧 `check . -diff -base HEAD~1 -config policy.yaml`（每 commit 独立 worktree 隔离）；
+MetricGate 侧 `check . -diff -base HEAD~1 -config .metricgate.yaml`（每 commit 独立 worktree 隔离）；
 LLM 侧 `codex review --commit <sha>`。
 
 **结果**：
@@ -181,7 +181,7 @@ LLM 侧 `codex review --commit <sha>`。
 
 这些都是**决策**，不是清理任务，所以留给维护者定：
 
-1. **本仓库 `policy.yaml` 的层声明漏了 6 个包**
+1. **本仓库 `.metricgate.yaml` 的层声明漏了 6 个包**
    （`apisurface`/`bundle`/`clonedrift`/`clones`/`hotspots`/`symbols`）。
    补齐会把 2 条含糊的 `sdp-violation` 换成精确的 `layer-violation`，
    并要求决定 `facts.FileFacts` 是否下沉 core、`clones` 是否注入文件列表。
@@ -207,7 +207,7 @@ gofmt -l internal/ cmd/                    # 空
 # 台账 #13 的复现：语法错误文件必须报 parse-error
 mkdir -p /tmp/mg-broken && cd /tmp/mg-broken
 printf 'package broken\n\nfunc F( {\n\treturn 1\n}\n' > broken.go
-printf 'version: 1\n' > policy.yaml
+printf 'version: 1\n' > .metricgate.yaml
 metricgate check .                         # 期望：[info] parse-error + "parse errors: broken.go"
 
 # 台账 #15 的装置：埋点 → 汇总

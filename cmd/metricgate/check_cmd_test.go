@@ -20,12 +20,12 @@ import (
 // itself in two consecutive lines.
 func TestRunCheckAddOnsReturnsTheFilteredSummary(t *testing.T) {
 	root := gittest.InitRepo(t)
-	gittest.Write(t, root, "policy.yaml", "gate:\n  fail_on: error\nlanguages:\n  typescript:\n    metrics:\n      cognitive-complexity: {warn: 2, error: 2}\n")
+	gittest.Write(t, root, ".metricgate.yaml", "gate:\n  fail_on: error\nlanguages:\n  typescript:\n    metrics:\n      cognitive-complexity: {warn: 2, error: 2}\n")
 	gittest.Write(t, root, "src/app.ts", "export function handle(input: string) {\n  if (input.includes(\"a\")) {\n    if (input.includes(\"b\")) {\n      return input.trim();\n    }\n  }\n  return \"\";\n}\n")
 	gittest.Run(t, root, "add", "-A")
 	gittest.Run(t, root, "commit", "-qm", "base")
 
-	cfg, err := config.LoadFile(filepath.Join(root, "policy.yaml"))
+	cfg, err := config.LoadFile(filepath.Join(root, ".metricgate.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

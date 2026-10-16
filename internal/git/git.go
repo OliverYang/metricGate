@@ -7,16 +7,14 @@
 package git
 
 import (
-	"archive/tar"
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"metricgate/internal/diff"
 )
@@ -27,8 +25,17 @@ var hunkRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 // diff contains only the branch's own changes even when the target branch moved
 // ahead. Falls back to the raw ref (e.g. HEAD) when merge-base fails.
 //
+// A base that already *is* HEAD needs no merge-base at all: the merge-base of
+// HEAD with HEAD is HEAD, so the subprocess would only re-derive a value we
+// hold in hand. That call used to fire twice per `-diff` run (here and in the
+// baseline snapshot), and every git round trip on this machine costs 0.21-0.4 s
+// of pure process spawning, so `-diff` paid ~0.5 s to prove a tautology.
+//
 // dir is the working directory for the git commands ("" = process cwd).
 func ResolveBase(dir, base string) string {
+	if base == "" || base == "HEAD" {
+		return base
+	}
 	out, err := run(dir, "merge-base", base, "HEAD")
 	if err != nil || strings.TrimSpace(out) == "" {
 		return base
@@ -97,16 +104,45 @@ func checkBaseDir(checkRoot string) (string, error) {
 // RepoRelative maps a check-root-relative path onto the worktree root, so a
 // caller that has both coordinate systems (the diff keys and a base archive)
 // can join them. It reports false when the path is not inside the worktree.
+//
+// A caller with many paths should build a RepoRelativizer once instead: this
+// resolves the two coordinate systems per path, which on a 181-path dirty tree
+// meant one `rev-parse --show-toplevel` process per changed file.
 func RepoRelative(checkRoot, path string) (string, bool) {
+	rel, ok := NewRepoRelativizer(checkRoot)
+	if !ok {
+		return "", false
+	}
+	return rel.Rel(path)
+}
+
+// RepoRelativizer holds the two coordinate systems a -diff report needs: the
+// worktree root git speaks, and the check root the report is scoped to.
+// Constructing it resolves both once; Rel itself is pure path math.
+type RepoRelativizer struct {
+	repoRoot  string
+	checkBase string
+}
+
+// NewRepoRelativizer resolves the worktree root and the check base for
+// checkRoot. It reports false when checkRoot is not inside a readable Git
+// worktree, the same condition RepoRelative reports as false per path.
+func NewRepoRelativizer(checkRoot string) (RepoRelativizer, bool) {
 	repoRoot := Root(checkRoot)
 	if repoRoot == "" {
-		return "", false
+		return RepoRelativizer{}, false
 	}
 	checkBase, err := checkBaseDir(checkRoot)
 	if err != nil {
-		return "", false
+		return RepoRelativizer{}, false
 	}
-	joined, err := filepath.Rel(repoRoot, filepath.Join(checkBase, filepath.FromSlash(path)))
+	return RepoRelativizer{repoRoot: repoRoot, checkBase: checkBase}, true
+}
+
+// Rel maps one check-root-relative path onto the worktree root, reporting
+// false when the path escapes the worktree.
+func (r RepoRelativizer) Rel(path string) (string, bool) {
+	joined, err := filepath.Rel(r.repoRoot, filepath.Join(r.checkBase, filepath.FromSlash(path)))
 	if err != nil || filepath.IsAbs(joined) || joined == ".." || strings.HasPrefix(joined, ".."+string(filepath.Separator)) {
 		return "", false
 	}
@@ -148,6 +184,16 @@ func rebaseOne(rel, repoRoot, checkBase string) (string, bool) {
 
 // Root returns the canonical Git worktree root containing path, or "" when
 // path is not inside a readable Git worktree.
+//
+// Successful answers are memoised for the life of the process: this is the one
+// git call in the package that cannot be batched, and -diff used to reach it
+// once per changed file (172 `rev-parse --show-toplevel` processes, ~21 s of
+// pure process spawning on a 173-path tree). Only non-empty answers are cached,
+// so a directory that is not a worktree yet does not stay a miss — that keeps
+// `git init` inside a long-lived process working, and keeps the failure mode
+// loud rather than a silently stale root. The accepted trade-off is that a
+// worktree whose root *moves* under a running process keeps being reported at
+// its old path; every git command downstream would fail there anyway.
 func Root(path string) string {
 	if path == "" {
 		path = "."
@@ -159,6 +205,13 @@ func Root(path string) string {
 	if !info.IsDir() {
 		path = filepath.Dir(path)
 	}
+	key := filepath.Clean(path)
+	rootMu.Lock()
+	cached, hit := rootCache[key]
+	rootMu.Unlock()
+	if hit {
+		return cached
+	}
 	root, err := run(path, "rev-parse", "--show-toplevel")
 	if err != nil || root == "" {
 		return ""
@@ -167,8 +220,17 @@ func Root(path string) string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Clean(resolved)
+	clean := filepath.Clean(resolved)
+	rootMu.Lock()
+	rootCache[key] = clean
+	rootMu.Unlock()
+	return clean
 }
+
+var (
+	rootMu    sync.Mutex
+	rootCache = map[string]string{}
+)
 
 // parseDiff collects the "+"-side hunk ranges of unified diff text. The
 // per-line decisions (filename tracker, hunk header matcher) live in a
@@ -223,128 +285,4 @@ func joinPath(dir, name string) string {
 		return name
 	}
 	return dir + "/" + name
-}
-
-// ArchivePaths exports only the named repo-relative paths at ref into a fresh
-// temp directory, preserving their layout.
-//
-// It exists because the diff-aware filter only needs the base values of the
-// files the change touched. Archiving the whole tree to answer a question
-// about a handful of files costs a full second analysis of a repository that
-// may be thousands of files.
-//
-// Paths that do not exist at ref (a file added by the change) are skipped by
-// asking git which of them it knows, because `git archive` aborts the entire
-// command on one unmatched pathspec. An empty result is not an error: it
-// means every touched file is new, so there is nothing to compare against.
-func ArchivePaths(dir, ref string, paths []string) (string, func(), error) {
-	existing, err := treePaths(dir, ref, paths)
-	if err != nil {
-		return "", nil, err
-	}
-	if len(existing) == 0 {
-		return "", func() {}, nil
-	}
-	args := append([]string{"archive", "--format=tar", ref, "--"}, existing...)
-	data, err := gitBytes(dir, args...)
-	if err != nil {
-		return "", nil, fmt.Errorf("git archive %s: %w", ref, err)
-	}
-	tmp, err := os.MkdirTemp("", "metricgate-base-")
-	if err != nil {
-		return "", nil, err
-	}
-	cleanup := func() { os.RemoveAll(tmp) }
-	if err := extractTar(data, tmp); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	return tmp, cleanup, nil
-}
-
-// treePaths filters paths down to the ones present in ref's tree. ls-tree
-// tolerates unmatched pathspecs (it reports them by omission), which is what
-// makes it the right pre-filter for ArchivePaths.
-func treePaths(dir, ref string, paths []string) ([]string, error) {
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	args := append([]string{"ls-tree", "-r", "--name-only", ref, "--"}, paths...)
-	out, err := run(dir, args...)
-	if err != nil {
-		return nil, fmt.Errorf("git ls-tree %s: %w", ref, err)
-	}
-	return strings.Fields(out), nil
-}
-
-// Archive exports the tree at ref into a fresh temp directory (repo-relative
-// layout preserved) so an adapter can parse the base revision. The caller owns
-// the returned cleanup. Extraction uses the stdlib tar reader, so it does not
-// depend on a system `tar` binary.
-func Archive(dir, ref string) (string, func(), error) {
-	data, err := gitBytes(dir, "archive", "--format=tar", ref)
-	if err != nil {
-		return "", nil, fmt.Errorf("git archive %s: %w", ref, err)
-	}
-	tmp, err := os.MkdirTemp("", "metricgate-base-")
-	if err != nil {
-		return "", nil, err
-	}
-	cleanup := func() { os.RemoveAll(tmp) }
-	if err := extractTar(data, tmp); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	return tmp, cleanup, nil
-}
-
-// extractTar walks a tar stream and materialises each entry under dest. The
-// top-level loop only steers control flow; per-entry materialisation lives
-// in helpers so each function stays under the complexity gates.
-func extractTar(data []byte, dest string) error {
-	tr := tar.NewReader(bytes.NewReader(data))
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("read archive: %w", err)
-		}
-		if err := materialiseTarEntry(tr, hdr, dest); err != nil {
-			return err
-		}
-	}
-}
-
-// materialiseTarEntry skips symlinks / odd entries and writes either a
-// directory or a regular file. Keeping the per-entry work in one place lets
-// extractTar stay linear and easy to read.
-func materialiseTarEntry(tr *tar.Reader, hdr *tar.Header, dest string) error {
-	target := filepath.Join(dest, filepath.FromSlash(hdr.Name))
-	switch hdr.Typeflag {
-	case tar.TypeDir:
-		return os.MkdirAll(target, 0o755)
-	case tar.TypeReg:
-		return writeRegularTarFile(target, tr)
-	}
-	return nil
-}
-
-// writeRegularTarFile creates the parent directory, copies the entry body,
-// and closes the file. Errors from any step propagate to the caller; the
-// caller has already opened the archive, so a partial file is fine.
-func writeRegularTarFile(target string, src io.Reader) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(target)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(f, src); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
 }

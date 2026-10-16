@@ -141,6 +141,68 @@ func assertLegacyMigration(t *testing.T, path string) {
 	}
 }
 
+// TestOpenMigratesLegacyFindingsColumns is the regression test for the read
+// path a legacy store takes. A database written before the issue key existed
+// has no snippet_hash and no fingerprint column, and the issue list selects
+// MAX(snippet_hash) grouped by fingerprint — so opening without adding both
+// columns leaves every issue query failing with "no such column". The two
+// migrations are order-dependent as well: the fingerprint backfill re-reads
+// each row through findingForBackfill, which selects snippet_hash.
+func TestOpenMigratesLegacyFindingsColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pre-issue-key schema: runs without provenance, findings without
+	// snippet_hash/fingerprint/trace_id.
+	_, err = db.Exec(`CREATE TABLE runs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL,
+		duration_ms INTEGER NOT NULL, tool_version TEXT NOT NULL, git_commit TEXT,
+		files INTEGER NOT NULL, error_count INTEGER NOT NULL, warning_count INTEGER NOT NULL,
+		info_count INTEGER NOT NULL
+	);
+	CREATE TABLE findings (
+		run_id INTEGER NOT NULL REFERENCES runs(id), rule_id TEXT NOT NULL,
+		severity TEXT NOT NULL, source TEXT NOT NULL, file TEXT NOT NULL,
+		start_line INTEGER NOT NULL, start_column INTEGER NOT NULL,
+		end_line INTEGER NOT NULL, end_column INTEGER NOT NULL, message TEXT NOT NULL
+	);
+	CREATE TABLE metric_snapshots (
+		run_id INTEGER NOT NULL, file TEXT NOT NULL, scope TEXT NOT NULL, metric TEXT NOT NULL,
+		value INTEGER NOT NULL, warn_threshold INTEGER NOT NULL, err_threshold INTEGER NOT NULL
+	);
+	INSERT INTO runs (started_at,duration_ms,tool_version,files,error_count,warning_count,info_count)
+		VALUES ('2026-01-01T00:00:00Z',0,'old',1,0,1,0);
+	INSERT INTO findings (run_id,rule_id,severity,source,file,start_line,start_column,end_line,end_column,message)
+		VALUES (1,'no-fmt-print','warning','rule','a.go',3,1,3,2,'legacy row')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopening a legacy store: %v", err)
+	}
+	defer st.Close()
+	// The query that used to fail: it reads snippet_hash and groups by
+	// fingerprint, neither of which the legacy table had.
+	got, err := st.IssuesForQuery(IssueQuery{}, nil)
+	if err != nil {
+		t.Fatalf("issue query on a migrated legacy store: %v", err)
+	}
+	if got.Total != 1 {
+		t.Fatalf("issues = %d, want the 1 legacy row", got.Total)
+	}
+	// Reopening must stay a no-op: the migration is additive and idempotent.
+	if _, err := Open(path); err != nil {
+		t.Fatalf("reopen migrated database: %v", err)
+	}
+}
+
 // TestProjectRootResolvesASymlinkedSpelling covers the macOS trap: `git
 // rev-parse` records the canonical root (/private/tmp/x), while an operator
 // types the path their shell shows (/tmp/x). The exact match fails, but the

@@ -11,7 +11,7 @@
 ```
  非标输入                    约束原语层                    门禁层                      硬控层
 ┌──────────────┐   S1-S3   ┌──────────────┐   S4-S5    ┌──────────────┐   S6     ┌──────────────┐
-│ 规约手册章节  │  提取/转化  │ policy.yaml  │  烟测/试点   │ fixture 烟测  │  消费    │ 生成前 digest │
+│ 规约手册章节  │  提取/转化  │ .metricgate.yaml  │  烟测/试点   │ fixture 烟测  │  消费    │ 生成前 digest │
 │ 团队规范分册  │ ────────▶ │  六族原语词汇  │ ─────────▶ │ FP 审计       │ ──────▶ │ 生成后 check  │
 │ 事故复盘报告  │  人+AI辅助  │ (A/B/C/D/E/F)│  独立policy │ rules-gaps    │ 闭环     │ + scorecard  │
 │ 论文/外部标准 │           │  reason 溯源  │            │ 豁免纪律      │         │ findings 修复 │
@@ -36,7 +36,7 @@ preset 是默认包——项目自己的 policy 永远是第一公民。
 
 ## 3. 原语层定义（投资单位是原语，不是条款）
 
-**统一约束原语 = policy.yaml 可表达的最小规则类型**，当前词汇表六族：
+**统一约束原语 = .metricgate.yaml 可表达的最小规则类型**，当前词汇表六族：
 A 禁 API/import（call 0-2 段 receiver + 前缀通配 / import 前缀）、B 架构（分层/forbid/环/SDP）、
 C 度量阈值（Go+Java 全集）、D 重复（clone 三态）、F 依赖白名单、E 缺陷类（外包给适配器，不自研）。
 
@@ -53,7 +53,7 @@ C 度量阈值（Go+Java 全集）、D 重复（clone 三态）、F 依赖白名
 **状态：一期已完成（2026-09-29）**——流程+模板+4 例试点（含 1 例自由文本事故）全部达成：
 CONC-07 新增落地（真实项目 2 命中 0 误报），doc-03/ELK 复现确认，isDelete 进缺口台账；
 见 [`../constraints/incident-to-constraint-playbook.md`](../constraints/incident-to-constraint-playbook.md)。
-**T1b 访谈/提取套件**——工具面已落地 2026-09-30：`metricgate constraints extract -file <规范文档> -lang go|java -config policy.yaml` 把非标文档自动条款化（markdown 表格/自由行拆分、代码围栏/引用块过滤），按禁令/要求语义判型三档（call/import/constructor+args_ban ✅、语义精确型 ⚠️ 需人工补 match、内置规则承载、正向要求 ❌ 台账），带 policy 查重，产出候选 YAML（SOP 步骤 2-5 前置烟测）；正向要求标记（必须/应当/统一使用…）处切分防语义反转（要求半句被当禁令目标）。验收剩余：非工程人员按 README 走通一条非标条款全流程（工具面已备，见缺口 4 检出情况）。
+**T1b 访谈/提取套件**——工具面已落地 2026-09-30：`metricgate constraints extract -file <规范文档> -lang go|java -config .metricgate.yaml` 把非标文档自动条款化（markdown 表格/自由行拆分、代码围栏/引用块过滤），按禁令/要求语义判型三档（call/import/constructor+args_ban ✅、语义精确型 ⚠️ 需人工补 match、内置规则承载、正向要求 ❌ 台账），带 policy 查重，产出候选 YAML（SOP 步骤 2-5 前置烟测）；正向要求标记（必须/应当/统一使用…）处切分防语义反转（要求半句被当禁令目标）。验收剩余：非工程人员按 README 走通一条非标条款全流程（工具面已备，见缺口 4 检出情况）。
 
 ### 缺口 2：原语词汇表不够用（T2，DSL P0）
 4 个聚类缺口的优先序（对应 conversion-map ❌ 条目）：

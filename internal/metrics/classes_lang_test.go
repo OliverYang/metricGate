@@ -264,6 +264,11 @@ func TestHasClassesMatchesSpecs(t *testing.T) {
 	want := map[string]bool{
 		"go": false, "java": true, "typescript": true, "tsx": true, "javascript": true,
 		"python": true, "c": true, "cpp": true, "csharp": true, "rust": true,
+		// SQL and Verilog have no class construct at all; VB.NET has class
+		// blocks, but the CK family needs member-level visibility and
+		// inheritance modelling this grammar does not carry, so it is not
+		// advertised for them either.
+		"sql": false, "verilog": false, "vbnet": false,
 	}
 	for _, id := range parser.Supported() {
 		got := HasClasses(string(id))

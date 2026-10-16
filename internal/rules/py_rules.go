@@ -166,6 +166,13 @@ func pyStdlibImport(path string) bool {
 	if strings.HasPrefix(path, ".") {
 		return true
 	}
+	// The set holds top-level modules, but an import is dotted:
+	// "concurrent.futures" and "os.path" are stdlib because their first segment
+	// is. Looking up the whole path would flag every submodule import as
+	// undeclared. Java takes the same root-first view (javaJDKImport).
+	if i := strings.IndexByte(path, '.'); i >= 0 {
+		path = path[:i]
+	}
 	return pyStdlib[path]
 }
 

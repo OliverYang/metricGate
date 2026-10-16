@@ -101,13 +101,14 @@ func (c *Config) ExplainPath(relPath string) *ExplainDecision {
 		}
 	}
 
-	// Add banned-api rules
-	if len(sec.Banned) > 0 {
-		for _, ban := range sec.Banned {
-			ruleID := "banned-" + strings.ReplaceAll(ban.Match, ".", "-")
-			decision.RuleIDs = append(decision.RuleIDs, ruleID)
-			decision.EffectivePolicy[ruleID] = "policy_file"
-		}
+	// Add banned-api rules. BanEntries carries the built-in floor too, so a file
+	// whose policy never mentions banned-api still explains the bans that will
+	// fire — and its provenance says "builtin" rather than claiming the policy
+	// asked for them.
+	for _, e := range c.BanEntries(lang) {
+		ruleID := "banned-" + strings.ReplaceAll(strings.ReplaceAll(e.Ban.Match, ".", "-"), "/", "-")
+		decision.RuleIDs = append(decision.RuleIDs, ruleID)
+		decision.EffectivePolicy[ruleID] = e.Source
 	}
 
 	return decision

@@ -21,7 +21,7 @@ scripts/osv2policy.sh                     ← 编排层（装了 osv-scanner 走
 scripts/osv2policy（Go 适配器）            ← 解析 scanner 报告 → 派生禁令 → 查重
         │                                   → 合并 → 回读校验 → 写独立 patch
         ▼
-patch.yaml  ——人批（审 + 定级 + fixture 烟测）——▶ policy.yaml
+patch.yaml  ——人批（审 + 定级 + fixture 烟测）——▶ .metricgate.yaml
         ▼
 check / digest / status 三条通道自动生效
 ```
@@ -45,7 +45,7 @@ scripts/osv2policy.sh /path/to/target-project demo/policy-pilot-java.yaml patch.
 
 # 2. 人批：审 + 行、fixture 烟测（SOP 第 4 步：已知引入点必须命中、干净代码零误伤）
 # 3. 定级：默认 warning 观察期；P0 资损类告警补 rules 键升 error
-# 4. 合入 policy.yaml —— 之后三条通道自动生效：
+# 4. 合入 .metricgate.yaml —— 之后三条通道自动生效：
 #    check 全量扫描秒级 / CI -diff 毫秒级 / constraints digest 让 agent 落笔前不写
 ```
 
@@ -142,12 +142,12 @@ scripts/ 适配器，引擎词汇与 CLI 面不为具体外部格式膨胀——
 
 ```bash
 # 编排层（推荐入口）
-scripts/osv2policy.sh <project-dir> [policy.yaml] [patch-out.yaml]
+scripts/osv2policy.sh <project-dir> [.metricgate.yaml] [patch-out.yaml]
 #   在线：调用 PATH 上的 osv-scanner（OSV_SCANNER= 可覆盖路径；未装时给安装指引退出 127）
 #   离线：SKIP_SCAN=/path/to/report.json 直接吃现成报告（无 osv-scanner 也能跑通链路）
 
 # 适配器（编排层内部调用，也可单独使用）
-go run ./scripts/osv2policy -in <report.json|-> [-config policy.yaml]
+go run ./scripts/osv2policy -in <report.json|-> [-config .metricgate.yaml]
                             [-out <patch.yaml>] [-format text|json]
 ```
 

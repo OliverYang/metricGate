@@ -47,10 +47,10 @@ median files/commit: 1
 
 1. 与 `hotspots` **同源**（同一次 `git log --numstat`），是同一数据源的第二个投影，
    不需要额外 git 调用。
-2. 直接进现有 `policy.yaml` 阈值体系。
+2. 直接进现有 `.metricgate.yaml` 阈值体系。
 3. 天然适配 `-diff` ratchet 语义：拦截口径是"**新增**的跨层共变对 > N"，
    而不是存量对（存量必然一大片）。
-4. **9 种语言全覆盖**——git 不挑语言。
+4. **13 种语言全覆盖**——git 不挑语言。
 
 ### 必做护栏
 
@@ -84,7 +84,7 @@ median files/commit: 1
 
 ### 现状证据（根因明确）
 
-`internal/facts/facts.go:179-200` 的 `parseFile` 对**全部 9 种语言**都做了解析，
+`internal/facts/facts.go:216` 的 `parseFile` 对**全部 13 种语言**都做了解析，
 并且填了两个跨语言字段：
 
 ```go
@@ -298,14 +298,14 @@ CI 流程控制（3 个 workflow + composite action）、
 | ~~3~~ | ~~reachability（死代码 + 测试触达）报告~~ | ✅ 已完成（迭代 11）→ [docs/iterations/iter-11-impact-reachability.md](iterations/iter-11-impact-reachability.md) |
 | ~~—~~ | ~~闭环易用性：P0 cockpit 读库 / P0 MCP preamble 吞载荷 / P0 accept 对 error 静默 no-op~~ | ✅ 已完成（迭代 12）→ [docs/iterations/iter-12-closed-loop-usability.md](iterations/iter-12-closed-loop-usability.md) |
 | — | 让步系统问责化：inline directive 加 owner/reason/expiry + 过期告警 | ⬜ 遗留，见迭代 12 日志「遗留」节 |
-| — | MCP `check_path -diff_only` 改用 value-delta 棘轮（与 CLI 对齐） | ⬜ 遗留，见迭代 12 日志「遗留」节 |
+| — | ~~MCP `check_path -diff_only` 改用 value-delta 棘轮（与 CLI 对齐）~~ | ✅ 已完成（迭代 20）→ [docs/iterations/iter-20-mcp-cli-ratchet-parity.md](iterations/iter-20-mcp-cli-ratchet-parity.md)：基线取数抽到 `internal/baseline`，两入口同走 `baseline.Split`；同一脏树实测 MCP 由 3 条收到 1 条（与 CLI 全等） |
 | ~~—~~ | ~~TSX / JSX 支持~~ | ✅ 已完成（迭代 13）→ [docs/iterations/iter-13-tsx.md](iterations/iter-13-tsx.md) |
 | — | TS/TSX 箭头函数不计入函数级度量（`const C = () => {}` 无 cyclomatic/cognitive 快照） | ⬜ 遗留，见迭代 13 日志「遗留」节 |
 | ~~—~~ | ~~策略指纹落库（`runs.policy_digest`）~~ | ✅ 已完成（迭代 14）→ [docs/iterations/iter-14-policy-fingerprint.md](iterations/iter-14-policy-fingerprint.md) |
 | ~~—~~ | ~~组织策略 `extends:` 单继承~~ | ✅ 已完成（迭代 15）→ [docs/iterations/iter-15-extends-and-trace.md](iterations/iter-15-extends-and-trace.md) |
 | ~~—~~ | ~~`trace_id` 贯通 runs/findings/snapshots + calllog + bundle + `runId` 输出~~ | ✅ 已完成（迭代 15）→ 同上 |
 | — | `trace_attrs`（模型名 / prompt digest / harness）与 LLM 侧维度自动采集 | ⬜ 遗留，见迭代 15 日志「遗留」节 |
-| — | MCP `check_path -diff_only` 改用 value-delta 棘轮（与 CLI 对齐） | ⬜ 遗留，见迭代 15 日志「遗留」节 |
+| — | ~~MCP `check_path -diff_only` 改用 value-delta 棘轮（与 CLI 对齐）~~ | ✅ 同上（迭代 20）；两处重复登记的是同一件事，当时共同的阻塞项「先把基线取数从 CLI 里搬出来」已完成 |
 | — | arch 包名规则做成机制（当前按语言手写分支） | ⬜ 遗留，见迭代 9 日志「遗留」节 |
 | — | blast-radius 进闸门（impact-scope 带 tier 过滤） | ⬜ 遗留，见迭代 11 日志「遗留」节 |
 | ~~—~~ | ~~`impact.go` 中 `affectedFiles`/`fileSet` 泛型化后重复~~ | ✅ 已清理（同一轮） |
@@ -318,6 +318,9 @@ CI 流程控制（3 个 workflow + composite action）、
 | ~~—~~ | ~~`trends` 可用性：`-out / -since / -project`~~ | ✅ 已完成（迭代 17）→ 同上 |
 | — | Cockpit 侧 owner 视图（复用 `internal/owners`，需要前端交互验证） | ⬜ 遗留，见迭代 17 日志「遗留」节 |
 | — | `internal/owners` 不认 GitHub 支持的自定义 CODEOWNERS location | ⬜ 遗留，见迭代 17 日志「遗留」节 |
+| ~~—~~ | ~~`trace_attrs`（X2）KV 白名单 + `trace` 组合报表（X3）~~ | ✅ 已完成（迭代 18）→ [docs/iterations/iter-18-trace-attrs-and-report.md](iterations/iter-18-trace-attrs-and-report.md) |
+| — | X4 LLM 侧元数据自动采集（模型名/prompt digest 由宿主设 env，工具不探测） | ⬜ 遗留，见迭代 18 日志「遗留」节 |
+| — | Cockpit trace 过滤只作用于调用视图，未作用于 run 历史视图 | ⬜ 遗留，见迭代 18 日志「遗留」节 |
 
 > 注：本文与 `docs/roadmap.md`（审美回路 5 迭代计划，已全部完成）正交，
 > 是 v1.x 之后的候选池。

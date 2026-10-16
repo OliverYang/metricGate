@@ -16,7 +16,7 @@
 | 5 | **复用指引的确定性来源**：R1b 证明"看见既有实现"是最高价值信息 | 目标包导出符号清单（internal/symbols 索引，确定性排序，封顶 30 个）。注意：refs.TopReferenced 不存在于真实代码（那是 R1 任务 T08 让 agent 新写的函数），不得依赖 |
 | 6 | **语言双栈**：Go/Java 阈值、禁令、包名归一化都不同 | `-lang` 参数 + 文件探测；Java 包名经 archFileOf 同款斜杠归一化；阈值走 EffectiveThresholds（policy 只能抬高内置地板，摘要必须报**生效值**而非 policy 原文） |
 | 7 | **预算与截断次序**：超大仓库的符号清单可能爆预算 | 截断优先级：红线/禁 API/分层契约**永不截**；复用符号清单封顶；deps 白名单只列计数+根前缀；输出 used/est_tokens |
-| 8 | **全程审计与溯源**：用户硬要求 | `-format json` 每行带 provenance（`policy.yaml#banned_api.go[2]` / `builtin:metrics.cyclomatic` / `symbols:internal/engine`）；R3 harness 逐任务留档实际注入的 digest，报告可复算 |
+| 8 | **全程审计与溯源**：用户硬要求 | `-format json` 每行带 provenance（`.metricgate.yaml#banned_api.go[2]` / `builtin:metrics.cyclomatic` / `symbols:internal/engine`）；R3 harness 逐任务留档实际注入的 digest，报告可复算 |
 | 9 | **不制造绕闸门手册**：摘要被注入提示词，可能被当作逃逸指南 | digest 只陈述约束与合法替代（"用 gitBytes() 不许用 os/exec"），不含"如何让检查器看不见"类信息；验收仍由 check 闸门独立判定，摘要无门禁权 |
 | 10 | **只读与成本**：目标仓可能是只读试点项目 | digest 零写盘、零 store 交互、毫秒级；对 /tmp 只读沙箱安全 |
 | 11 | **CLI/MCP 一致性**：双入口容易漂移（getReviewBundle 注释里的教训） | 本期只做 CLI `metricgate constraints digest`；MCP 工具化（复用同一 internal/digest 函数）列为 P1，函数签名现在就按双入口设计 |
@@ -36,7 +36,7 @@
 
 ## 3. R3 前置接地实验预注册（2026-09-29，动手前锁定）
 
-**设计**：配对 P 臂。同一 22 任务集、同一沙箱模板（/tmp/r2-sandbox 白名单复制 + git 基线）、同一模型（Cliproxyapi `z-ai/glm-5.3-flash`）、同一度量协议（`check . -config /tmp/r2-policy.yaml -format json`，zz_eval 过滤，R1 分类器）。
+**设计**：配对 P 臂。同一 22 任务集、同一沙箱模板（/tmp/r2-sandbox 白名单复制 + git 基线）、同一模型（Cliproxyapi `z-ai/glm-5.3-flash`）、同一度量协议（`check . -config /tmp/r2-.metricgate.yaml -format json`，zz_eval 过滤，R1 分类器）。
 
 - **Arm P**：生成提示 = 原任务文本 + 固定引导语 + **本任务目标包的 digest 文本**（harness 留档每份注入内容）。
 - 对照基线：Arm A 31.8%（7/22，R1 与 R2 两次独立复现）。

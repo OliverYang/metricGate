@@ -5,7 +5,7 @@
 ### 1. 现有约束来源
 
 #### ✅ 已识别的约束:
-- **policy.yaml**: 已有 banned-api 规则 (fmt.Print*, os/exec)
+- **.metricgate.yaml**: 已有 banned-api 规则 (fmt.Print*, os/exec)
 - **README.md**: 项目说明和架构描述
 - **AGENTS.md**: 开发规范约定
 

@@ -2,6 +2,7 @@ package cockpit
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,9 +28,9 @@ func policyRepo(t *testing.T) (root string) {
 func TestHandlerServesTheDiscoveredPolicy(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	view := getPolicyView(t, srv.URL)
+	view := getPolicyView(t, srv)
 
 	if !view.Found {
 		t.Fatal("the discovered policy must be reported as found, or the UI cannot say what it is editing")
@@ -51,9 +52,9 @@ func TestHandlerServesTheDiscoveredPolicy(t *testing.T) {
 func TestPolicyViewReportsSectionsWithLines(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	view := getPolicyView(t, srv.URL)
+	view := getPolicyView(t, srv)
 
 	var wantKey string
 	for _, s := range view.Sections {
@@ -72,9 +73,9 @@ func TestPolicyViewReportsSectionsWithLines(t *testing.T) {
 func TestPolicyViewCarriesProvenanceForEveryEffectiveKey(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	view := getPolicyView(t, srv.URL)
+	view := getPolicyView(t, srv)
 
 	if len(view.Keys) == 0 {
 		t.Fatal("keys must list the effective configuration; a dashboard that shows nothing reads as 'nothing configured'")
@@ -89,9 +90,9 @@ func TestPolicyViewCarriesProvenanceForEveryEffectiveKey(t *testing.T) {
 func TestPolicyViewWithoutAnyFileIsHonest(t *testing.T) {
 	root := t.TempDir()
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	view := getPolicyView(t, srv.URL)
+	view := getPolicyView(t, srv)
 
 	if view.Found {
 		t.Fatal("a repository with no policy must not claim one was found")
@@ -107,10 +108,10 @@ func TestPolicyViewWithoutAnyFileIsHonest(t *testing.T) {
 func TestPolicySaveReplacesTheDiscoveredFile(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
 	updated := "version: 1\ngate:\n  fail_on: warning\n"
-	res := policySave(t, srv.URL, http.MethodPut, map[string]string{
+	res := policySave(t, srv, http.MethodPut, map[string]string{
 		"path":    filepath.Join(root, ".metricgate.yaml"),
 		"content": updated,
 	})
@@ -125,7 +126,7 @@ func TestPolicySaveReplacesTheDiscoveredFile(t *testing.T) {
 		t.Fatalf("content on disk = %q: the save must land in the discovered file", got)
 	}
 	// A re-read must see the new values, so the UI never shows a stale editor.
-	view := getPolicyView(t, srv.URL)
+	view := getPolicyView(t, srv)
 	if !strings.Contains(view.Content, "fail_on: warning") {
 		t.Fatalf("view = %q: GET must reflect the save", view.Content)
 	}
@@ -138,9 +139,9 @@ func TestPolicySaveRefusesAnUnparseableDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	res := policySave(t, srv.URL, http.MethodPut, map[string]string{
+	res := policySave(t, srv, http.MethodPut, map[string]string{
 		"path":    filepath.Join(root, ".metricgate.yaml"),
 		"content": "version: 1\nlanguages: [this is: not a map\n",
 	})
@@ -159,9 +160,9 @@ func TestPolicySaveRefusesAnUnparseableDocument(t *testing.T) {
 func TestPolicySaveRefusesANewPath(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	res := policySave(t, srv.URL, http.MethodPut, map[string]string{
+	res := policySave(t, srv, http.MethodPut, map[string]string{
 		"path":    filepath.Join(root, "invented.yaml"),
 		"content": "version: 1\n",
 	})
@@ -176,9 +177,9 @@ func TestPolicySaveRefusesANewPath(t *testing.T) {
 func TestPolicySaveWithoutADiscoveredFileIsARefusal(t *testing.T) {
 	root := t.TempDir()
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	res := policySave(t, srv.URL, http.MethodPut, map[string]string{
+	res := policySave(t, srv, http.MethodPut, map[string]string{
 		"content": "version: 1\n",
 	})
 	if res.StatusCode != http.StatusConflict {
@@ -192,9 +193,9 @@ func TestPolicySaveWithoutADiscoveredFileIsARefusal(t *testing.T) {
 func TestPolicySaveRejectsGETAndViceVersa(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	res := policySave(t, srv.URL, http.MethodDelete, map[string]string{})
+	res := policySave(t, srv, http.MethodDelete, map[string]string{})
 	if res.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d: only GET and PUT are allowed", res.StatusCode)
 	}
@@ -206,18 +207,17 @@ func TestPolicySaveRejectsGETAndViceVersa(t *testing.T) {
 func TestPolicySaveIsRejectedCrossOrigin(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
+	srv := newLocalCockpit(t)
 
-	req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/policy", strings.NewReader(`{"content":"version: 1\n"}`))
+	req, err := http.NewRequest(http.MethodPut, srv.base+"/api/policy", strings.NewReader(`{"content":"version: 1\n"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://evil.example")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The host guard sees a loopback request; the same-origin check is the one
+	// that has to refuse it, which is the point of the test.
+	res := srv.doRaw(req)
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d: a cross-origin write must be refused", res.StatusCode)
@@ -227,8 +227,8 @@ func TestPolicySaveIsRejectedCrossOrigin(t *testing.T) {
 func TestPolicySaveLeavesNoTemporaryFileBehind(t *testing.T) {
 	root := policyRepo(t)
 	chdir(t, root)
-	srv := httptest.NewServer(Handler("", ""))
-	_ = policySave(t, srv.URL, http.MethodPut, map[string]string{
+	srv := newLocalCockpit(t)
+	_ = policySave(t, srv, http.MethodPut, map[string]string{
 		"content": "version: 1\n",
 	})
 
@@ -266,12 +266,9 @@ func writeTestFile(t *testing.T, path, body string) {
 }
 
 // getPolicyView performs the GET the UI would perform.
-func getPolicyView(t *testing.T, base string) policyView {
+func getPolicyView(t *testing.T, srv localCockpit) policyView {
 	t.Helper()
-	res, err := http.Get(base + "/api/policy")
-	if err != nil {
-		t.Fatal(err)
-	}
+	res := srv.get("/api/policy")
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", res.StatusCode)
@@ -285,22 +282,13 @@ func getPolicyView(t *testing.T, base string) policyView {
 
 // policySave PUTs a JSON body and returns the response with its body
 // still readable by the caller's assertions (it is closed here).
-func policySave(t *testing.T, base, method string, body map[string]string) *http.Response {
+func policySave(t *testing.T, srv localCockpit, method string, body map[string]string) *http.Response {
 	t.Helper()
 	data, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := http.NewRequest(method, base+"/api/policy", strings.NewReader(string(data)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", base)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	res := srv.do(method, "/api/policy", strings.NewReader(string(data)), "application/json")
 	t.Cleanup(func() { res.Body.Close() })
 	return res
 }
@@ -318,4 +306,57 @@ func chdir(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
+// localCockpit serves the cockpit handler without binding a socket.
+//
+// httptest.NewServer listens on loopback, which is a dependency this project's
+// own environment does not always have (a locked-down CI runner has no
+// permission to bind). The windows are narrow — one GET per assertion — but
+// they are the ones these tests are actually about, and the sandbox-free
+// version runs everywhere.
+type localCockpit struct {
+	handler http.Handler
+	base    string
+}
+
+func newLocalCockpit(t *testing.T) localCockpit {
+	t.Helper()
+	// The origin is loopback because the API guard admits nothing else.
+	return localCockpit{handler: Handler("", ""), base: "http://127.0.0.1"}
+}
+
+func (c localCockpit) Close() {}
+
+// doRaw serves a request the test assembled itself, for the cases that need an
+// unusual header (a cross-site write) rather than a plain JSON body.
+func (c localCockpit) doRaw(req *http.Request) *http.Response {
+	req.Host = "127.0.0.1"
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+	return rec.Result()
+}
+
+// get performs GET relative to the cockpit origin.
+func (c localCockpit) get(path string) *http.Response {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Host = "127.0.0.1"
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+	return rec.Result()
+}
+
+// do performs a request with a body, as the UI's POST/PUT/DELETE would.
+func (c localCockpit) do(method, path string, body io.Reader, contentType string) *http.Response {
+	req := httptest.NewRequest(method, path, body)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	// Both the host guard and the same-origin check read the request's own
+	// Host, so a write has to look like it came from the cockpit itself.
+	req.Host = "127.0.0.1"
+	req.Header.Set("Origin", "http://127.0.0.1")
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+	return rec.Result()
 }

@@ -3,6 +3,7 @@ module metricgate
 go 1.26.2
 
 require (
+	github.com/DerekStride/tree-sitter-sql v0.0.0-20260919000438-39fdb0064037
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	github.com/tree-sitter/tree-sitter-c v0.23.4
@@ -13,7 +14,9 @@ require (
 	github.com/tree-sitter/tree-sitter-javascript v0.23.1
 	github.com/tree-sitter/tree-sitter-python v0.25.0
 	github.com/tree-sitter/tree-sitter-rust v0.23.2
+	github.com/tree-sitter/tree-sitter-tree_sitter_vb_dotnet v0.0.0
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2
+	github.com/tree-sitter/tree-sitter-verilog v1.0.3
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.59.0
 )
@@ -37,3 +40,12 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+// The VB.NET grammar has no usable upstream Go module: its go.mod declares the
+// module path github.com/tree-sitter/tree-sitter-tree_sitter_vb_dotnet while
+// the repository lives at github.com/CodeAnt-AI/tree-sitter-vb-dotnet, and its
+// bindings/go/binding.go calls a C symbol (tree_sitter_tree_sitter_vb_dotnet)
+// that src/parser.c does not export (it exports tree_sitter_vb_dotnet).
+// third_party/tree-sitter-vb-dotnet keeps upstream's declared module path,
+// vendors the byte-identical src/parser.c, and fixes only the cgo symbol.
+replace github.com/tree-sitter/tree-sitter-tree_sitter_vb_dotnet => ./third_party/tree-sitter-vb-dotnet

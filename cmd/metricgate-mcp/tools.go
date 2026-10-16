@@ -6,11 +6,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"metricgate/internal/calllog"
 	"metricgate/internal/dist"
 	"metricgate/internal/facts"
 	"metricgate/internal/hotspots"
 	"metricgate/internal/model"
 	"metricgate/internal/store"
+	"metricgate/internal/traceview"
 )
 
 // addTool registers one tool on the server, routing its handler through the
@@ -29,6 +31,15 @@ func addTool[In, Out any](srv *mcp.Server, svc *service, t *mcp.Tool, h mcp.Tool
 // the inline-verdict watcher (see gate.go); it may be nil, which disables the
 // preamble.
 func registerTools(srv *mcp.Server, svc *service) {
+	registerLoopTools(srv, svc)
+	registerInsightTools(srv, svc)
+}
+
+// registerLoopTools declares the tools an agent calls while it is producing and
+// checking code: the grounding pack, the two gates, the unfinished-code
+// worklist and the symbol/impact lookups that keep generated code aligned with
+// the existing surface.
+func registerLoopTools(srv *mcp.Server, svc *service) {
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "get_constraints",
 		Description: "Get the dense constraint pack (exact signatures/imports + active policy rules and limits) for a file or directory. Call BEFORE generating code and follow it, so output aligns with the existing API surface.",
@@ -40,7 +51,7 @@ func registerTools(srv *mcp.Server, svc *service) {
 	}, svc.checkCode)
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "check_path",
-		Description: "Check files on disk with rules + metrics. With diff_only=true only new violations are reported (legacy code is not re-flagged).",
+		Description: "Check files on disk with rules + metrics. With diff_only=true the gate applies the same ratchet as `metricgate check -diff` against base=HEAD: findings outside the changed lines are hidden (reported as `hidden`), and metric findings whose measured value did not rise since the base revision are dropped (reported as `unchanged`). Both counters say what the gate did NOT report — check them instead of trusting a clean verdict; new files have no base values, so their metric findings are always kept. Guarantee holds for path at the worktree root: under a subdirectory the base values are keyed worktree-relatively and the value test cannot join, so nothing is reported as unchanged.",
 	}, svc.checkPath)
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "list_stubs",
@@ -54,6 +65,12 @@ func registerTools(srv *mcp.Server, svc *service) {
 		Name:        "get_impact",
 		Description: "What uses this symbol: every call site and type reference, plus the files affected if it changes. AST-only and name-based (interface dispatch, reflection and dynamic names can be missed), 0 tokens. Call BEFORE renaming a symbol or changing its signature.",
 	}, svc.getImpact)
+}
+
+// registerInsightTools declares the read-only views over data the gate already
+// wrote: the repo map, hotspots, trends, one trace in full, metric stats and
+// the review bundle. None of them mutate the store or the code.
+func registerInsightTools(srv *mcp.Server, svc *service) {
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "get_repo_map",
 		Description: "Rank every file by how much the rest of the code leans on it (reference graph + PageRank, 0 tokens, AST-only). Call this FIRST to decide what to read, then get_constraints on the chosen files. By default each file also carries its static risk score; pass skip_risk=true to skip that extra pass.",
@@ -66,6 +83,10 @@ func registerTools(srv *mcp.Server, svc *service) {
 		Name:        "get_trends",
 		Description: "Read the local trend database: the per-run severity series, its time range, and the rules that fired most often. Use it to see whether the codebase is improving across runs. Read-only — only `check` writes the store.",
 	}, svc.getTrends)
+	addTool(srv, svc, &mcp.Tool{
+		Name:        "get_trace",
+		Description: "One trace in full: the stored runs and findings attributed to a trace id, the trace's attributes (model/prompt_digest/harness/…), and the MCP calls made under it. Use it to attribute a verdict to the unit of work that produced it. Read-only.",
+	}, svc.getTrace)
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "get_metric_stats",
 		Description: "Distribution of every measured metric across its scopes (count/min/p50/p90/p95/max/mean) plus the worst scopes per metric, e.g. the most complex functions. Use it to decide where a refactor pays off; `check_path` only reports threshold crossings.",
@@ -199,8 +220,11 @@ func filterMetric(mets []model.MetricResult, id string) []model.MetricResult {
 }
 
 type trendsIn struct {
-	Runs      int    `json:"runs,omitempty" jsonschema:"how many of the most recent runs to include (default 20)"`
-	StorePath string `json:"store_path,omitempty" jsonschema:"override the trend database path (default: store.path from policy.yaml)"`
+	Runs         int    `json:"runs,omitempty" jsonschema:"how many of the most recent runs to include (default 20)"`
+	StorePath    string `json:"store_path,omitempty" jsonschema:"override the trend database path (default: store.path from .metricgate.yaml)"`
+	Trace        string `json:"trace,omitempty" jsonschema:"scope the report to one trace id"`
+	Model        string `json:"model,omitempty" jsonschema:"scope the report to runs whose trace carries this model attribute"`
+	PromptDigest string `json:"prompt_digest,omitempty" jsonschema:"scope the report to runs whose trace carries this prompt_digest attribute"`
 }
 
 // getTrends reads the local trend database through the same store.Report the
@@ -211,7 +235,7 @@ func (s *service) getTrends(ctx context.Context, req *mcp.CallToolRequest, in tr
 		path = s.cfg.Store.Path
 	}
 	if path == "" {
-		return nil, store.TrendReport{}, fmt.Errorf("no trend store configured: set store.path in policy.yaml or pass store_path")
+		return nil, store.TrendReport{}, fmt.Errorf("no trend store configured: set store.path in .metricgate.yaml or pass store_path")
 	}
 	limit := in.Runs
 	if limit <= 0 {
@@ -222,9 +246,40 @@ func (s *service) getTrends(ctx context.Context, req *mcp.CallToolRequest, in tr
 		return nil, store.TrendReport{}, fmt.Errorf("open store: %w (run `check` first to create %s)", err, path)
 	}
 	defer st.Close()
-	report, err := st.Report(limit)
+	window := store.Window{Limit: limit}
+	if window.TraceIDs, err = st.ResolveTraceFilters([]store.TraceFilter{
+		{Key: "", Value: in.Trace},
+		{Key: "model", Value: in.Model},
+		{Key: "prompt_digest", Value: in.PromptDigest},
+	}); err != nil {
+		return nil, store.TrendReport{}, err
+	}
+	report, err := st.ReportIn(window)
 	if err != nil {
 		return nil, store.TrendReport{}, err
 	}
 	return nil, report, nil
+}
+
+type traceIn struct {
+	TraceID   string `json:"trace_id" jsonschema:"the trace id to inspect (from $METRICGATE_TRACE_ID on the runs you want)"`
+	StorePath string `json:"store_path,omitempty" jsonschema:"override the trend database path (default: store.path from .metricgate.yaml)"`
+	LogPath   string `json:"log_path,omitempty" jsonschema:"override the MCP call log path (default: .metricgate/mcp-calls.jsonl)"`
+}
+
+// getTrace reuses traceview.Collect, the same builder the CLI `trace` verb
+// uses, so the MCP and CLI panoramas cannot drift.
+func (s *service) getTrace(ctx context.Context, req *mcp.CallToolRequest, in traceIn) (*mcp.CallToolResult, traceview.View, error) {
+	if in.TraceID == "" {
+		return nil, traceview.View{}, fmt.Errorf("trace_id is required")
+	}
+	storePath := in.StorePath
+	if storePath == "" {
+		storePath = s.cfg.Store.Path
+	}
+	logPath := in.LogPath
+	if logPath == "" {
+		logPath = calllog.DefaultPath
+	}
+	return nil, traceview.Collect(storePath, logPath, in.TraceID), nil
 }

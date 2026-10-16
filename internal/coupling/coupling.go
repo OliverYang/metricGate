@@ -292,7 +292,7 @@ func PackageOf(file string) string {
 }
 
 // LayerResolver builds the LayerOf function for one layer list. The layers
-// come straight from policy.yaml's architecture section, so a project that
+// come straight from .metricgate.yaml's architecture section, so a project that
 // already declared its layering gets cross-layer coupling for free.
 func LayerResolver(layers []arch.Layer) func(string) string {
 	return func(pkg string) string {

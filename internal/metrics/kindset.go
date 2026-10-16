@@ -66,6 +66,18 @@ var (
 	cppFuncKinds  = NewKindSet(parser.TsCpp, "function_definition")
 	csFuncKinds   = NewKindSet(parser.TsCSharp, "method_declaration", "constructor_declaration", "destructor_declaration", "operator_declaration", "local_function_statement")
 	rustFuncKinds = NewKindSet(parser.TsRust, "function_item")
+	// sqlFuncKinds names the two declarative units SQL actually has. A table
+	// or a view is not a unit of behaviour, and the grammar's
+	// `function_declaration` is a PL/SQL local assignment, not a function.
+	sqlFuncKinds = NewKindSet(parser.TsSQL, "create_function", "create_procedure")
+	// verilogFuncKinds names function_declaration, task_declaration and the
+	// class method. A module is a file-level container, not a unit of
+	// behaviour, so it is deliberately absent — the same call Go's
+	// function_declaration and a SQL table get.
+	verilogFuncKinds = NewKindSet(parser.TsVerilog, "function_declaration", "task_declaration", "class_constructor_declaration")
+	// vbFuncKinds names the method and constructor declarations. A
+	// class_block is a type container, not a unit of behaviour.
+	vbFuncKinds = NewKindSet(parser.TsVB, "method_declaration", "constructor_declaration")
 )
 
 // LangProfile holds the node kinds a language measures functions on.
@@ -73,73 +85,37 @@ type LangProfile struct {
 	FuncKinds *NodeKindSet
 }
 
-var (
-	goProfile = &LangProfile{
-		FuncKinds: goFuncKinds,
+// HasFunc reports whether n opens a function-like unit in this language. A nil
+// profile — a language that declares no function kinds — reports false.
+func (p *LangProfile) HasFunc(n *sitter.Node) bool {
+	if p == nil {
+		return false
 	}
+	return p.FuncKinds.Has(n)
+}
 
-	javaProfile = &LangProfile{
-		FuncKinds: javaFuncKinds,
-	}
+// langProfiles is the per-language function-kind table, the single source of
+// truth for AST traversal. A language missing from this map declares no
+// function kinds at all: it never inherits another language's table. An
+// omission is a red test in TestLanguageParity, not a silent degradation.
+var langProfiles = map[parser.LanguageID]*LangProfile{
+	parser.LangGo:      {FuncKinds: goFuncKinds},
+	parser.LangJava:    {FuncKinds: javaFuncKinds},
+	parser.LangTS:      {FuncKinds: tsFuncKinds},
+	parser.LangTSX:     {FuncKinds: tsxFuncKinds},
+	parser.LangJS:      {FuncKinds: jsFuncKinds},
+	parser.LangPy:      {FuncKinds: pyFuncKinds},
+	parser.LangC:       {FuncKinds: cFuncKinds},
+	parser.LangCpp:     {FuncKinds: cppFuncKinds},
+	parser.LangCS:      {FuncKinds: csFuncKinds},
+	parser.LangRust:    {FuncKinds: rustFuncKinds},
+	parser.LangSQL:     {FuncKinds: sqlFuncKinds},
+	parser.LangVerilog: {FuncKinds: verilogFuncKinds},
+	parser.LangVB:      {FuncKinds: vbFuncKinds},
+}
 
-	tsProfile = &LangProfile{
-		FuncKinds: tsFuncKinds,
-	}
-
-	tsxProfile = &LangProfile{
-		FuncKinds: tsxFuncKinds,
-	}
-
-	jsProfile = &LangProfile{
-		FuncKinds: jsFuncKinds,
-	}
-
-	pyProfile = &LangProfile{
-		FuncKinds: pyFuncKinds,
-	}
-
-	cProfile = &LangProfile{
-		FuncKinds: cFuncKinds,
-	}
-
-	cppProfile = &LangProfile{
-		FuncKinds: cppFuncKinds,
-	}
-
-	csProfile = &LangProfile{
-		FuncKinds: csFuncKinds,
-	}
-
-	rustProfile = &LangProfile{
-		FuncKinds: rustFuncKinds,
-	}
-)
-
-// ProfileFor returns the language-specific node kind sets.
-// This is the single source of truth for AST traversal logic.
+// ProfileFor returns the function-kind profile of a language, or nil when the
+// language declares none. Callers treat nil as "measure nothing".
 func ProfileFor(lang parser.LanguageID) *LangProfile {
-	switch lang {
-	case parser.LangGo:
-		return goProfile
-	case parser.LangJava:
-		return javaProfile
-	case parser.LangTS:
-		return tsProfile
-	case parser.LangTSX:
-		return tsxProfile
-	case parser.LangJS:
-		return jsProfile
-	case parser.LangPy:
-		return pyProfile
-	case parser.LangC:
-		return cProfile
-	case parser.LangCpp:
-		return cppProfile
-	case parser.LangCS:
-		return csProfile
-	case parser.LangRust:
-		return rustProfile
-	default:
-		return goProfile // fallback
-	}
+	return langProfiles[lang]
 }

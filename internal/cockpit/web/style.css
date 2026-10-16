@@ -1,46 +1,1566 @@
-:root{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e8eaf1;background:#0d1017;font-synthesis:none;text-rendering:optimizeLegibility;font-optical-sizing:auto;font-weight:400;--bg:#0d1017;--panel:#141923;--panel2:#171e2a;--line:#252d3a;--muted:#8791a3;--text:#e8eaf1;--mint:#72e0bd;--blue:#85a7ff;--amber:#f3bd68;--red:#f17f88;--mono:'DM Mono',ui-monospace,SFMono-Regular,Menlo,monospace}*{box-sizing:border-box}body{margin:0;min-width:320px;background:radial-gradient(ellipse at 80% -20%,#1d2938 0,transparent 38%),var(--bg);color:var(--text)}button,input,select{font:inherit}button{color:inherit}.app-shell{min-height:100vh}.sidebar{position:fixed;inset:0 auto 0 0;width:238px;padding:28px 18px 22px;background:#10141c;border-right:1px solid var(--line);display:flex;flex-direction:column;z-index:2}.brand{display:flex;align-items:center;gap:12px;padding:2px 8px 32px}.brand-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;color:#07130f;background:linear-gradient(145deg,#8df0ce,#4abd9d);font-family:Manrope,sans-serif;font-size:21px;font-weight:800;box-shadow:0 5px 22px #60d7b333}.brand strong,.brand small{display:block}.brand strong{font:700 15px Manrope,sans-serif;letter-spacing:.02em}.brand small{margin-top:3px;color:var(--muted);font-size:11px}.sidebar nav{display:grid;gap:6px}.nav-item{display:flex;gap:13px;align-items:center;padding:11px 13px;border:1px solid transparent;border-radius:9px;color:#a7afbd;text-decoration:none;font-size:13px;transition:.18s}.nav-item span{width:17px;text-align:center;color:#79869a;font-size:17px}.nav-item:hover{background:#171e29;color:var(--text)}.nav-item.active{color:#dffcf2;background:#183029;border-color:#24483c}.nav-item.active span{color:var(--mint)}.sidebar-foot{margin-top:auto;padding:15px 8px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:9px 1fr;align-items:center;gap:7px 9px;color:#b2bdc9;font-size:11px}.sidebar-foot small{grid-column:2;overflow:hidden;color:#758197;font:10px var(--mono);text-overflow:ellipsis;white-space:nowrap}.pulse{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 10px #72e0bd99}.main{max-width:1600px;margin-left:238px;padding:34px clamp(24px,4vw,62px) 64px}.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:28px}.eyebrow{margin:0 0 9px;color:#7d8aa0;font:500 10px var(--mono);letter-spacing:.14em}.topbar h1{margin:0;font:700 clamp(24px,2.3vw,32px) Manrope,sans-serif;letter-spacing:-.035em}.subtitle{margin:8px 0 0;color:#9ba5b6;font-size:13px}.top-actions{display:flex;align-items:center;gap:14px;padding-top:18px}.button{border:1px solid #344051;border-radius:8px;background:#19212d;padding:9px 13px;color:#dce3ec;font-size:12px;cursor:pointer;transition:.18s}.button:hover{border-color:#53677c;background:#202b3a}.button:disabled{opacity:.6;cursor:wait}.updated{color:#778397;font:10px var(--mono);white-space:nowrap}.error-banner{margin:-10px 0 18px;border:1px solid #713e45;border-radius:9px;background:#311d25;padding:12px 15px;color:#ffb9bc;font-size:12px}.metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}.metric-card,.panel{border:1px solid var(--line);border-radius:12px;background:linear-gradient(145deg,#161c27,#131822);box-shadow:0 10px 35px #00000012}.metric-card{min-height:127px;padding:18px 20px;position:relative;overflow:hidden}.metric-card.accent{border-color:#2c4c43;background:linear-gradient(140deg,#182b29,#151c25)}.metric-card.accent:after{content:'';position:absolute;right:-20px;top:-48px;width:115px;height:115px;border-radius:50%;border:1px solid #72e0bd20;box-shadow:0 0 0 13px #72e0bd09,0 0 0 27px #72e0bd06}.metric-label{color:#a2adbd;font-size:11px}.metric-value{margin:12px 0 5px;font:700 29px Manrope,sans-serif;letter-spacing:-.04em}.accent .metric-value{color:var(--mint)}.metric-note{color:#7e8999;font-size:10px}.layout-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.9fr);gap:15px;margin-bottom:16px}.panel{padding:20px 21px;margin-bottom:16px}.layout-grid .panel{margin-bottom:0;min-height:318px}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px}.panel-head h2,.dialog-head h2{margin:0;font:650 16px Manrope,sans-serif;letter-spacing:-.02em}.panel-head .eyebrow{margin-bottom:6px}.live-badge,.phase-tag{display:inline-flex;align-items:center;gap:6px;border:1px solid #2a483e;border-radius:20px;padding:5px 8px;background:#172620;color:#9fe4c9;font:9px var(--mono);letter-spacing:.06em}.live-badge i{width:6px;height:6px;border-radius:50%;background:var(--mint)}.subtle{color:#8490a0;font:10px var(--mono)}.flow{display:grid;gap:14px;margin-top:24px}.flow-step{display:grid;grid-template-columns:27px minmax(0,1fr) 44px;align-items:center;gap:0 11px}.flow-index{display:grid;place-items:center;width:25px;height:25px;border:1px solid #303a4a;border-radius:8px;color:#8490a3;font:10px var(--mono)}.flow-copy strong,.flow-copy small{display:block}.flow-copy strong{font-size:11px;font-weight:600}.flow-copy small{margin-top:3px;color:#7e899b;font-size:10px}.flow-count{text-align:right;color:#d4dbe4;font:12px var(--mono)}.flow-count small{margin-left:4px;color:#788599;font-size:9px}.flow-track{grid-column:2/4;height:3px;margin-top:8px;border-radius:2px;background:#252d39;overflow:hidden}.flow-track i{display:block;height:100%;border-radius:2px;background:linear-gradient(90deg,#4ba98e,var(--mint));transition:width .4s}.trend-chart{height:197px;display:flex;align-items:flex-end;justify-content:space-around;gap:8px;margin:18px 0 12px;padding:5px 4px 0;border-bottom:1px solid #2a3240;background:repeating-linear-gradient(to bottom,transparent 0,transparent 47px,#232a3633 48px)}.trend-column{height:100%;flex:1;min-width:9px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px}.bar-stack{width:min(26px,75%);min-height:4px;display:flex;flex-direction:column;overflow:hidden;border-radius:4px 4px 1px 1px;background:#29313e}.bar-stack i{display:block;min-height:0}.bar-error{background:var(--red)}.bar-warning{background:var(--amber)}.bar-info{background:#809ff2}.trend-column small{height:13px;color:#788599;font:8px var(--mono)}.legend{display:flex;justify-content:center;gap:17px;color:#8994a5;font-size:9px}.legend span{display:flex;align-items:center;gap:6px}.dot{width:6px;height:6px;border-radius:50%}.dot.error{background:var(--red)}.dot.warning{background:var(--amber)}.dot.info{background:#809ff2}.filters{display:flex;gap:9px;margin:18px 0 13px}.search{flex:1;display:flex;align-items:center;gap:8px;min-width:120px;border:1px solid #2c3543;border-radius:7px;background:#10151e;padding:0 10px;color:#7f8b9d}.search input{width:100%;border:0;outline:0;background:transparent;padding:9px 0;color:#e8eaf1;font-size:11px}.search input::placeholder{color:#667286}.filters select{border:1px solid #2c3543;border-radius:7px;background:#151b25;padding:0 10px;color:#bdc5d0;font-size:10px;outline:0}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{padding:10px 9px;border-bottom:1px solid #29313e;color:#748095;font:9px var(--mono);font-weight:400;letter-spacing:.04em}td{padding:12px 9px;border-bottom:1px solid #202733;color:#c2cad4;font-size:10px}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#ffffff04}.time-cell{color:#8994a5;font:9px var(--mono)}td strong{color:#dfe5ec;font-size:10px}.target-cell{max-width:220px;overflow:hidden;text-overflow:ellipsis;color:#8995a6;font:9px var(--mono)}.phase-tag{padding:4px 7px;border-color:#313b4a;background:#1a202b;color:#adb8c6;letter-spacing:0}.muted{color:#778397}.badge{display:inline-flex;align-items:center;border:1px solid #41434a;border-radius:20px;padding:3px 7px;color:#c1c7d0;background:#252932;font:9px var(--mono);white-space:nowrap}.badge.pass{border-color:#285344;background:#183128;color:#8ee2bd}.badge.error{border-color:#713d45;background:#321f26;color:#ff9ca4}.badge.flagged{border-color:#70552f;background:#30271b;color:#f2c675}.text-button{border:0;background:none;padding:4px;color:#8eb1ff;font-size:10px;cursor:pointer}.text-button:hover{color:#bfd0ff}.table-empty{text-align:center!important;padding:34px 10px!important;color:#778397!important}.runs-panel{margin-top:16px}.runs-list{margin-top:17px}.run-row{display:flex;align-items:center;gap:13px;padding:14px 3px;border-top:1px solid #252d38}.run-status{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:9px;font-size:13px}.run-status.is-clean{background:#183128;color:var(--mint)}.run-status.has-errors{background:#321f26;color:var(--red)}.run-main{flex:1;min-width:150px}.run-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.run-title strong{font-size:11px}.run-commit{color:#8190a4;font:9px var(--mono)}.run-meta{display:flex;gap:7px;margin-top:6px;color:#818da0;font-size:9px}.run-counts{display:grid;gap:4px;min-width:116px;color:#8792a3;font:9px var(--mono)}.error-text{color:#ee9297}.warning-text{color:#e5bb70}.empty-state{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#aab4c2}.empty-icon{margin-bottom:10px;color:#617188;font-size:24px}.empty-state strong{font-size:11px}.empty-state small{max-width:270px;margin-top:7px;color:#7e899a;font-size:10px;line-height:1.6}.empty-state code{color:#a6c1ff;font:10px var(--mono)}.run-empty{min-height:140px}.empty{color:#788599;font-size:11px}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.detail-grid div{padding:12px 0;border-bottom:1px solid #28303c}.detail-grid dt{margin-bottom:5px;color:#8190a3;font-size:10px}.detail-grid dd{margin:0;overflow-wrap:anywhere;color:#dce3ed;font:11px var(--mono)}.privacy-note{margin:16px 0 0;color:#8591a1;font-size:10px}.finding-list{max-height:60vh;overflow:auto}.finding{padding:12px 0;border-bottom:1px solid #28303c}.finding strong{margin-left:5px;font:11px var(--mono)}.finding p{margin:8px 0;color:#c2cad4;font-size:11px;line-height:1.5}.finding small{color:#8190a3;font:9px var(--mono);overflow-wrap:anywhere}dialog{width:min(620px,calc(100vw - 28px));max-height:82vh;overflow:auto;border:1px solid #374354;border-radius:13px;background:#151b25;color:var(--text);padding:21px 23px;box-shadow:0 25px 100px #000b}dialog::backdrop{background:#05070bcc;backdrop-filter:blur(3px)}.dialog-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:15px}.icon-button{width:29px;height:29px;border:1px solid #394352;border-radius:8px;background:#202733;color:#bac3d0;font-size:19px;line-height:1;cursor:pointer}.icon-button:hover{background:#2a3442}.error-banner[hidden]{display:none}
-.project-overview{display:grid;gap:15px}.section-heading{display:flex;align-items:end;justify-content:space-between;margin:2px 0 0}.section-heading h2{margin:0;font:650 19px Manrope,sans-serif}.project-list{display:grid;gap:10px}.project-card{display:grid;grid-template-columns:42px minmax(0,1fr) auto minmax(130px,auto) 18px;align-items:center;gap:15px;width:100%;padding:17px 18px;text-align:left;color:var(--text);background:linear-gradient(110deg,#171e28,#141a23);border:1px solid var(--line);border-radius:11px;cursor:pointer;transition:.18s}.project-card:hover{transform:translateY(-1px);border-color:#3d7965;background:#19251f}.project-icon{display:grid;place-items:center;width:40px;height:40px;color:var(--mint);background:#1c332c;border:1px solid #315447;border-radius:10px;font-size:19px}.project-copy{min-width:0}.project-copy strong,.project-copy small,.project-latest{display:block}.project-copy strong{font-size:13px}.project-copy small{margin-top:5px;overflow:hidden;color:var(--muted);font:10px var(--mono);text-overflow:ellipsis;white-space:nowrap}.project-stats{display:grid;text-align:right}.project-stats b{font:600 20px var(--mono)}.project-stats small,.project-latest{color:var(--muted);font-size:10px}.project-latest{line-height:1.7}.project-arrow{color:var(--mint)}.unassigned-card{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 12px;padding:13px 15px;text-align:left;color:var(--text);background:#171b22;border:1px dashed #45404a;border-radius:9px;cursor:pointer}.unassigned-card strong{color:#f4c980;font:600 16px var(--mono)}.unassigned-card span{grid-column:1/-1;color:var(--muted);font-size:10px}.unassigned-card.selected{border-color:#b18a4b}.breadcrumbs{display:flex;align-items:center;gap:9px;min-height:20px;margin:-12px 0 20px;color:var(--muted);font-size:11px}.breadcrumbs button{padding:0;border:0;background:none;color:var(--mint);cursor:pointer;font:inherit}.breadcrumbs strong{color:var(--text);font-weight:600}.workspace-nav{display:flex;gap:7px;margin:-4px 0 16px}.workspace-nav .button{padding:8px 12px;color:var(--muted)}.workspace-nav .button.active{color:#dffcf2;background:#183029;border-color:#315a4a}[hidden]{display:none!important}.unassigned-notice{margin:0 0 14px;padding:10px 12px;border:1px solid #55452d;border-radius:7px;background:#211c15;color:#e8c787;font-size:11px}.extra-details{margin-top:13px;border-top:1px solid var(--line);padding-top:11px}.extra-details summary,.finding summary{cursor:pointer;color:#b8c3d0;font-size:11px}.finding{padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:#151b24}.finding summary span{float:right;color:var(--muted);font:10px var(--mono)}.nav-item{width:100%;border:1px solid transparent;background:transparent;text-align:left;cursor:pointer;font:inherit}.history-toolbar{display:flex;align-items:center;gap:8px;margin-top:16px;padding:10px 0;border-top:1px solid var(--line)}.history-tabs{display:flex;gap:5px;margin-right:auto}.history-tabs .button{padding:7px 10px;font-size:10px}.history-tabs .button.active{border-color:#315a4a;background:#183029;color:#dffcf2}.button.primary{border-color:#315a4a;background:#183029;color:#a5edce}.run-select{display:grid;place-items:center;flex:none}.run-select input{accent-color:#72e0bd}.run-row{gap:10px}.history-toolbar .subtle{white-space:nowrap}@media(max-width:560px){.history-toolbar{flex-wrap:wrap}.history-toolbar .subtle{width:100%}.history-toolbar .button{font-size:10px}.run-row{align-items:flex-start}.run-select{padding-top:6px}}
-@media(max-width:760px){.project-card{grid-template-columns:36px minmax(0,1fr) auto 14px;gap:10px;padding:13px}.project-latest{grid-column:2/4;grid-row:2}.project-icon{width:34px;height:34px}.project-arrow{grid-column:4;grid-row:1}.breadcrumbs{margin-top:-5px}.workspace-nav{overflow:auto}.unassigned-card{font-size:11px}}
-@media(max-width:1080px){.project-card{grid-template-columns:38px minmax(0,1fr) auto 14px}.project-latest{grid-column:2/4;grid-row:2}.project-arrow{grid-column:4;grid-row:1}}
+/*
+ * metricGate cockpit — stylesheet, zero build step.
+ *
+ * The visual language is SonarQube's: the Echoes design system (SonarSource's
+ * open-source token package, LGPL-3.0). No Echoes code is copied here; the
+ * *token values* are, because a design system is exactly the thing whose whole
+ * point is to be adopted rather than reinvented. The mapping is recorded in
+ * docs/constraints/cockpit-ui-review.md.
+ *
+ * Structure:
+ *   1. TOKENS   — the only place a colour literal may appear.
+ *   2. BASE     — document, shell, typography.
+ *   3. CHROME   — top bar, left rail, breadcrumbs.
+ *   4. SURFACES — panels, cards, tables, forms, buttons, badges, dialog.
+ *   5. VIEWS    — the per-page pieces, in the order the views are documented.
+ *
+ * Rule for the gate: every colour outside section 1 is a var() reference. A
+ * literal further down is drift — it is how the previous stylesheet ended up
+ * with four greens and three reds that no longer matched each other.
+ */
 
-{.sidebar{width:205px}.main{margin-left:205px;padding-inline:27px}.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.layout-grid{grid-template-columns:1fr 1fr}.run-counts{display:none}}
-@media(max-width:760px){.sidebar{position:static;width:auto;height:auto;padding:13px 16px;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-direction:row;align-items:center;justify-content:space-between}.brand{padding:0}.brand-mark{width:34px;height:34px}.sidebar nav{display:flex;gap:2px}.nav-item{padding:8px 9px;font-size:0}.nav-item span{font-size:16px}.sidebar-foot{display:none}.main{margin:0;padding:25px 17px 45px}.topbar{display:block}.top-actions{padding-top:15px;justify-content:space-between}.layout-grid{grid-template-columns:1fr}.layout-grid .panel{min-height:280px}.metrics-grid{gap:9px}.metric-card{padding:15px;min-height:115px}.metric-value{font-size:25px}.metric-note{font-size:9px}.filters{flex-wrap:wrap}.search{flex-basis:100%;height:36px}.filters select{height:34px;flex:1}.panel{padding:17px 15px}.run-row{gap:9px}.run-commit{display:none}.run-row>.text-button{font-size:9px}.run-meta{flex-wrap:wrap}.updated{font-size:9px}}
-@media(max-width:390px){.brand strong{font-size:13px}.brand small{font-size:9px}.nav-item{padding:7px}.metrics-grid{grid-template-columns:1fr 1fr}.metric-card{padding:12px}.metric-value{font-size:23px}.metric-label{font-size:10px}.run-row{flex-wrap:wrap}.run-main{min-width:calc(100% - 50px)}.run-row>.text-button{margin-left:38px}.detail-grid{grid-template-columns:1fr}}
+/* ------------------------------------------------------------------ 1. TOKENS */
 
-/* Concession ledger panel */
-.accepted-panel { margin-top: 16px; }
-.accepted-list { display: grid; gap: 8px; }
-.accepted-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; }
-.accepted-item small { width: 100%; color: var(--muted); }
-.accepted-item .tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; }
-.accepted-item .tag.ok { color: #2f9e6e; border: 1px solid #2f9e6e55; }
-.accepted-item .tag.stale { color: #c9862a; border: 1px solid #c9862a55; }
+/*
+ * The core palette is declared under Echoes' own names. Keeping upstream names
+ * (rather than inventing shorter ones) is what makes the mapping auditable: a
+ * value here can be checked against @sonarsource/echoes-react's
+ * dist/tokens/sonar/themed.json without a translation table in between.
+ */
+:root {
+  /* Surfaces. SonarQube is a light, high-density UI: a near-white canvas, white
+     cards, and hairlines rather than shadows doing the separating. */
+  --e-color-surface-canvas: #fcfcfd;
+  --e-color-surface-default: #ffffff;
+  --e-color-surface-hover: #f6f7fb;
+  --e-color-surface-active: #e1e6f3;
+  --e-color-surface-disabled: #eff2f9;
+  --e-color-surface-inverse: #2a2f40;
+  --e-color-background-neutral-subtle: #eff2f9;
+  --e-color-background-neutral-subtle-hover: #e1e6f3;
+  --e-color-background-neutral-bolder: #e1e6f3;
 
-/* metric experiment panel: highlight a row where the threshold stepped */
-.metric-trend-panel .table-wrap { max-height: 280px; overflow: auto; }
-.metric-trend-panel tr.metric-step td { border-top: 2px dashed var(--accent, #7c9cff); }
+  /* Text. */
+  --e-color-text-strong: #1d212f;
+  --e-color-text-default: #3e4357;
+  --e-color-text-subtle: #637192;
+  --e-color-text-disabled: #a6adc2;
+  --e-color-text-placeholder: #637192;
+  --e-color-text-on-color: #ffffff;
 
-/* Configuration (policy) view */
-.policy-pane { margin-top: 2px; }
-.policy-intro { margin: 0 0 14px; line-height: 1.7; }
-.policy-intro code { color: var(--mint); font: 10px var(--mono); background: #182420; padding: 1px 5px; border-radius: 4px; }
-.policy-layout { display: grid; grid-template-columns: minmax(220px, .82fr) minmax(0, 2fr); gap: 15px; align-items: start; }
-.policy-side, .policy-editor { display: grid; gap: 14px; }
-.policy-chain { display: grid; gap: 5px; margin: 12px 0 4px; }
-.policy-chain-step { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; font: 10px var(--mono); color: var(--muted); }
-.policy-chain-step.in-force { border-color: #315a4a; background: #14231d; color: #a5edce; }
-.policy-chain-step.missed { opacity: .55; }
-.policy-chain-step .mark { width: 14px; text-align: center; }
-.policy-sections { display: flex; flex-wrap: wrap; gap: 5px; }
-.policy-section-chip { border: 1px solid #2f3947; border-radius: 20px; background: #18202c; padding: 4px 9px; color: #b8c3d0; font: 9px var(--mono); cursor: pointer; }
-.policy-section-chip:hover { border-color: #53677c; color: var(--text); }
-.policy-editor-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.policy-file-label { font-size: 12px; font-weight: 600; }
-.policy-editor-actions { margin-left: auto; display: flex; gap: 8px; }
-.policy-textarea { width: 100%; min-height: 46vh; padding: 14px 16px; border: 1px solid #2c3543; border-radius: 10px; background: #10151e; color: #dfe6ef; font: 11px/1.65 var(--mono); resize: vertical; tab-size: 2; }
-.policy-textarea:focus { outline: 0; border-color: #4a7b66; box-shadow: 0 0 0 3px #72e0bd1a; }
-.policy-hint { margin: 0; color: var(--amber); font: 10px var(--mono); }
-.policy-keys-panel { margin: 0; }
+  /* Borders. */
+  --e-color-border-weak: #e1e6f3;
+  --e-color-border-weaker: #eff2f9;
+  --e-color-border-bold: #c5cddf;
+  --e-color-border-bolder: #637192;
+  --e-color-border-disabled: #c5cddf;
+
+  /* Accent — links, primary buttons, the active rail item. */
+  --e-color-accent: #5d6cd0;
+  --e-color-accent-hover: #4b56bb;
+  --e-color-accent-active: #47518f;
+  --e-color-accent-weak: #f4f6ff;
+  --e-color-accent-weak-hover: #e8ebff;
+  --e-color-accent-weak-active: #d1d7fe;
+  --e-color-text-accent: #5d6cd0;
+  --e-color-text-link-hover: #4b56bb;
+  --e-color-focus: #4b56bb;
+
+  /* Semantic tones. Each has a fill, a weak fill for badges, and a readable
+     foreground — a badge is always fill + text from the same tone, never a fill
+     from one tone and a text colour borrowed from another. */
+  --e-color-danger: #d92d20;
+  --e-color-danger-strong: #b42318;
+  --e-color-danger-text: #b42318;
+  --e-color-danger-deep: #801b14;
+  --e-color-danger-weak: #fef3f2;
+  --e-color-danger-weak-border: #fee4e2;
+  --e-color-danger-weak-active: #fecdca;
+
+  --e-color-warning: #f5b840;
+  --e-color-warning-text: #8c5e1e;
+  --e-color-warning-strong: #93370d;
+  --e-color-warning-weak: #fcf5e4;
+  --e-color-warning-weak-border: #fef5d0;
+  --e-color-warning-weak-active: #fce9a3;
+
+  --e-color-success: #75a92c;
+  --e-color-success-text: #537c17;
+  --e-color-success-deep: #054f16;
+  --e-color-success-weak: #f3f8ef;
+  --e-color-success-weak-border: #e4f7d1;
+  --e-color-success-weak-active: #d4f2b7;
+
+  --e-color-info: #316c92;
+  --e-color-info-text: #316c92;
+  --e-color-info-weak: #f5fbff;
+  --e-color-info-weak-border: #e9f4fb;
+  --e-color-info-weak-active: #b8def1;
+
+  /* Ratings A–E. The grade chip is the one place a page-level verdict is read
+     at a glance, so these five are their own tokens rather than mapped onto the
+     tone scale — an "E" must not read as a mere warning. */
+  --e-rating-a-bg: #d1fadf;
+  --e-rating-a-text: #054f31;
+  --e-rating-a-border: #12b76a;
+  --e-rating-b-bg: #d4f2b7;
+  --e-rating-b-text: #054f16;
+  --e-rating-b-border: #9dcb6b;
+  --e-rating-c-bg: #fce9a3;
+  --e-rating-c-text: #66400f;
+  --e-rating-c-border: #f5b840;
+  --e-rating-d-bg: #ffd6af;
+  --e-rating-d-text: #7a2e0e;
+  --e-rating-d-border: #fd7122;
+  --e-rating-e-bg: #fecdca;
+  --e-rating-e-text: #5d1d13;
+  --e-rating-e-border: #f04438;
+
+  /* Quality gate banner. */
+  --e-gate-passed-bg: #d4f2b7;
+  --e-gate-passed-text: #054f16;
+  --e-gate-failed-bg: #fecdca;
+  --e-gate-failed-text: #801b14;
+
+  /* Severity badges, mirroring Echoes' severity-badge tokens: error reads as
+     SonarQube's blocker, warning as high, info as info. */
+  --e-sev-error-bg: #fee4e2;
+  --e-sev-error-text: #801b14;
+  --e-sev-error-border: #fecdca;
+  --e-sev-warning-bg: #fff0eb;
+  --e-sev-warning-text: #93370d;
+  --e-sev-warning-border: #ffe8da;
+  --e-sev-info-bg: #f5fbff;
+  --e-sev-info-text: #316c92;
+  --e-sev-info-border: #e9f4fb;
+
+  /* Geometry and type. */
+  --e-radius-sm: 2px;
+  --e-radius-md: 4px;
+  --e-radius-lg: 8px;
+  --e-radius-pill: 700px;
+  --e-border-width: 1px;
+  --e-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --e-font-mono: "Ubuntu Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+  --e-font-size-xs: 0.75rem;
+  --e-font-size-sm: 0.8125rem;
+  --e-font-size-md: 0.875rem;
+  --e-font-size-lg: 1rem;
+  --e-font-size-xl: 1.25rem;
+  --e-font-size-2xl: 1.5rem;
+  --e-line-tight: 1.25rem;
+  --e-line-normal: 1.5rem;
+  --e-shadow-sm: 0 1px 3px 0 #1d212f0d;
+  --e-shadow-md: 0 2px 15px -2px #1d212f0f, 0 4px 8px -2px #1d212f1a;
+  --e-shadow-lg: 0 4px 6px -2px #1d212f0d, 0 12px 16px -4px #1d212f1a;
+  --e-overlay-backdrop: #08090c73;
+
+  /* Shell metrics. */
+  --e-topbar-height: 3.5rem;
+  --e-rail-width: 15rem;
+}
+
+/*
+ * The semantic layer. Components below reference these, never the palette, so a
+ * single re-pointing here changes the meaning of a class everywhere at once.
+ * This is the indirection that was missing before: the old stylesheet had
+ * components reading palette values directly, which is how one border token
+ * went undeclared for months without anyone noticing.
+ */
+:root {
+  --bg: var(--e-color-surface-canvas);
+  --panel: var(--e-color-surface-default);
+  --panel2: var(--e-color-background-neutral-subtle);
+  --line: var(--e-color-border-weak);
+  --line-strong: var(--e-color-border-bold);
+  --text: var(--e-color-text-default);
+  --text-strong: var(--e-color-text-strong);
+  --muted: var(--e-color-text-subtle);
+  --disabled: var(--e-color-text-disabled);
+  --accent: var(--e-color-accent);
+  --accent-weak: var(--e-color-accent-weak);
+  --focus: var(--e-color-focus);
+  --mint: var(--e-color-success-text);
+  --blue: var(--e-color-text-accent);
+  --amber: var(--e-color-warning-text);
+  --red: var(--e-color-danger-strong);
+  --border: var(--e-color-border-weak);
+  --mono: var(--e-font-mono);
+  --sans: var(--e-font-sans);
+}
+
+/* -------------------------------------------------------------------- 2. BASE */
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 var(--e-font-size-md) / var(--e-line-normal) var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { color: var(--text-strong); font-weight: 600; }
+
+a { color: var(--e-color-text-accent); }
+a:hover { color: var(--e-color-text-link-hover); }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* The focus ring is one declaration, so no control can ship without one. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+code, pre, .mono { font-family: var(--mono); }
+
+[hidden] { display: none !important; }
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--e-rail-width) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "brand topbar" "rail main";
+  min-height: 100vh;
+}
+
+/* ------------------------------------------------------------------ 3. CHROME */
+
+/*
+ * Top bar. SonarQube's own chrome: a white strip over a hairline, the location
+ * path on its own line, then the page title with its actions pushed right. The
+ * bar is sticky, so the path back to the picker never scrolls away.
+ */
+.topbar {
+  grid-area: topbar;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "crumb crumb" "heading actions";
+  align-items: end;
+  column-gap: 1.5rem;
+  row-gap: 0.25rem;
+  padding: 0.5rem 1.5rem 0.625rem;
+  background: var(--panel);
+  border-bottom: var(--e-border-width) solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.breadcrumbs { grid-area: crumb; align-self: start; }
+.topbar-heading {
+  grid-area: heading;
+  min-width: 0;
+}
+.topbar-heading h1 {
+  margin: 0;
+  font-size: var(--e-font-size-xl);
+  letter-spacing: -0.01em;
+}
+.topbar .eyebrow { margin: 0 0 0.125rem; }
+
+.top-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
+.updated { color: var(--muted); font-size: var(--e-font-size-xs); }
+
+/* Brand block, pinned to the top-left corner of the shell. */
+.brand {
+  grid-area: brand;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  background: var(--panel);
+  border-right: var(--e-border-width) solid var(--line);
+  border-bottom: var(--e-border-width) solid var(--line);
+}
+/* The mark is the way home, the same affordance SonarQube's logo carries. */
+.brand-home {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.brand-text { display: grid; gap: 1px; }
+.brand strong, .brand small { display: block; }
+.brand strong { color: var(--text-strong); font-size: var(--e-font-size-md); }
+.brand small { color: var(--muted); font-size: var(--e-font-size-xs); }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-accent);
+  color: var(--e-color-text-on-color);
+  font-weight: 700;
+}
+
+/* Left rail: grouped items, active item on a weak accent wash. */
+.sidebar {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0.5rem;
+  background: var(--panel);
+  border-right: var(--e-border-width) solid var(--line);
+  overflow-y: auto;
+}
+
+.sidebar nav { display: grid; gap: 1px; }
+
+/* Group label. SonarQube separates the workspace from the global section with
+ * a caption rather than a divider, so the two stay one list of destinations. */
+.nav-group {
+  margin: 0.75rem 0.625rem 0.25rem;
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.nav-group:first-child { margin-top: 0; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border: 0;
+  border-radius: var(--e-radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--e-font-size-md);
+  text-align: left;
+  cursor: pointer;
+}
+.nav-item span {
+  width: 1rem;
+  color: var(--muted);
+  text-align: center;
+  font-size: var(--e-font-size-lg);
+}
+.nav-item:hover { background: var(--e-color-surface-hover); }
+.nav-item.active {
+  background: var(--e-color-accent-weak);
+  color: var(--e-color-text-accent);
+  font-weight: 600;
+}
+.nav-item.active span { color: var(--e-color-text-accent); }
+
+.sidebar-foot {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: 0.5rem minmax(0, 1fr);
+  gap: 0.375rem 0.5rem;
+  align-items: center;
+  padding: 0.75rem 0.625rem 0.25rem;
+  border-top: var(--e-border-width) solid var(--line);
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+}
+.sidebar-foot small {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pulse {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--e-color-success);
+}
+
+.main {
+  grid-area: main;
+  min-width: 0;
+  padding: 1.5rem clamp(1rem, 2.5vw, 2.5rem) 4rem;
+}
+
+/* Header breadcrumb. Hidden on the picker, where there is nothing above. */
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: var(--e-font-size-md);
+}
+.breadcrumbs button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--e-color-text-accent);
+  cursor: pointer;
+}
+.breadcrumbs button:hover { text-decoration: underline; }
+.breadcrumbs strong { color: var(--text-strong); font-weight: 600; }
+
+.eyebrow {
+  margin: 0 0 0.375rem;
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Page subtitle: the one line of prose under the header, so it belongs to the
+ * content column and not to the bar above it. */
+.page-subtitle {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+  font-size: var(--e-font-size-md);
+}
+
+.subtitle { margin: 0.25rem 0 0; color: var(--muted); font-size: var(--e-font-size-md); }
+
+.error-banner {
+  margin: 0 0 1rem;
+  padding: 0.625rem 0.875rem;
+  border: var(--e-border-width) solid var(--e-color-danger-weak-border);
+  border-left: 3px solid var(--e-color-danger);
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-danger-weak);
+  color: var(--e-color-danger-text);
+  font-size: var(--e-font-size-md);
+}
+
+/* The toast is a confirmation of a write that already landed, not an error:
+   it sits where the banner does but in the neutral surface tone, and it answers
+   "what just happened" with an undo rather than a dismissal. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.875rem;
+  border: var(--e-border-width) solid var(--e-color-success-weak-border);
+  border-left: 3px solid var(--e-color-success);
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-success-weak);
+  color: var(--e-color-success-text);
+  font-size: var(--e-font-size-md);
+}
+.toast[hidden] { display: none; }
+.toast #toastText { flex: 1; }
+
+/* ---------------------------------------------------------------- 4. SURFACES */
+
+.panel, .metric-card, .measure-card, .issue-card, .project-card, .run-row,
+.policy-side, .policy-editor, .issues-sidebar, .source-view, .accepted-item {
+  background: var(--panel);
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-lg);
+}
+
+.panel { padding: 1rem 1.125rem; margin-bottom: 1rem; }
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.panel-head h2, .dialog-head h2 {
+  margin: 0;
+  font-size: var(--e-font-size-lg);
+  font-weight: 600;
+}
+
+/* The scope line under a panel title: which workspace this panel describes,
+   demoted below the heading rather than replacing it. */
+.panel-subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.section-heading h2 { margin: 0; font-size: var(--e-font-size-xl); }
+
+.subtle { color: var(--muted); font-size: var(--e-font-size-xs); }
+.muted { color: var(--muted); }
+.empty { color: var(--muted); font-size: var(--e-font-size-md); }
+
+/* Buttons. A secondary button is a white chip on a hairline; the primary one is
+   the accent fill. Both keep one 2rem-ish height so rows of them line up. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border: var(--e-border-width) solid var(--line-strong);
+  border-radius: var(--e-radius-md);
+  background: var(--panel);
+  color: var(--text-strong);
+  font-size: var(--e-font-size-md);
+  cursor: pointer;
+}
+.button:hover { background: var(--e-color-surface-hover); border-color: var(--e-color-border-bolder); }
+.button:disabled { background: var(--e-color-surface-disabled); color: var(--disabled); cursor: wait; }
+.button.ghost { border-color: transparent; background: transparent; color: var(--e-color-text-accent); }
+.button.ghost:hover { background: var(--e-color-accent-weak); }
+.button.primary {
+  border-color: var(--e-color-accent);
+  background: var(--e-color-accent);
+  color: var(--e-color-text-on-color);
+}
+.button.primary:hover { background: var(--e-color-accent-hover); border-color: var(--e-color-accent-hover); }
+.button.active { border-color: var(--e-color-accent); background: var(--e-color-accent-weak); color: var(--e-color-text-accent); font-weight: 600; }
+
+.text-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--e-color-text-accent);
+  font-size: var(--e-font-size-md);
+  cursor: pointer;
+}
+.text-button:hover { color: var(--e-color-text-link-hover); text-decoration: underline; }
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: var(--e-border-width) solid transparent;
+  border-radius: var(--e-radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--e-font-size-xl);
+  line-height: 1;
+  cursor: pointer;
+}
+.icon-button:hover { background: var(--e-color-surface-hover); color: var(--text-strong); }
+
+/* Forms. */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 12rem;
+  padding: 0 0.625rem;
+  border: var(--e-border-width) solid var(--line-strong);
+  border-radius: var(--e-radius-md);
+  background: var(--panel);
+  color: var(--muted);
+}
+.search input {
+  width: 100%;
+  padding: 0.375rem 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font-size: var(--e-font-size-md);
+}
+.search input::placeholder { color: var(--e-color-text-placeholder); }
+
+.filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0 0 0.75rem; }
+.filters select, .issue-status, select, input[type="text"], textarea {
+  border: var(--e-border-width) solid var(--line-strong);
+  border-radius: var(--e-radius-md);
+  background: var(--panel);
+  padding: 0.375rem 0.5rem;
+  color: var(--text-strong);
+  font-size: var(--e-font-size-md);
+}
+.filters select:focus, .issue-status:focus, textarea:focus {
+  outline: 0;
+  border-color: var(--e-color-accent);
+  box-shadow: 0 0 0 2px var(--e-color-accent-weak);
+}
+
+/* The verdict dropdown is tinted by the verdict it currently holds, in the same
+   tone words statusTag uses, so the control and the badge beside it never
+   disagree about what is in force. Only the fill changes: the select's own text
+   colour stays readable, because the dropdown is still a control. */
+.issue-status.tone-muted { border-color: var(--line-strong); color: var(--muted); }
+.issue-status.tone-blue { border-color: var(--e-color-info-weak-border); background: var(--e-color-info-weak); color: var(--e-color-info-text); }
+.issue-status.tone-amber { border-color: var(--e-color-warning-weak-border); background: var(--e-color-warning-weak); color: var(--e-color-warning-text); }
+.issue-status.tone-mint { border-color: var(--e-color-success-weak-border); background: var(--e-color-success-weak); color: var(--e-color-success-text); }
+.issue-status.tone-error { border-color: var(--e-color-danger-weak-border); background: var(--e-color-danger-weak); color: var(--e-color-danger-text); }
+
+/* A failed read replaces the view's empty state rather than sitting beside it:
+   the empty list would otherwise read as "there is nothing here" when what
+   happened is "this could not be read". The retry button lives in the card so
+   the answer to the error is on screen with it. */
+.load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0.875rem 1rem;
+  border: var(--e-border-width) solid var(--e-color-danger-weak-border);
+  border-left: 3px solid var(--e-color-danger);
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-danger-weak);
+  color: var(--e-color-danger-text);
+}
+.load-error-head { display: flex; align-items: center; gap: 0.5rem; }
+.load-error-glyph {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: var(--e-color-danger);
+  color: var(--e-color-text-on-color);
+  font-size: var(--e-font-size-xs);
+  font-weight: 700;
+}
+.load-error-reason { margin: 0; font-size: var(--e-font-size-xs); line-height: 1.6; }
+.table-empty.load-error-cell { color: var(--e-color-danger-text); text-align: left; }
+
+/* The in-flight card. Same shape as load-error on purpose — it stands in the
+   same place, for the same reason — but in the neutral tone, because waiting is
+   not a failure. Only the tint separates "could not read" from "not back yet". */
+.load-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0.875rem 1rem;
+  border: var(--e-border-width) solid var(--e-color-border-weak);
+  border-left: 3px solid var(--e-color-accent);
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-background-neutral-subtle);
+}
+.load-pending-glyph { color: var(--e-color-accent); font-weight: 700; }
+
+/* Tables. */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th {
+  padding: 0.5rem 0.625rem;
+  border-bottom: var(--e-border-width) solid var(--line);
+  background: var(--e-color-background-neutral-subtle);
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+/* A sortable column header. The button is inside the th rather than replacing
+   it so the cell keeps the table's own padding and border: a header that sits
+   on its own baseline while the cells sit on another reads as a different
+   table. aria-sort carries the state; the arrow is for whoever does not read
+   an attribute, and a column that is not the active one shows a neutral glyph
+   rather than none — "no arrow" and "not sortable" must not look the same. */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.th-sort:hover { color: var(--e-color-text-accent); }
+.th-sort .sort-arrow { font-style: normal; font-size: var(--e-font-size-xs); opacity: 0.55; }
+th[aria-sort="ascending"] .th-sort, th[aria-sort="descending"] .th-sort { color: var(--text-strong); }
+th[aria-sort="ascending"] .sort-arrow, th[aria-sort="descending"] .sort-arrow { opacity: 1; }
+td {
+  padding: 0.625rem;
+  border-bottom: var(--e-border-width) solid var(--line);
+  color: var(--text);
+  font-size: var(--e-font-size-md);
+}
+tbody tr:hover { background: var(--e-color-surface-hover); }
+tbody tr:last-child td { border-bottom: 0; }
+.time-cell { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.target-cell {
+  max-width: 20rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-empty { padding: 2rem 0.625rem !important; color: var(--muted) !important; text-align: center !important; }
+
+/*
+ * Headroom is the margin a condition still has, so its tone has to be readable
+ * without comparing two numbers: over the line, exactly on it, or with room
+ * left. "unknown" is deliberately flat — an unmeasured condition must not
+ * borrow the green of a comfortable pass.
+ */
+.headroom {
+  display: inline-block;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--e-radius-sm);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  white-space: nowrap;
+}
+.headroom-under { background: var(--e-rating-a-bg); color: var(--e-rating-a-text); }
+.headroom-at { background: var(--e-rating-c-bg); color: var(--e-rating-c-text); }
+.headroom-over { background: var(--e-rating-e-bg); color: var(--e-rating-e-text); }
+.headroom-unknown { background: var(--panel2); color: var(--muted); }
+.cell-unknown { color: var(--muted); font-style: italic; }
+
+/*
+ * A language group inside the condition table. The header is a full-width row
+ * rather than a column, because the grouping is what tells two otherwise
+ * identical rows apart — a "language" cell on every row would repeat the same
+ * word down the page and still leave the reader matching rows by eye.
+ */
+.gate-lang-row th {
+  padding-top: 0.875rem;
+  padding-bottom: 0.375rem;
+  border-bottom: var(--e-border-width) solid var(--line);
+  background: transparent;
+  text-align: left;
+}
+.gate-lang {
+  display: inline-block;
+  padding: 0.0625rem 0.375rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-sm);
+  background: var(--panel2);
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+/* The locate control belongs at the row's right edge, after the run id when
+   there is one. Without the sibling rule the button inherits margin-left:auto
+   too, splits that space with the run id, and ends up floating mid-banner —
+   which reads as part of the reason text. */
+.gate-banner .gate-locate {
+  margin-left: auto;
+  padding: 0.3rem 0.7rem;
+  border: var(--e-border-width) solid currentColor;
+  border-radius: var(--e-radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--e-font-size-xs);
+  cursor: pointer;
+  opacity: 0.9;
+}
+.gate-banner .gate-locate:hover { opacity: 1; background: var(--panel); }
+.gate-banner .gate-run + .gate-locate { margin-left: 0.75rem; }
+
+/* The row a locate click landed on. The mark is temporary (the handler clears
+   it) so the tint keeps meaning "this is where the jump went" instead of
+   becoming a permanent status colour a reader learns to ignore. */
+tr.is-located td { background: var(--e-color-warning-weak); }
+tr.is-located td:first-child { box-shadow: inset 3px 0 0 var(--e-color-warning); }
+
+/*
+ * The verdict's provenance line: one row of small facts beside the table title.
+ * It wraps rather than scrolls — a gate that failed because of a run the reader
+ * cannot identify is the state this line exists to end.
+ */
+.gate-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: center;
+  font-size: var(--e-font-size-xs);
+}
+.gate-meta-item { color: var(--muted); white-space: nowrap; }
+.gate-meta-item code { color: var(--text); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+
+/* Badges and tags: fill + text from one tone. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-pill);
+  background: var(--e-color-background-neutral-subtle);
+  color: var(--text);
+  font-size: var(--e-font-size-xs);
+  white-space: nowrap;
+}
+.badge.pass { border-color: var(--e-color-success-weak-border); background: var(--e-color-success-weak); color: var(--e-color-success-text); }
+.badge.flagged { border-color: var(--e-color-warning-weak-border); background: var(--e-color-warning-weak); color: var(--e-color-warning-text); }
+.badge.error { border-color: var(--e-color-danger-weak-border); background: var(--e-color-danger-weak); color: var(--e-color-danger-text); }
+/* Neither green nor amber: a condition with no measurement has no verdict, and
+   the two other tones both claim one. */
+.badge.unknown { border-color: var(--line); background: var(--panel2); color: var(--muted); }
+
+.badge.sev-error { border-color: var(--e-sev-error-border); background: var(--e-sev-error-bg); color: var(--e-sev-error-text); }
+.badge.sev-warning { border-color: var(--e-sev-warning-border); background: var(--e-sev-warning-bg); color: var(--e-sev-warning-text); }
+.badge.sev-info { border-color: var(--e-sev-info-border); background: var(--e-sev-info-bg); color: var(--e-sev-info-text); }
+
+.status-tag {
+  padding: 0.125rem 0.5rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-pill);
+  background: var(--e-color-background-neutral-subtle);
+  font-size: var(--e-font-size-xs);
+  white-space: nowrap;
+}
+.status-tag.tone-muted { color: var(--muted); }
+.status-tag.tone-blue { border-color: var(--e-color-info-weak-border); background: var(--e-color-info-weak); color: var(--e-color-info-text); }
+.status-tag.tone-amber { border-color: var(--e-color-warning-weak-border); background: var(--e-color-warning-weak); color: var(--e-color-warning-text); }
+.status-tag.tone-mint { border-color: var(--e-color-success-weak-border); background: var(--e-color-success-weak); color: var(--e-color-success-text); }
+.status-tag.tone-error { border-color: var(--e-color-danger-weak-border); background: var(--e-color-danger-weak); color: var(--e-color-danger-text); }
+.status-tag.tone-pass { border-color: var(--e-color-success-weak-border); background: var(--e-color-success-weak); color: var(--e-color-success-text); }
+.status-tag.tone-info { border-color: var(--e-color-info-weak-border); background: var(--e-color-info-weak); color: var(--e-color-info-text); }
+
+.tag { padding: 0.0625rem 0.5rem; border-radius: var(--e-radius-pill); font-size: var(--e-font-size-xs); }
+.tag.ok { border: var(--e-border-width) solid var(--e-color-success-weak-border); background: var(--e-color-success-weak); color: var(--e-color-success-text); }
+.tag.stale { border: var(--e-border-width) solid var(--e-color-warning-weak-border); background: var(--e-color-warning-weak); color: var(--e-color-warning-text); }
+
+.phase-tag, .live-badge, .issues-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-pill);
+  background: var(--e-color-background-neutral-subtle);
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+  white-space: nowrap;
+}
+.live-badge i { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--e-color-success); }
+
+.dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+.dot.error, .bar-error { background: var(--e-color-danger); }
+.dot.warning, .bar-warning { background: var(--e-color-warning); }
+.dot.info, .bar-info { background: var(--e-color-info); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.875rem; color: var(--muted); font-size: var(--e-font-size-xs); }
+.legend span { display: flex; align-items: center; gap: 0.375rem; }
+
+/* Empty states. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 11rem;
+  padding: 1.5rem;
+  color: var(--muted);
+  text-align: center;
+}
+.empty-icon { margin-bottom: 0.5rem; color: var(--e-color-text-disabled); font-size: var(--e-font-size-2xl); }
+.empty-state strong { color: var(--text); font-size: var(--e-font-size-md); }
+.empty-state small { max-width: 22rem; margin-top: 0.375rem; font-size: var(--e-font-size-xs); line-height: 1.6; }
+.empty-state code { color: var(--e-color-text-accent); font-family: var(--mono); }
+.run-empty { min-height: 8rem; }
+
+/* Dialog. */
+dialog {
+  width: min(48rem, calc(100vw - 2rem));
+  max-height: 85vh;
+  padding: 1.25rem 1.5rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--e-shadow-lg);
+}
+dialog::backdrop { background: var(--e-overlay-backdrop); }
+.dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0 1.5rem; }
+/* One column, for a pane that is a third of the viewport wide: auto-fit would
+   otherwise put two labels side by side in ~20rem and wrap every value. */
+.detail-grid-single { grid-template-columns: minmax(0, 1fr); }
+.detail-grid div { padding: 0.625rem 0; border-bottom: var(--e-border-width) solid var(--line); }
+.detail-grid dt { margin-bottom: 0.25rem; color: var(--muted); font-size: var(--e-font-size-xs); }
+.detail-grid dd { margin: 0; color: var(--text-strong); font-family: var(--mono); font-size: var(--e-font-size-sm); overflow-wrap: anywhere; }
+
+/* The run list on the history tab: a paragraph, not a table, because every run
+   carries the same fact ("it was reported"). */
+.activity-runs { display: grid; gap: 0.25rem; padding: 0.625rem 0 0.75rem; border-bottom: var(--e-border-width) solid var(--line); }
+.activity-runs dt { color: var(--muted); font-size: var(--e-font-size-xs); }
+.activity-runs dd { margin: 0; }
+.run-ids { display: inline-flex; flex-wrap: wrap; gap: 0.375rem; }
+.run-ids code { padding: 0.0625rem 0.3125rem; border: var(--e-border-width) solid var(--line); border-radius: var(--e-radius-sm); background: var(--e-color-background-neutral-subtle); color: var(--text-strong); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.privacy-note { margin: 1rem 0 0; color: var(--muted); font-size: var(--e-font-size-xs); }
+/* A note that names a gap the tool cannot fill: it is the finding, so it gets
+   the accent instead of the muted grey a disclaimer gets. */
+.privacy-note strong { color: var(--text-strong); }
+.privacy-note code { padding: 0.0625rem 0.3125rem; border-radius: var(--e-radius-sm); background: var(--e-color-background-neutral-subtle); color: var(--e-color-text-accent); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+
+/*
+ * A panel's own footnote, for a statement about the whole panel rather than
+ * about one cell. It is a separate rule from .privacy-note because the two say
+ * different things: a privacy note bounds what the tool reads, a convention
+ * note bounds what a number means. Sharing one class let the gate table's
+ * "worst single file" convention read as a privacy claim, and it sat inside
+ * .table-wrap — where it scrolled sideways with the columns instead of staying
+ * with the panel.
+ */
+.panel-foot {
+  margin: 0.75rem 0 0;
+  padding-top: 0.625rem;
+  border-top: var(--e-border-width) solid var(--line);
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+}
+.metric-convention { max-width: 60rem; }
+
+.finding-list { max-height: 60vh; overflow: auto; }
+.finding {
+  padding: 0.75rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-md);
+  background: var(--panel);
+  margin-bottom: 0.5rem;
+}
+.finding summary { color: var(--text); cursor: pointer; font-size: var(--e-font-size-md); }
+.finding summary span { float: right; color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.finding strong { margin-left: 0.375rem; font-family: var(--mono); font-size: var(--e-font-size-sm); }
+.finding p { margin: 0.5rem 0; color: var(--text); font-size: var(--e-font-size-md); line-height: 1.5; }
+.finding small { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); overflow-wrap: anywhere; }
+.extra-details { margin-top: 0.75rem; padding-top: 0.75rem; border-top: var(--e-border-width) solid var(--line); }
+.extra-details summary { color: var(--text); cursor: pointer; font-size: var(--e-font-size-md); }
+
+/* The effective-key table, demoted below the catalogue. `summary` has to be
+   given the padding back that `details` does not inherit from `.panel`, and
+   the marker removed because the default triangle is the same size as the text
+   at these font sizes. */
+.policy-keys-details > summary {
+  padding: 0.875rem 1rem;
+  color: var(--text-strong);
+  font-size: var(--e-font-size-lg);
+  cursor: pointer;
+}
+.policy-keys-details > summary::-webkit-details-marker { display: none; }
+.policy-keys-details[open] > summary { border-bottom: var(--e-border-width) solid var(--line); }
+.policy-keys-details > .table-wrap, .policy-keys-details > .privacy-note { margin: 0 1rem; }
+.policy-keys-details > .privacy-note { margin-bottom: 0.875rem; }
+
+.view-stack { display: grid; gap: 1rem; }
+
+/* ------------------------------------------------------------ 5. VIEWS: home */
+
+.project-overview { display: grid; gap: 1rem; }
+.project-list { display: grid; gap: 0.5rem; }
+.project-card {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto minmax(8rem, auto) 1rem;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.875rem 1rem;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.project-card:hover { background: var(--e-color-surface-hover); border-color: var(--line-strong); }
+.project-icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-accent-weak);
+  color: var(--e-color-text-accent);
+  font-size: var(--e-font-size-xl);
+}
+.project-copy { min-width: 0; }
+.project-copy strong, .project-copy small, .project-latest { display: block; }
+.project-copy strong { color: var(--text-strong); font-size: var(--e-font-size-lg); }
+.project-copy small {
+  margin-top: 0.25rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-stats { display: grid; text-align: right; }
+.project-stats b { color: var(--text-strong); font-size: var(--e-font-size-xl); }
+.project-stats small, .project-latest { color: var(--muted); font-size: var(--e-font-size-xs); }
+.project-arrow { color: var(--muted); }
+
+/* The two secondary doors on a card with no calls. They are buttons rather than
+   the card's own span so each is one click, and they sit on their own grid row
+   so a card in the empty state reads "nothing here" followed by "do this". */
+.project-entries {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.unassigned-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.75rem 1rem;
+  border: var(--e-border-width) dashed var(--line-strong);
+  border-radius: var(--e-radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.unassigned-card:hover { border-color: var(--e-color-warning); }
+.unassigned-card strong { color: var(--e-color-warning-text); font-family: var(--mono); font-size: var(--e-font-size-lg); }
+.unassigned-card span { grid-column: 1 / -1; color: var(--muted); font-size: var(--e-font-size-xs); }
+.unassigned-card.selected { border-style: solid; border-color: var(--e-color-warning); background: var(--e-color-warning-weak); }
+.unassigned-notice {
+  margin: 0 0 1rem;
+  padding: 0.625rem 0.875rem;
+  border: var(--e-border-width) solid var(--e-color-warning-weak-border);
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-warning-weak);
+  color: var(--e-color-warning-text);
+  font-size: var(--e-font-size-md);
+}
+
+/* Metric cards on the summary page. */
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.metric-card { padding: 0.875rem 1rem; }
+.metric-label { color: var(--muted); font-size: var(--e-font-size-xs); }
+.metric-value { margin: 0.375rem 0 0.25rem; color: var(--text-strong); font-size: var(--e-font-size-2xl); font-weight: 600; }
+.metric-note { color: var(--muted); font-size: var(--e-font-size-xs); }
+.metric-card.accent { border-color: var(--e-color-accent-weak-active); background: var(--e-color-accent-weak); }
+.metric-card.accent .metric-value { color: var(--e-color-text-accent); }
+
+.layout-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.layout-grid .panel { margin-bottom: 0; }
+
+/* Gate loop: a numbered list whose step is a label, a bar and a count. */
+.flow { display: grid; gap: 0.75rem; margin-top: 1rem; }
+.flow-step { display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) auto; align-items: center; gap: 0 0.75rem; }
+.flow-index {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-md);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+}
+.flow-copy strong, .flow-copy small { display: block; }
+.flow-copy strong { color: var(--text-strong); font-size: var(--e-font-size-md); }
+.flow-copy small { margin-top: 0.125rem; color: var(--muted); font-size: var(--e-font-size-xs); }
+.flow-count { color: var(--text-strong); font-family: var(--mono); font-size: var(--e-font-size-sm); }
+.flow-count small { margin-left: 0.25rem; color: var(--muted); font-size: var(--e-font-size-xs); }
+.flow-track { grid-column: 2 / 4; height: 0.25rem; margin-top: 0.375rem; border-radius: var(--e-radius-pill); background: var(--e-color-background-neutral-bolder); overflow: hidden; }
+.flow-track i { display: block; height: 100%; border-radius: var(--e-radius-pill); background: var(--e-color-accent); }
+
+/* Trend chart. SonarQube draws these in its dataviz palette; the stacked bar
+   keeps one segment per severity so the legend stays honest. */
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  gap: 0.5rem;
+  height: 12rem;
+  margin: 1rem 0 0.75rem;
+  padding: 0.25rem 0.25rem 0;
+  border-bottom: var(--e-border-width) solid var(--line);
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 2.875rem, var(--e-color-border-weaker) 3rem);
+}
+.trend-column { display: flex; flex: 1; min-width: 0.5rem; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; gap: 0.375rem; }
+.bar-stack { display: flex; width: min(1.5rem, 70%); min-height: 0.25rem; flex-direction: column; overflow: hidden; border-radius: var(--e-radius-sm) var(--e-radius-sm) 0 0; background: var(--e-color-background-neutral-bolder); }
+.bar-stack i { display: block; min-height: 0; }
+.trend-column small { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+/* The chart reads the payload nothing else in the tool can: an axis without a
+   stated scale makes the operator guess whether the peak is 1 or 1000, so the
+   unit and the peak live beside the legend rather than inside the picture. */
+.chart-caption { margin: 0.75rem 0 0; color: var(--muted); font-size: var(--e-font-size-xs); line-height: 1.6; }
+.chart-caption strong { color: var(--text-strong); font-family: var(--mono); }
+.legend .legend-scale { margin-left: auto; color: var(--muted); font-family: var(--mono); }
+
+/* Quality gate banner: the page-level verdict, one line, loud. */
+.gate-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: var(--e-border-width) solid var(--line);
+  border-left: 4px solid var(--e-color-border-bold);
+  border-radius: var(--e-radius-lg);
+  background: var(--panel);
+  font-size: var(--e-font-size-md);
+}
+.gate-banner strong { font-size: var(--e-font-size-md); font-weight: 700; letter-spacing: 0.04em; }
+/* The glyph is what carries the verdict at a glance; the word is for the
+   reader who does not trust a shape. Sized and spaced like SonarQube's
+   check/cross in the Quality Gate block. */
+.gate-banner .gate-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--e-radius-md);
+  background: var(--e-color-background-neutral-subtle);
+  font-size: var(--e-font-size-lg);
+  line-height: 1;
+}
+.gate-banner .gate-reason { color: inherit; opacity: 0.85; }
+.gate-banner .gate-run { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); margin-left: auto; }
+/* A verdict borrowed from another project root. Reuses the existing
+   .badge.flagged tone rather than inventing one: it is the same "amber =
+   read this carefully" signal the condition table already uses, and a bespoke
+   colour here would have to be kept in sync with it. */
+.gate-banner .gate-foreign { margin-left: 0.5rem; }
+.measure-foreign { color: var(--e-color-warning-text); }
+.gate-banner.is-passed { border-left-color: var(--e-gate-passed-text); background: var(--e-gate-passed-bg); color: var(--e-gate-passed-text); }
+.gate-banner.is-passed .gate-glyph { background: var(--e-rating-a-bg); color: var(--e-rating-a-text); }
+.gate-banner.is-failed { border-left-color: var(--e-gate-failed-text); background: var(--e-gate-failed-bg); color: var(--e-gate-failed-text); }
+.gate-banner.is-failed .gate-glyph { background: var(--e-rating-e-bg); color: var(--e-rating-e-text); }
+/* Unknown is not a quiet passed: no green, no check, and a dashed border so a
+   glance cannot mistake "no run here" for a verdict. */
+.gate-banner.is-unknown { color: var(--muted); border-left-style: dashed; background: var(--panel2); }
+.gate-banner.is-unknown strong { color: var(--text); }
+
+/* Measure cards: label, grade chip, value, bands. */
+.measures-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.75rem; }
+.measure-card { padding: 0.875rem 1rem; }
+.measure-head { display: flex; align-items: center; justify-content: space-between; gap: 0.625rem; min-width: 0; }
+/* A long measure name must ellipsize instead of squeezing the grade chip out of
+   the card or pushing bands into a second line. */
+.measure-label { min-width: 0; overflow: hidden; color: var(--muted); font-size: var(--e-font-size-xs); text-overflow: ellipsis; white-space: nowrap; }
+/* The threshold band is one row of text; it may ellipsize but must never wrap,   
+   and the exceeded line is its own row so the two cannot collide. */
+.measure-bands { overflow: hidden; color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); text-overflow: ellipsis; white-space: nowrap; }
+.measure-grade {
+  display: grid;
+  place-items: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.375rem;
+  border: var(--e-border-width) solid transparent;
+  border-radius: var(--e-radius-pill);
+  font-size: var(--e-font-size-sm);
+  font-weight: 700;
+}
+.measure-grade.grade-A { border-color: var(--e-rating-a-border); background: var(--e-rating-a-bg); color: var(--e-rating-a-text); }
+.measure-grade.grade-B { border-color: var(--e-rating-b-border); background: var(--e-rating-b-bg); color: var(--e-rating-b-text); }
+.measure-grade.grade-C { border-color: var(--e-rating-c-border); background: var(--e-rating-c-bg); color: var(--e-rating-c-text); }
+.measure-grade.grade-D { border-color: var(--e-rating-d-border); background: var(--e-rating-d-bg); color: var(--e-rating-d-text); }
+.measure-grade.grade-E { border-color: var(--e-rating-e-border); background: var(--e-rating-e-bg); color: var(--e-rating-e-text); }
+.measure-value { margin: 0.375rem 0 0.125rem; color: var(--text-strong); font-size: var(--e-font-size-2xl); font-weight: 600; }
+.measure-bands { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.measure-exceeded { margin-top: 0.25rem; color: var(--e-color-danger-text); font-size: var(--e-font-size-xs); }
+.measure-bands, .measure-exceeded { font-family: var(--mono); }
+.measure-exceeded { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.metric-trend-panel .table-wrap { max-height: 17rem; overflow: auto; }
+.metric-trend-panel tr.metric-step td { border-top: 2px dashed var(--e-color-border-bolder); }
+
+.accepted-panel { margin-top: 1rem; }
+.accepted-list { display: grid; gap: 0.5rem; }
+/* One row per waiver: tag + rule + location on the left, who/why/when on the
+   right. The meta half ellipsizes rather than wrapping, so a long reason
+   costs space instead of height and the list stays scannable. */
+.accepted-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.375rem 0.75rem; padding: 0.5rem 0.75rem; }
+.accepted-who { display: flex; flex: 0 0 auto; align-items: center; gap: 0.5rem; }
+.accepted-who code { font-size: var(--e-font-size-xs); }
+.accepted-who strong { font-size: var(--e-font-size-sm); }
+.accepted-meta { display: flex; flex: 1 1 auto; align-items: baseline; justify-content: flex-end; gap: 0.75rem; min-width: 0; font-size: var(--e-font-size-xs); }
+.accepted-owner { flex: 0 0 auto; color: var(--text-strong); font-weight: 600; }
+.accepted-reason { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.accepted-expires { flex: 0 0 auto; color: var(--muted); font-family: var(--mono); }
+
+/* Runs. */
+.runs-panel { margin-top: 1rem; }
+.runs-list { margin-top: 1rem; display: grid; gap: 0.5rem; }
+.run-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0.875rem; }
+.run-status { display: grid; place-items: center; flex: none; width: 1.75rem; height: 1.75rem; border-radius: var(--e-radius-pill); font-size: var(--e-font-size-md); }
+.run-status.is-clean { background: var(--e-color-success-weak-active); color: var(--e-color-success-deep); }
+.run-status.has-errors { background: var(--e-color-danger-weak-active); color: var(--e-color-danger-deep); }
+.run-main { flex: 1; min-width: 9rem; }
+.run-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.run-title strong { color: var(--text-strong); font-size: var(--e-font-size-md); }
+.run-commit { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.run-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; color: var(--muted); font-size: var(--e-font-size-xs); }
+.run-counts { display: grid; gap: 0.125rem; min-width: 7rem; color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.run-select { display: grid; place-items: center; flex: none; }
+.run-select input { accent-color: var(--e-color-accent); }
+.error-text { color: var(--e-color-danger-text); }
+.warning-text { color: var(--e-color-warning-text); }
+
+.history-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: var(--e-border-width) solid var(--line);
+}
+.history-tabs { display: flex; gap: 0.25rem; margin-right: auto; }
+.history-tabs .button { padding: 0.25rem 0.625rem; font-size: var(--e-font-size-xs); }
+
+/* ---------------------------------------------------- 5. VIEWS: issues triage */
+
+/* The SonarQube issues layout: a sticky facet rail on the left, the card list
+   in the middle, and the detail pane as a third column once a card is picked.
+   The detail is a sibling of the list rather than a block under it because the
+   code window is tall: stacked, reading it scrolls the cards you are comparing
+   out of view, which is the one thing the triage page is for. The detail gets
+   the flexible column and the list a fixed one, because the code window is the
+   thing that has to fit (sq-issues.png: rail | cards | detail). */
+.issues-layout { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1rem; align-items: start; }
+.issues-layout.has-detail { grid-template-columns: 14rem minmax(23rem, 1.15fr) minmax(21rem, 1fr); }
+.issues-sidebar { display: grid; gap: 1rem; padding: 0.875rem 1rem; position: sticky; top: calc(var(--e-topbar-height) + 0.75rem); }
+.issues-main { display: grid; min-width: 0; gap: 0.75rem; }
+/* Sticky so the pane stays beside the card it belongs to while the list
+   scrolls, and capped so a long source window scrolls inside the pane instead
+   of stretching the page past the rail. */
+.issues-layout > .issue-detail {
+  position: sticky;
+  top: calc(var(--e-topbar-height) + 0.75rem);
+  max-height: calc(100vh - var(--e-topbar-height) - 1.5rem);
+  margin-bottom: 0;
+  overflow-y: auto;
+}
+
+.facet-group h3 {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* The rail's own 口径 line: it sits above the groups because it qualifies every
+   number below it, not one of them. */
+.facet-note {
+  margin: 0;
+  padding-bottom: 0.625rem;
+  border-bottom: var(--e-border-width) solid var(--line);
+  color: var(--muted);
+  font-size: var(--e-font-size-xs);
+}
+.facet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  margin-bottom: 0.125rem;
+  padding: 0.375rem 0.5rem;
+  border: 0;
+  border-radius: var(--e-radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--e-font-size-md);
+  text-align: left;
+  cursor: pointer;
+}
+.facet-row:hover { background: var(--e-color-surface-hover); }
+.facet-row.is-active { background: var(--e-color-accent-weak); color: var(--e-color-text-accent); font-weight: 600; }
+.facet-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facet-count { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+/* The converge strip sits above the list, not in the rail, because it is a
+   control over the list itself: it has to be findable while data is on screen,
+   and a rail you have to open to escape a 37k-finding window is a rail nobody
+   opens while there is data on screen. It reuses .facet-row wholesale. */
+.converge {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-md);
+  background: var(--panel);
+}
+
+.facet-row.is-active .facet-count { color: var(--e-color-text-accent); }
+
+.issues-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.issues-count { color: var(--text-strong); font-size: var(--e-font-size-md); font-weight: 600; }
+.issues-head .filters { margin: 0; margin-left: auto; }
+
+.issue-list { display: grid; gap: 1rem; }
+
+/* SonarQube groups the list by file: the file is the unit an operator works on,
+   so it is a heading with its own rows rather than a column on every row. */
+.file-group { display: grid; gap: 0.5rem; }
+.file-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.375rem;
+  border-bottom: var(--e-border-width) solid var(--line);
+}
+.file-group-head code {
+  display: flex;
+  min-width: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+}
+/* Only the directory may ellipsize: the file name is what the operator reads,
+   so a plain nowrap+ellipsis on the whole path would clip it instead. */
+.file-group-head .path-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+}
+
+/* The card is a checkbox column plus the content column, so the selection box
+   lines up on every row whatever the message length. */
+.issue-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.625rem; padding: 0.75rem 0.875rem; cursor: pointer; }
+.issue-card:hover { border-color: var(--line-strong); }
+.issue-card.is-selected { border-color: var(--e-color-accent); box-shadow: 0 0 0 2px var(--e-color-accent-weak); }
+.issue-card-body { display: grid; min-width: 0; gap: 0.5rem; }
+.issue-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.875rem; }
+.issue-file {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issue-message { margin: 0; color: var(--text-strong); font-size: var(--e-font-size-md); line-height: 1.55; }
+.issue-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem; }
+.issue-rule { flex: none; color: var(--e-color-text-accent); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.issue-loc {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issue-meta { margin-left: auto; color: var(--muted); font-size: var(--e-font-size-xs); white-space: nowrap; }
+.issue-pick { display: inline-flex; align-items: flex-start; padding-top: 0.1875rem; }
+.issue-pick input { width: 0.875rem; height: 0.875rem; accent-color: var(--e-color-accent); cursor: pointer; }
+.issue-status { cursor: pointer; }
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border: var(--e-border-width) solid var(--e-color-accent-weak-active);
+  border-radius: var(--e-radius-lg);
+  background: var(--e-color-accent-weak);
+  color: var(--e-color-text-accent);
+  font-size: var(--e-font-size-md);
+}
+.bulk-bar .button { padding: 0.25rem 0.625rem; font-size: var(--e-font-size-xs); }
+.bulk-bar .button.ghost { margin-left: auto; }
+
+.pager { display: flex; align-items: center; justify-content: center; gap: 0.875rem; margin-top: 0.75rem; }
+
+.issue-detail { min-height: 15rem; }
+.issue-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.625rem; }
+.issue-detail-title { min-width: 0; }
+.issue-detail-head h2 { margin: 0.375rem 0 0; color: var(--text-strong); font-size: var(--e-font-size-lg); line-height: 1.5; overflow-wrap: anywhere; }
+.issue-detail-loc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.75rem; margin: 0.5rem 0 0; }
+.issue-detail-loc code { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); overflow-wrap: anywhere; }
+.issue-detail-actions { display: flex; flex: none; align-items: center; gap: 0.5rem; }
+
+/* The tab strip is SonarQube's: underline the active tab, no boxes. */
+.tab-bar { display: flex; gap: 0.25rem; margin: 0.25rem 0 1rem; border-bottom: var(--e-border-width) solid var(--line); }
+.tab {
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-size: var(--e-font-size-md);
+  cursor: pointer;
+}
+.tab:hover { color: var(--text-strong); }
+.tab.active { border-bottom-color: var(--e-color-accent); color: var(--e-color-text-accent); font-weight: 600; }
+
+/* The source window: line numbers in a gutter, the anchor line highlighted. */
+.source-view { overflow: hidden; background: var(--panel); }
+.source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: var(--e-border-width) solid var(--line);
+  background: var(--e-color-background-neutral-subtle);
+}
+.source-head code { color: var(--e-color-text-accent); font-family: var(--mono); font-size: var(--e-font-size-xs); overflow-wrap: anywhere; }
+.source-lines { margin: 0; padding: 0.375rem 0; list-style: none; overflow-x: auto; font-family: var(--mono); font-size: var(--e-font-size-sm); line-height: 1.6; }
+.source-line { display: grid; grid-template-columns: 3.25rem minmax(0, 1fr); }
+.source-line.is-anchor { background: var(--e-color-warning-weak); box-shadow: inset 3px 0 0 var(--e-color-warning); }
+/* The anchor line carries the finding's own message, the way SonarQube repeats
+   it inline. Without it the code window shows a highlighted line whose meaning
+   lives in a header the reader has already scrolled past. */
+.source-anchor-note { grid-column: 1 / -1; margin: 0.25rem 1rem 0.375rem 0; padding: 0.375rem 0.5rem; border: var(--e-border-width) solid var(--e-color-warning); border-radius: var(--e-radius-sm); background: var(--panel); color: var(--text-strong); font-family: var(--sans); font-size: var(--e-font-size-xs); white-space: normal; }
+.source-no { padding-right: 0.75rem; color: var(--e-color-text-disabled); text-align: right; user-select: none; }
+.source-text { padding-right: 1rem; color: var(--text-strong); white-space: pre; }
+.source-line.hl-comment .source-text { color: var(--e-color-text-subtle); font-style: italic; }
+.source-line.hl-string .source-text { color: var(--e-color-success-text); }
+.source-line.hl-key .source-text { color: var(--e-color-text-accent); }
+
+/* ------------------------------------------------------------ 5. VIEWS: activity */
+
+.timeline { display: grid; gap: 0.125rem; margin-top: 1rem; }
+.timeline-row {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem 0.625rem 0.875rem;
+  border-left: 2px solid var(--e-color-border-bold);
+  background: var(--panel);
+}
+.timeline-row:hover { background: var(--e-color-surface-hover); }
+.timeline-row.tone-error { border-left-color: var(--e-color-danger); }
+.timeline-row.tone-pass { border-left-color: var(--e-color-success); }
+.timeline-row.tone-info { border-left-color: var(--e-color-info); }
+.timeline-kind { color: var(--muted); font-size: var(--e-font-size-md); }
+.timeline-body strong { display: block; color: var(--text-strong); font-family: var(--mono); font-size: var(--e-font-size-sm); }
+.timeline-body small { display: block; margin-top: 0.25rem; color: var(--muted); font-size: var(--e-font-size-xs); }
+.timeline-when { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); white-space: nowrap; }
+
+/* ------------------------------------------------------- 5. VIEWS: policy, rules */
+
+.policy-pane { margin-top: 0.125rem; }
+.policy-intro { margin: 0 0 0.875rem; line-height: 1.7; }
+.policy-intro code { padding: 0.0625rem 0.3125rem; border-radius: var(--e-radius-sm); background: var(--e-color-background-neutral-subtle); color: var(--e-color-text-accent); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.policy-layout { display: grid; grid-template-columns: minmax(14rem, 0.85fr) minmax(0, 2fr); gap: 1rem; align-items: start; }
+.policy-side, .policy-editor { display: grid; gap: 0.875rem; padding: 0.875rem 1rem; }
+.policy-chain { display: grid; gap: 0.25rem; margin: 0.75rem 0 0.25rem; }
+.policy-chain-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-md);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+}
+.policy-chain-step.in-force { border-color: var(--e-color-success-weak-border); background: var(--e-color-success-weak); color: var(--e-color-success-text); }
+.policy-chain-step.missed { opacity: 0.6; }
+.policy-chain-step .mark { width: 0.875rem; text-align: center; }
+.policy-sections { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.policy-section-chip {
+  padding: 0.25rem 0.5rem;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-pill);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-xs);
+  cursor: pointer;
+}
+.policy-section-chip:hover { border-color: var(--e-color-accent); color: var(--e-color-text-accent); }
+.policy-editor-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.policy-file-label { color: var(--text-strong); font-size: var(--e-font-size-md); font-weight: 600; }
+.policy-editor-actions { display: flex; gap: 0.5rem; margin-left: auto; }
+.policy-textarea {
+  width: 100%;
+  min-height: 46vh;
+  padding: 0.875rem 1rem;
+  border: var(--e-border-width) solid var(--line-strong);
+  border-radius: var(--e-radius-md);
+  background: var(--panel);
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: var(--e-font-size-sm);
+  line-height: 1.65;
+  resize: vertical;
+  tab-size: 2;
+}
+.policy-textarea:focus { outline: 0; border-color: var(--e-color-accent); box-shadow: 0 0 0 2px var(--e-color-accent-weak); }
+.policy-hint { margin: 0; color: var(--e-color-warning-text); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.policy-dirty { color: var(--e-color-warning-text); font-size: var(--e-font-size-xs); }
+/* The effective-keys block sits inside the policy panel, so it drops the
+   panel chrome instead of nesting a card in a card. It keeps the background
+   and the radius, and re-earns the breathing room the removed padding used to
+   give it — as a class, because an inline style is a token the theme pass
+   cannot see. */
+.policy-keys-panel { margin: 1rem 0 0; padding: 0; border: 0; }
+.policy-keys-panel > .panel-head { padding: 1rem 0.125rem 0.625rem; }
 .policy-keys-panel td { white-space: normal; }
-.policy-keys-panel td:first-child { font-family: var(--mono); color: #cfd8e3; }
-@media (max-width: 900px) { .policy-layout { grid-template-columns: 1fr; } }
+.policy-keys-panel td:first-child { color: var(--text-strong); font-family: var(--mono); }
+
+/* ------------------------------------------------------------- 6. RESPONSIVE */
+
+@media (max-width: 1100px) {
+  .layout-grid { grid-template-columns: minmax(0, 1fr); }
+  .issues-layout, .issues-layout.has-detail { grid-template-columns: minmax(0, 1fr); }
+  .issues-sidebar { position: static; }
+  /* Below the breakpoint there is no third column to be sticky in, and a
+     capped height would clip the pane instead of scrolling the page. */
+  .issues-layout > .issue-detail { position: static; max-height: none; overflow-y: visible; }
+  .policy-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 860px) {
+  /* The rail collapses to a horizontal strip above the content. The brand block
+     moves into it, so the shell becomes one column. */
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "topbar" "rail" "main";
+  }
+  .brand { display: none; }
+  .sidebar { flex-direction: row; align-items: center; gap: 0.25rem; overflow-x: auto; border-right: 0; border-bottom: var(--e-border-width) solid var(--line); }
+  .sidebar nav { display: flex; gap: 0.125rem; }
+  /* One scrolling strip: the group captions would break the line into two rows. */
+  .nav-group { display: none; }
+  .nav-item { width: auto; white-space: nowrap; }
+  .sidebar-foot { display: none; }
+  .topbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "crumb" "heading";
+    padding: 0.5rem 1rem 0.625rem;
+    position: static;
+  }
+  .top-actions { order: 3; grid-area: auto; }
+  .main { padding: 1rem 1rem 3rem; }
+  .project-card { grid-template-columns: 2.25rem minmax(0, 1fr) auto; gap: 0.75rem; }
+  .project-latest { grid-column: 2 / 4; }
+  .project-arrow { display: none; }
+}
+
+@media (max-width: 560px) {
+  .metrics-grid, .measures-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .issue-meta { margin-left: 0; }
+  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .run-counts { display: none; }
+}

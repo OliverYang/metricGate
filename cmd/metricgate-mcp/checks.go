@@ -6,9 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"metricgate/internal/baseline"
 	"metricgate/internal/config"
-	"metricgate/internal/engine"
-	"metricgate/internal/git"
 	"metricgate/internal/model"
 )
 
@@ -52,12 +51,13 @@ type checkPathIn struct {
 }
 
 type checkPathOut struct {
-	Verdict  string          `json:"verdict"`
-	Files    int             `json:"files"`
-	Errors   int             `json:"errors"`
-	Warnings int             `json:"warnings"`
-	Hidden   int             `json:"hidden,omitempty"`
-	Findings []model.Finding `json:"findings"`
+	Verdict   string          `json:"verdict"`
+	Files     int             `json:"files"`
+	Errors    int             `json:"errors"`
+	Warnings  int             `json:"warnings"`
+	Hidden    int             `json:"hidden,omitempty"`
+	Unchanged int             `json:"unchanged,omitempty"`
+	Findings  []model.Finding `json:"findings"`
 }
 
 // callOutcome exposes the verdict to the call log without the wrapper having
@@ -77,13 +77,15 @@ func (s *service) checkPath(ctx context.Context, req *mcp.CallToolRequest, in ch
 	}
 	out := checkPathOut{Files: summary.Files}
 	if in.DiffOnly {
-		changed, err := git.ChangedLinesFor(path, "HEAD")
+		// One call, the same one cmd/metricgate/check_cmd.go makes: the ratchet
+		// is not a CLI-only feature, and an agent that is told "pre-existing
+		// code is not re-flagged" must get the same set of findings the terminal
+		// reports for the same tree.
+		split, err := baseline.Split(s.cfg, path, "HEAD", summary)
 		if err != nil {
 			return nil, checkPathOut{}, err
 		}
-		var hidden int
-		summary, hidden = engine.FilterSummary(summary, changed)
-		out.Hidden = hidden
+		summary, out.Hidden, out.Unchanged = split.RunSummary, len(split.PreExisting), len(split.Unchanged)
 	}
 	out.Findings = summary.Findings
 	out.Errors = summary.Count(model.SevError)

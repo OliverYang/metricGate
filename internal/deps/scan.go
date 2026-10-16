@@ -40,6 +40,10 @@ type Draft struct {
 	Module  string   // this repository's own module path ("" if none)
 	Imports []Import // external imports, sorted by path
 	Covered []string // names already declared by manifests or policy
+	// Files counts the parsed files per language, including the languages
+	// with no import extractor. Without it a language absent from
+	// importQueries is indistinguishable from a language with no imports.
+	Files map[string]int
 }
 
 // hiddenSkip reports whether a path should be skipped by the scan: any
@@ -62,7 +66,7 @@ func hiddenSkip(p string) bool {
 // per-language file counts in the output make a missing extractor visible
 // instead of silently thinning the whitelist.
 func ScanRoot(root string, cfgAllow []string) (*Draft, error) {
-	d := &Draft{}
+	d := &Draft{Files: map[string]int{}}
 	if modPath, ok := findGoMod(root); ok {
 		d.Module, _ = ParseGoMod(modPath)
 	}
@@ -86,11 +90,12 @@ func ScanRoot(root string, cfgAllow []string) (*Draft, error) {
 		if !ok {
 			continue
 		}
+		counts[lang]++
+		d.Files[string(lang)] = counts[lang]
 		q, ok := importQueries[lang]
 		if !ok {
 			continue
 		}
-		counts[lang]++
 		src, err := os.ReadFile(f)
 		if err != nil {
 			continue // unreadable file: skip, the scan is a draft not a gate
@@ -171,5 +176,23 @@ func Uncovered(d *Draft) []Import {
 			out = append(out, imp)
 		}
 	}
+	return out
+}
+
+// LanguagesWithoutImports returns the parsed languages that have no import
+// extractor, in stable order. The scan skips them, and a caller that prints
+// the draft has to say so: an empty draft otherwise reads as "no external
+// dependencies" rather than "not scanned".
+func (d *Draft) LanguagesWithoutImports() []string {
+	var out []string
+	for lang, n := range d.Files {
+		if n == 0 {
+			continue
+		}
+		if _, ok := importQueries[parser.LanguageID(lang)]; !ok {
+			out = append(out, lang)
+		}
+	}
+	sort.Strings(out)
 	return out
 }

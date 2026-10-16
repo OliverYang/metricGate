@@ -6,6 +6,7 @@
     "internal/accept",
     "internal/apisurface",
     "internal/arch",
+    "internal/baseline",
     "internal/bundle",
     "internal/calllog",
     "internal/clonedrift",
@@ -49,6 +50,10 @@
     "internal/store",
     "internal/stubs",
     "internal/symbols",
+    "internal/trace",
+    "internal/traceview",
+    "internal/webspec",
+    "internal/webspec/generate",
     "scripts/osv2policy"
   ],
   "edges": [
@@ -69,13 +74,18 @@
     },
     {
       "from": "cmd/metricgate",
+      "to": "internal/baseline",
+      "count": 2
+    },
+    {
+      "from": "cmd/metricgate",
       "to": "internal/bundle",
       "count": 2
     },
     {
       "from": "cmd/metricgate",
       "to": "internal/calllog",
-      "count": 2
+      "count": 3
     },
     {
       "from": "cmd/metricgate",
@@ -130,7 +140,7 @@
     {
       "from": "cmd/metricgate",
       "to": "internal/engine",
-      "count": 10
+      "count": 9
     },
     {
       "from": "cmd/metricgate",
@@ -150,7 +160,7 @@
     {
       "from": "cmd/metricgate",
       "to": "internal/git",
-      "count": 5
+      "count": 4
     },
     {
       "from": "cmd/metricgate",
@@ -229,11 +239,6 @@
     },
     {
       "from": "cmd/metricgate",
-      "to": "internal/selection",
-      "count": 1
-    },
-    {
-      "from": "cmd/metricgate",
       "to": "internal/sources",
       "count": 2
     },
@@ -245,7 +250,7 @@
     {
       "from": "cmd/metricgate",
       "to": "internal/store",
-      "count": 2
+      "count": 3
     },
     {
       "from": "cmd/metricgate",
@@ -253,8 +258,23 @@
       "count": 2
     },
     {
+      "from": "cmd/metricgate",
+      "to": "internal/trace",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate",
+      "to": "internal/traceview",
+      "count": 1
+    },
+    {
       "from": "cmd/metricgate-mcp",
       "to": "internal/accept",
+      "count": 1
+    },
+    {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/baseline",
       "count": 1
     },
     {
@@ -265,7 +285,7 @@
     {
       "from": "cmd/metricgate-mcp",
       "to": "internal/calllog",
-      "count": 2
+      "count": 3
     },
     {
       "from": "cmd/metricgate-mcp",
@@ -285,7 +305,7 @@
     {
       "from": "cmd/metricgate-mcp",
       "to": "internal/engine",
-      "count": 3
+      "count": 2
     },
     {
       "from": "cmd/metricgate-mcp",
@@ -295,7 +315,7 @@
     {
       "from": "cmd/metricgate-mcp",
       "to": "internal/git",
-      "count": 3
+      "count": 2
     },
     {
       "from": "cmd/metricgate-mcp",
@@ -333,6 +353,11 @@
       "count": 1
     },
     {
+      "from": "cmd/metricgate-mcp",
+      "to": "internal/traceview",
+      "count": 1
+    },
+    {
       "from": "internal/apisurface",
       "to": "internal/facts",
       "count": 1
@@ -340,6 +365,36 @@
     {
       "from": "internal/arch",
       "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/baseline",
+      "to": "internal/config",
+      "count": 1
+    },
+    {
+      "from": "internal/baseline",
+      "to": "internal/diff",
+      "count": 1
+    },
+    {
+      "from": "internal/baseline",
+      "to": "internal/engine",
+      "count": 1
+    },
+    {
+      "from": "internal/baseline",
+      "to": "internal/git",
+      "count": 1
+    },
+    {
+      "from": "internal/baseline",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/baseline",
+      "to": "internal/selection",
       "count": 1
     },
     {
@@ -395,17 +450,17 @@
     {
       "from": "internal/cockpit",
       "to": "internal/accept",
-      "count": 1
+      "count": 3
     },
     {
       "from": "internal/cockpit",
       "to": "internal/calllog",
-      "count": 1
+      "count": 2
     },
     {
       "from": "internal/cockpit",
       "to": "internal/config",
-      "count": 2
+      "count": 4
     },
     {
       "from": "internal/cockpit",
@@ -414,8 +469,33 @@
     },
     {
       "from": "internal/cockpit",
-      "to": "internal/store",
+      "to": "internal/metrics",
       "count": 1
+    },
+    {
+      "from": "internal/cockpit",
+      "to": "internal/model",
+      "count": 1
+    },
+    {
+      "from": "internal/cockpit",
+      "to": "internal/parser",
+      "count": 1
+    },
+    {
+      "from": "internal/cockpit",
+      "to": "internal/rules",
+      "count": 1
+    },
+    {
+      "from": "internal/cockpit",
+      "to": "internal/store",
+      "count": 8
+    },
+    {
+      "from": "internal/cockpit",
+      "to": "internal/webspec",
+      "count": 2
     },
     {
       "from": "internal/config",
@@ -470,7 +550,7 @@
     {
       "from": "internal/digest",
       "to": "internal/config",
-      "count": 1
+      "count": 2
     },
     {
       "from": "internal/digest",
@@ -939,7 +1019,17 @@
     },
     {
       "from": "internal/store",
+      "to": "internal/accept",
+      "count": 2
+    },
+    {
+      "from": "internal/store",
       "to": "internal/model",
+      "count": 4
+    },
+    {
+      "from": "internal/store",
+      "to": "internal/parser",
       "count": 1
     },
     {
@@ -955,6 +1045,21 @@
     {
       "from": "internal/stubs",
       "to": "internal/sources",
+      "count": 1
+    },
+    {
+      "from": "internal/traceview",
+      "to": "internal/calllog",
+      "count": 1
+    },
+    {
+      "from": "internal/traceview",
+      "to": "internal/store",
+      "count": 1
+    },
+    {
+      "from": "internal/webspec/generate",
+      "to": "internal/webspec",
       "count": 1
     },
     {

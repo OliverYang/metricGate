@@ -1,3 +1,5 @@
+github.com/DerekStride/tree-sitter-sql v0.0.0-20260919000438-39fdb0064037 h1:PIEFv07b1SsyRd3BF1cQrNPD7LEVfAB5r38+N5NPoqg=
+github.com/DerekStride/tree-sitter-sql v0.0.0-20260919000438-39fdb0064037/go.mod h1:tKhfNbTiFmw3xaK1QSZjCPlOXhPkcf168z/FOpsBDCQ=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
@@ -62,6 +64,8 @@ github.com/tree-sitter/tree-sitter-rust v0.23.2 h1:6AtoooCW5GqNrRpfnvl0iUhxTAZEo
 github.com/tree-sitter/tree-sitter-rust v0.23.2/go.mod h1:hfeGWic9BAfgTrc7Xf6FaOAguCFJRo3RBbs7QJ6D7MI=
 github.com/tree-sitter/tree-sitter-typescript v0.23.2 h1:/Odvphn18PniVixb9e97X0DbNVsU6Qocv9mfkyzdXwU=
 github.com/tree-sitter/tree-sitter-typescript v0.23.2/go.mod h1:zjzMXT/Ulffel2xfOcAkQQkiAkmgnbtPGlFQw/5X4xA=
+github.com/tree-sitter/tree-sitter-verilog v1.0.3 h1:slIBGTY4U0QfjzBbOu9ppCY6kCcEv5LxMCEpESvkmJY=
+github.com/tree-sitter/tree-sitter-verilog v1.0.3/go.mod h1:4Utc6f6WM/i6nM0oPkIo+g4V3/MQWNFJi8OVzbJy7Ko=
 github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zIM+UJPGz4=
 github.com/yosida95/uritemplate/v3 v3.0.2/go.mod h1:ILOh0sOhIJR3+L/8afwt/kE++YT040gmv5BQTMR2HP4=
 golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=

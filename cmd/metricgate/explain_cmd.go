@@ -76,37 +76,55 @@ func cmdExplainPreview(eng *engine.Engine, root, format string) {
 	fmt.Printf("  Unsupported: %d\n", unsupported)
 	fmt.Println()
 
-	if excluded > 0 {
-		fmt.Println("Excluded files:")
-		for _, d := range decisions {
-			if d.Status == "excluded" {
-				fmt.Printf("  [%s] %s (%s)\n", d.MatchedPattern, d.Path, d.Reason)
-			}
-		}
-		fmt.Println()
-	}
-
-	if unsupported > 0 {
-		fmt.Println("Unsupported files:")
-		for _, d := range decisions {
-			if d.Status == "unsupported" {
-				fmt.Printf("  [%s] %s (%s)\n", d.Language, d.Path, d.Reason)
-			}
-		}
-		fmt.Println()
-	}
+	cmdExplainGroup(root, "Excluded files:", decisions, "excluded", func(d *engine.ExplainDecision) string {
+		return fmt.Sprintf("[%s] %s (%s)", d.MatchedPattern, d.Path, d.Reason)
+	})
+	cmdExplainGroup(root, "Unsupported files:", decisions, "unsupported", func(d *engine.ExplainDecision) string {
+		return fmt.Sprintf("[%s] %s (%s)", d.Language, d.Path, d.Reason)
+	})
 
 	fmt.Println("Included files (first 10):")
-	count := 0
-	for _, d := range decisions {
-		if d.Status == "included" && count < 10 {
-			fmt.Printf("  %s (%s)\n", d.Path, d.Language)
-			count++
-		}
-	}
+	cmdExplainLimit(root, decisions, "included", 10, func(d *engine.ExplainDecision) string {
+		return fmt.Sprintf("%s (%s)", d.Path, d.Language)
+	})
 	if included > 10 {
 		fmt.Printf("  ... and %d more\n", included-10)
 	}
+}
+
+// cmdExplainGroup prints one status group when it is non-empty. The decision
+// list and the renderer are the caller's; the loop and the blank line after
+// every group live here so the three groups below read as one shape and the
+// command stays under the complexity ceiling.
+func cmdExplainGroup(root string, title string, decisions []*engine.ExplainDecision, status string, render func(*engine.ExplainDecision) string) {
+	_ = root
+	if !cmdExplainAny(decisions, status) {
+		return
+	}
+	fmt.Println(title)
+	cmdExplainLimit(root, decisions, status, len(decisions), render)
+	fmt.Println()
+}
+
+func cmdExplainLimit(root string, decisions []*engine.ExplainDecision, status string, limit int, render func(*engine.ExplainDecision) string) {
+	_ = root
+	n := 0
+	for _, d := range decisions {
+		if d.Status != status || n >= limit {
+			continue
+		}
+		fmt.Printf("  %s\n", render(d))
+		n++
+	}
+}
+
+func cmdExplainAny(decisions []*engine.ExplainDecision, status string) bool {
+	for _, d := range decisions {
+		if d.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func cmdExplainOne(eng *engine.Engine, path, format string) {

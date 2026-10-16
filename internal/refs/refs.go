@@ -60,6 +60,12 @@ func Extract(file string, src []byte, tree *sitter.Tree, lang parser.LanguageID)
 		w.walkCS(tree.RootNode(), "")
 	case parser.LangRust:
 		w.walkRust(tree.RootNode(), "")
+	case parser.LangSQL, parser.LangVerilog, parser.LangVB:
+		// No reference surface yet. Spelled out rather than left to the
+		// missing default so that "not implemented" is distinguishable from
+		// "walked and found nothing": a language silently absent here looks
+		// identical to a language with no cross-references.
+		return nil
 	}
 	return w.out
 }

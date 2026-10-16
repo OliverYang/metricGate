@@ -15,7 +15,7 @@
 集成者（人或 LLM agent）只接触两个东西：一个 Spec JSON，一组 fixture 文件。
 不需要读 metricgate 源码。
 
-**入参**——Spec（字段与 policy.yaml 词汇同构，LLM 读过 policy 就会写）：
+**入参**——Spec（字段与 .metricgate.yaml 词汇同构，LLM 读过 policy 就会写）：
 
 ```json
 {
@@ -66,7 +66,7 @@ good 命中 → fail（match 过宽，考虑收窄）；**其他规则在 fixtur
 
 ```bash
 metricgate constraints rule -spec rule.json -bad bad.java [-good good.java]
-                            [-config 现有policy.yaml] [-format text|json] [-out 节点目录]
+                            [-config 现有.metricgate.yaml] [-format text|json] [-out 节点目录]
 ```
 
 - `-spec -` 从 stdin 读 spec（agent 管道友好）；
@@ -92,7 +92,7 @@ nodes/
 
 ## 3. 引擎裁决的具体含义
 
-验证不是模拟：`internal/rulegen` 把 spec 渲染成真实 policy.yaml
+验证不是模拟：`internal/rulegen` 把 spec 渲染成真实 .metricgate.yaml
 （含 severity override、unknown-dependency 静默消依赖噪声、fail_on: warning），
 写入临时目录，跑**真实引擎**（config.LoadFile → engine.New → RunDetailed），
 再按 RuleID + 文件把 findings 投影回 fixture 案例判分。LLM 看到的 PASS 意味着

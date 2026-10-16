@@ -43,7 +43,7 @@
 **每次产出代码后**（包括你自己刚改的每一段）：
 - 调 `check_code`（内存检查，毫秒级，0 token）。
   `verdict` 不是 `PASS` 就继续改，改完再查。
-- 不要为了让 verdict 变绿去改 `policy.yaml`、加 ignore 注释、或降低阈值。
+- 不要为了让 verdict 变绿去改 `.metricgate.yaml`、加 ignore 注释、或降低阈值。
   闸门报的是**需求**，不是障碍。
 
 **收尾**：
@@ -168,9 +168,9 @@ exit 0
 ### 4.1 打开
 
 ```sh
-metricgate-mcp -config policy.yaml -calllog .metricgate/mcp-calls.jsonl
+metricgate-mcp -config .metricgate.yaml -calllog .metricgate/mcp-calls.jsonl
 # 或者
-METRICGATE_CALLLOG=1 metricgate-mcp -config policy.yaml   # 1 表示用默认路径
+METRICGATE_CALLLOG=1 metricgate-mcp -config .metricgate.yaml   # 1 表示用默认路径
 ```
 
 MCP 客户端配置里的写法：
@@ -180,7 +180,7 @@ MCP 客户端配置里的写法：
   "mcpServers": {
     "metricgate": {
       "command": "/path/to/metricgate-mcp",
-      "args": ["-config", "/path/to/policy.yaml", "-calllog", ".metricgate/mcp-calls.jsonl"]
+      "args": ["-config", "/path/to/.metricgate.yaml", "-calllog", ".metricgate/mcp-calls.jsonl"]
     }
   }
 }
@@ -234,6 +234,31 @@ verification (the gate's own verdicts)
 | `phase` 分布 | before / verify / review / explore | 区分"用闸门验证"和"用闸门翻仓库" |
 
 计数永远和比率一起打印。一个没有分母的百分比会让人把"没跑过"读成"从不发生"。
+
+### 4.3b trace：把一次任务的调用与运行串起来
+
+一个 `session` 是进程级的，一个 `run` 是一次 check 级的，两者一对多。要让
+"一次任务"的全部工具调用与全部 check 归到一起，需要第三把键：**trace**。
+它由宿主（agent harness）在启动 MCP server 之前用环境变量设好，metricgate
+只读不探测——工具不知道你用的是哪个模型，也不该去猜。
+
+```sh
+# 一次任务（一个 PR / 一个 prompt 版本 / 一个模型）开工前设一次：
+export METRICGATE_TRACE_ID="task-2026-10-14-001"
+# 可选：模型、提示词指纹、harness 等维度（逗号分隔的 key=value）：
+export METRICGATE_TRACE_ATTRS="model=gpt-5,prompt_digest=sha256:ab12,harness=codex"
+metricgate-mcp -config .metricgate.yaml -calllog .metricgate/mcp-calls.jsonl
+```
+
+- 白名单键：`model` / `prompt_digest` / `harness` / `agent` / `branch` /
+  `tool_invocations`。**未知键被丢弃并在 `check` 的 stderr 上计数提示**，
+  值超 256 字节按 rune 边界截断。
+- **空 trace 是合法状态**：不设 env 时行为与以前逐字节一致，check 照常跑，
+  只是这些 run 不属于任何 trace。
+- 读回来：`metricgate trace <traceID>` 给出该 trace 的 runs + findings +
+  属性 + MCP 调用；`metricgate trends -trace/-model/-prompt-digest` 按 trace
+  或属性切窗口。MCP 侧对应 `get_trace` 与 `get_trends` 的同名参数。
+- trace **只出现在输出侧，不参与判定**：同一份代码的结论不因 trace 而变。
 
 ### 4.4 已知失效模式（必须连这些一起读）
 

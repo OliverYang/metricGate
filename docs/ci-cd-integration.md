@@ -15,10 +15,10 @@ metricGate integrates into CI/CD pipelines at multiple stages:
 
 ```bash
 # JSON output for PR comments
-./scripts/ci-helper.sh json findings.json policy.yaml .
+./scripts/ci-helper.sh json findings.json .metricgate.yaml .
 
 # HTML dashboard
-./scripts/ci-helper.sh html dashboard.html policy.yaml .
+./scripts/ci-helper.sh html dashboard.html .metricgate.yaml .
 ```
 
 ### Option 2: Direct CLI Usage
@@ -110,7 +110,7 @@ metricgate-pr-check:
 ### HTML Dashboard
 
 ```bash
-./scripts/ci-helper.sh html dashboard.html policy.yaml .
+./scripts/ci-helper.sh html dashboard.html .metricgate.yaml .
 ```
 
 Generates a self-contained HTML file with:
@@ -162,7 +162,7 @@ Outputs p50/p90/p95/max for all complexity metrics.
 Start with warning-level only:
 
 ```yaml
-# In policy.yaml
+# In .metricgate.yaml
 rules:
   fail_on: warning  # Change to error after stabilization
 ```
@@ -202,12 +202,12 @@ rules:
 
 ## Troubleshooting
 
-### Issue: "no policy file at policy.yaml"
+### Issue: "no policy file at .metricgate.yaml"
 
 **Solution**: Pass explicit config path:
 
 ```bash
-./metricgate check . -config /path/to/policy.yaml
+./metricgate check . -config /path/to/.metricgate.yaml
 ```
 
 ### Issue: Slow execution on large repos

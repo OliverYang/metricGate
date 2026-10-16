@@ -3,6 +3,8 @@ package cockpit
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -166,13 +168,17 @@ func TestHandlerDashboardReadsRunHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := httptest.NewServer(Handler("", dbPath))
-	defer srv.Close()
-	res, err := http.Get(srv.URL + "/api/dashboard")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Body.Close()
+	// The handler is exercised directly rather than through httptest.NewServer:
+	// the dashboard is served over loopback, and binding a listener for it is
+	// an environment dependency a unit test does not need.
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	// The API guard admits loopback hosts only, so the request has to look like
+	// it came from the local cockpit: httptest.NewRequest defaults to
+	// "example.com", which is exactly the host a remote caller would use.
+	req.Host = "127.0.0.1"
+	rec := httptest.NewRecorder()
+	Handler("", dbPath).ServeHTTP(rec, req)
+	res := rec.Result()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
@@ -216,13 +222,17 @@ func TestHandlerServesEmbeddedUIAndAssets(t *testing.T) {
 }
 
 func TestCheckAvailable(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"version":"9.9.9","url":"https://example.com/dl"}`))
-	}))
-	defer srv.Close()
-
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL}
+	// The feed is served through an injected RoundTripper rather than a live
+	// listener: the update check's contract is about parsing the feed and
+	// running the state machine, and binding a socket to prove it makes the
+	// test depend on the environment having a network stack available.
+	c := &Checker{
+		Current: "0.1.0",
+		FeedURL: "http://feed.test/latest.json",
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			return jsonResponse(`{"version":"9.9.9","url":"https://example.com/dl"}`), nil
+		})},
+	}
 	res := waitResult(t, c.Check(context.Background()))
 	if res.State != StateAvailable {
 		t.Fatalf("state = %q, want %q", res.State, StateAvailable)
@@ -236,24 +246,36 @@ func TestCheckAvailable(t *testing.T) {
 }
 
 func TestCheckNotAvailable(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"version":"0.1.0"}`))
-	}))
-	defer srv.Close()
-
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL}
+	c := &Checker{Current: "0.1.0", FeedURL: feedURL, HTTPClient: feedClient(`{"version":"0.1.0"}`)}
 	res := waitResult(t, c.Check(context.Background()))
 	if res.State != StateNotAvail {
 		t.Fatalf("state = %q, want %q", res.State, StateNotAvail)
 	}
 }
 
-func TestCheckNetworkError(t *testing.T) {
-	// Closed server: connection refused on every request.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	srv.Close()
+func TestCheckNotEnabled(t *testing.T) {
+	// No feed configured is a shipping decision, not a network failure. The
+	// old behaviour probed a placeholder domain and reported its DNS error as
+	// StateError, which advertised a host that does not exist. The contract
+	// here is the opposite: an empty FeedURL must not touch the network at all,
+	// so an HTTPClient that fails on any request still yields not_enabled.
+	c := &Checker{Current: "0.1.0", HTTPClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("no request may be made when no feed is configured")
+	})}}
+	res := waitResult(t, c.Check(context.Background()))
+	if res.State != StateNotEnabled {
+		t.Fatalf("state = %q, want %q", res.State, StateNotEnabled)
+	}
+	if res.Error == "" {
+		t.Fatal("not_enabled must say how to enable a feed")
+	}
+}
 
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL}
+func TestCheckNetworkError(t *testing.T) {
+	// A transport that refuses every request stands in for a closed server.
+	c := &Checker{Current: "0.1.0", FeedURL: feedURL, HTTPClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: connection refused")
+	})}}
 	res := waitResult(t, c.Check(context.Background()))
 	if res.State != StateError {
 		t.Fatalf("state = %q, want %q", res.State, StateError)
@@ -266,15 +288,13 @@ func TestCheckNetworkError(t *testing.T) {
 func TestCheckTimeout(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-release // hang until the client gives up
-	}))
-	defer func() {
-		releaseOnce.Do(func() { close(release) })
-		srv.Close()
-	}()
+	defer releaseOnce.Do(func() { close(release) })
 
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL, Timeout: 50 * time.Millisecond}
+	c := &Checker{Current: "0.1.0", FeedURL: feedURL, Timeout: 50 * time.Millisecond,
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			<-r.Context().Done() // hang until the client gives up
+			return nil, r.Context().Err()
+		})}}
 	res := waitResult(t, c.Check(context.Background()))
 	if res.State != StateError {
 		t.Fatalf("state = %q, want %q (timeout must surface as error, not hang)", res.State, StateError)
@@ -284,13 +304,10 @@ func TestCheckTimeout(t *testing.T) {
 func TestCheckNonBlocking(t *testing.T) {
 	// A slow feed must not block the caller: Check returns while the probe
 	// is still in flight, and status is checking at that point.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := &Checker{Current: "0.1.0", FeedURL: feedURL, HTTPClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		time.Sleep(200 * time.Millisecond)
-		_, _ = w.Write([]byte(`{"version":"0.1.0"}`))
-	}))
-	defer srv.Close()
-
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL}
+		return jsonResponse(`{"version":"0.1.0"}`), nil
+	})}}
 	ch := c.Check(context.Background())
 	if got := c.Status(); got.State != StateChecking {
 		t.Fatalf("state right after Check = %q, want %q", got.State, StateChecking)
@@ -301,39 +318,35 @@ func TestCheckNonBlocking(t *testing.T) {
 }
 
 func TestCheckBadFeed(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL}
+	c := &Checker{Current: "0.1.0", FeedURL: feedURL, HTTPClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}}
 	if res := waitResult(t, c.Check(context.Background())); res.State != StateError {
 		t.Fatalf("state = %q, want %q for HTTP 500", res.State, StateError)
 	}
 }
 
 func TestSupersededCheckKeepsLatestStatus(t *testing.T) {
+	// One transport answers both feeds: the slow URL blocks until released,
+	// the fast URL responds immediately. The test is about the generation
+	// counter, not about sockets.
 	slow := make(chan struct{})
 	var slowOnce sync.Once
 	releaseSlow := func() { slowOnce.Do(func() { close(slow) }) }
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	defer releaseSlow()
+	transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.String(), "fast") {
+			return jsonResponse(`{"version":"2.0.0"}`), nil
+		}
 		<-slow
-		_, _ = w.Write([]byte(`{"version":"1.0.0"}`))
-	}))
-	defer func() {
-		releaseSlow()
-		srv.Close()
-	}()
+		return jsonResponse(`{"version":"1.0.0"}`), nil
+	})
 
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL, Timeout: 2 * time.Second}
+	c := &Checker{Current: "0.1.0", FeedURL: "http://feed.test/slow.json", Timeout: 2 * time.Second, HTTPClient: &http.Client{Transport: transport}}
 	first := c.Check(context.Background())
 
 	// Second check against a fast feed supersedes the first.
-	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"version":"2.0.0"}`))
-	}))
-	defer fast.Close()
-	c.FeedURL = fast.URL
+	c.FeedURL = "http://feed.test/fast.json"
 	second := c.Check(context.Background())
 	if res := waitResult(t, second); res.Latest != "2.0.0" {
 		t.Fatalf("second check latest = %q, want 2.0.0", res.Latest)
@@ -351,17 +364,47 @@ func TestSupersededCheckKeepsLatestStatus(t *testing.T) {
 }
 
 func TestCheckContextCancel(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(500 * time.Millisecond)
-	}))
-	defer srv.Close()
-
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Checker{Current: "0.1.0", FeedURL: srv.URL, Timeout: 5 * time.Second}
+	c := &Checker{Current: "0.1.0", FeedURL: feedURL, Timeout: 5 * time.Second,
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			select {
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			case <-time.After(500 * time.Millisecond):
+				return jsonResponse(`{"version":"9.9.9"}`), nil
+			}
+		})}}
 	ch := c.Check(ctx)
 	cancel()
 	res := waitResult(t, ch)
 	if res.State != StateError {
 		t.Fatalf("state = %q, want %q after cancel", res.State, StateError)
+	}
+}
+
+// feedURL is the stand-in release feed every test below addresses. No socket
+// is bound: the Checker accepts an injected client precisely so the state
+// machine can be tested without a network stack.
+const feedURL = "http://feed.test/latest.json"
+
+// feedClient serves a canned document from memory.
+func feedClient(body string) *http.Client {
+	return &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(body), nil
+	})}
+}
+
+// roundTripperFunc adapts a function to http.RoundTripper, so a test can serve
+// a canned response without binding a port.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// jsonResponse builds a 200 JSON response in memory.
+func jsonResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }

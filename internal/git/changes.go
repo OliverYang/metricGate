@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"metricgate/internal/diff"
@@ -74,33 +72,69 @@ func LoadChanges(dir string, req ChangeRequest) ([]FileChange, error) {
 			return nil, err
 		}
 	}
-	for i := range changes {
-		if err := fillHunks(root, normalized, &changes[i]); err != nil {
-			return nil, err
-		}
+	if err := attachHunks(root, normalized, changes); err != nil {
+		return nil, err
 	}
 	sortChanges(changes)
 	return changes, nil
 }
 
-// fillHunks attaches the added-line hunks of one change. An untracked file is
-// read from disk (its whole content is new); a tracked one is diffed against
-// the request base. Kept out of LoadChanges so the list loop stays flat under
-// the fan-out gate.
-func fillHunks(root string, req ChangeRequest, c *FileChange) error {
-	if c.Untracked {
-		data, err := os.ReadFile(joinPath(root, c.Path))
-		if err != nil {
-			return fmt.Errorf("read untracked %s: %w", c.Path, err)
-		}
-		c.Hunks = wholeFileHunk(string(data))
+// attachHunks fills the hunks of a whole change set with ONE git process. The
+// previous shape spawned `git diff -- <path>` per file, which on a 173-path
+// dirty tree cost ~14 s of pure process startup — the bulk of the overhead that
+// made `-diff` feel too expensive to run per edit. Untracked files are read
+// from disk (their whole content is new) and need no git at all.
+func attachHunks(root string, req ChangeRequest, changes []FileChange) error {
+	if err := readUntrackedHunks(root, changes); err != nil {
+		return err
+	}
+	if !hasTrackedChange(changes) {
 		return nil
 	}
-	patch, err := gitBytes(root, patchArgs(req, changePaths(*c))...)
+	patch, err := gitBytes(root, patchArgs(req, nil)...)
 	if err != nil {
-		return fmt.Errorf("git diff %s: %w", c.Path, err)
+		return fmt.Errorf("git diff %s: %w", patchTarget(req), err)
 	}
-	c.Hunks = parseUnifiedHunks(string(patch))
+	assignPatchHunks(changes, string(patch))
+	return nil
+}
+
+// patchTarget names what the batched diff compares against, so a failure says
+// which side of the diff broke rather than blaming one arbitrary file.
+func patchTarget(req ChangeRequest) string {
+	switch req.Mode {
+	case ModeRange:
+		return req.From + ".." + req.To
+	case ModeCommit:
+		return req.Commit
+	default:
+		if req.Base == "" {
+			return "HEAD"
+		}
+		return req.Base
+	}
+}
+
+func hasTrackedChange(changes []FileChange) bool {
+	for i := range changes {
+		if !changes[i].Untracked {
+			return true
+		}
+	}
+	return false
+}
+
+func readUntrackedHunks(root string, changes []FileChange) error {
+	for i := range changes {
+		if !changes[i].Untracked {
+			continue
+		}
+		data, err := os.ReadFile(joinPath(root, changes[i].Path))
+		if err != nil {
+			return fmt.Errorf("read untracked %s: %w", changes[i].Path, err)
+		}
+		changes[i].Hunks = wholeFileHunk(string(data))
+	}
 	return nil
 }
 
@@ -184,20 +218,24 @@ func nameStatusArgs(req ChangeRequest) []string {
 	}
 }
 
+// patchArgs builds the diff query for a change set. --src-prefix/--dst-prefix
+// are pinned because `diff.mnemonicPrefix` (c/ + w/) or `diff.noprefix` in a
+// user's config would otherwise hand section paths back in a shape that
+// splitPatchSections/patchSectionPaths cannot strip.
 func patchArgs(req ChangeRequest, paths []string) []string {
 	var args []string
 	switch req.Mode {
 	case ModeRange:
-		args = []string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--unified=0", "--find-renames", req.From, req.To, "--"}
+		args = []string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--unified=0", "--src-prefix=a/", "--dst-prefix=b/", "--find-renames", req.From, req.To, "--"}
 	case ModeCommit:
 		// show handles root commits as well as ordinary parented commits.
-		args = []string{"--literal-pathspecs", "show", "--format=", "--no-ext-diff", "--no-color", "--unified=0", "--find-renames", req.Commit, "--"}
+		args = []string{"--literal-pathspecs", "show", "--format=", "--no-ext-diff", "--no-color", "--unified=0", "--src-prefix=a/", "--dst-prefix=b/", "--find-renames", req.Commit, "--"}
 	default:
 		base := req.Base
 		if base == "" {
 			base = "HEAD"
 		}
-		args = []string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--unified=0", "--find-renames", base, "--"}
+		args = []string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--unified=0", "--src-prefix=a/", "--dst-prefix=b/", "--find-renames", base, "--"}
 	}
 	return append(args, paths...)
 }
@@ -213,20 +251,6 @@ func addUntracked(dir string, changes []FileChange) ([]FileChange, error) {
 		}
 	}
 	return changes, nil
-}
-
-func changePaths(c FileChange) []string {
-	var paths []string
-	if c.OldPath != "" {
-		paths = append(paths, c.OldPath)
-	}
-	if c.NewPath != "" && c.NewPath != c.OldPath {
-		paths = append(paths, c.NewPath)
-	}
-	if len(paths) == 0 {
-		paths = append(paths, c.Path)
-	}
-	return paths
 }
 
 // parseNameStatusZ walks git's `--name-status -z` output. The loop only
@@ -299,50 +323,6 @@ func nulFields(data []byte) []string {
 		out = append(out, string(p))
 	}
 	return out
-}
-
-var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
-
-func parseUnifiedHunks(patch string) []Hunk {
-	var out []Hunk
-	var current *Hunk
-	for _, line := range strings.Split(patch, "\n") {
-		if m := hunkHeader.FindStringSubmatch(line); m != nil {
-			oldStart, _ := strconv.Atoi(m[1])
-			newStart, _ := strconv.Atoi(m[3])
-			oldCount, newCount := 1, 1
-			if m[2] != "" {
-				oldCount, _ = strconv.Atoi(m[2])
-			}
-			if m[4] != "" {
-				newCount, _ = strconv.Atoi(m[4])
-			}
-			out = append(out, Hunk{OldStart: oldStart, OldCount: oldCount, NewStart: newStart, NewCount: newCount})
-			current = &out[len(out)-1]
-			continue
-		}
-		if current == nil || line == "" || strings.HasPrefix(line, "\\") {
-			continue
-		}
-		switch line[0] {
-		case '+':
-			current.Added = append(current.Added, strings.TrimPrefix(line, "+"))
-		case '-':
-			current.Deleted = append(current.Deleted, strings.TrimPrefix(line, "-"))
-		}
-	}
-	return out
-}
-
-func wholeFileHunk(src string) []Hunk {
-	lines := strings.Split(src, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-	return []Hunk{{NewStart: 1, NewCount: len(lines), Added: lines}}
 }
 
 // ChangedLinesFromChanges projects a change set onto the legacy new-side

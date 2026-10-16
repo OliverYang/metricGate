@@ -142,3 +142,53 @@ func TestScanRootRelativeAndOwnModuleAreInternal(t *testing.T) {
 		t.Fatalf("internal imports must not appear in the draft, got %+v", d.Imports)
 	}
 }
+
+// TestScanRootCountsEveryParsedLanguage pins the fix for the silent skip:
+// before Files existed, a language with no import extractor was dropped
+// without a trace, so an empty draft read as "no dependencies".
+func TestScanRootCountsEveryParsedLanguage(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"go.mod": "module demo\n\ngo 1.26\n",
+		"a.vb":   "Imports MyApp.Core\n",
+		"b.v":    "`include \"defs.vh\"\n",
+		"c.sql":  "CREATE FUNCTION f() RETURNS int AS $$ SELECT 1; $$ LANGUAGE sql;\n",
+	})
+	d, err := ScanRoot(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range []string{"vbnet", "verilog", "sql"} {
+		if d.Files[lang] != 1 {
+			t.Errorf("Files[%s] = %d, want 1 (parsed but not counted)", lang, d.Files[lang])
+		}
+	}
+	got := d.LanguagesWithoutImports()
+	if len(got) != 1 || got[0] != "sql" {
+		t.Errorf("LanguagesWithoutImports() = %v, want [sql]", got)
+	}
+}
+
+// TestScanRootReadsVBAndVerilogImports covers the two new extractors. VB's
+// Imports clause is a real namespace import; SystemVerilog's `include is a
+// file reference, kept because a missing header is a missing dependency.
+func TestScanRootReadsVBAndVerilogImports(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"go.mod": "module demo\n\ngo 1.26\n",
+		"a.vb":   "Imports MyApp.Core\nImports System\n",
+		"b.v":    "`include \"defs.vh\"\n",
+	})
+	d, err := ScanRoot(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := draftPaths(d)
+	if _, ok := got["MyApp.Core"]; !ok {
+		t.Errorf("VB namespace import missing from draft: %v", got)
+	}
+	if _, ok := got["defs.vh"]; !ok {
+		t.Errorf("SystemVerilog include missing from draft: %v", got)
+	}
+	if _, ok := got["System"]; ok {
+		t.Errorf("System is a BCL namespace and must not be drafted: %v", got)
+	}
+}

@@ -76,6 +76,7 @@ var toolPhases = map[string]Phase{
 	"get_impact":        PhaseExplore,
 	"get_hotspots":      PhaseExplore,
 	"get_trends":        PhaseExplore,
+	"get_trace":         PhaseExplore,
 	"get_metric_stats":  PhaseExplore,
 	"list_stubs":        PhaseExplore,
 }

@@ -49,7 +49,11 @@ type Shingles struct {
 // FingerprintShingles extracts the normalised token stream of a body and
 // returns its 3-gram shingle set. Must run inside the parse workers (it
 // walks the tree).
-func FingerprintShingles(src []byte, body *sitter.Node) Shingles {
+//
+// roots is a list because not every grammar wraps a body in a single node:
+// VB follows a method header with a flat list of statements. Shingling only
+// the first statement would match unrelated methods that share an opening.
+func FingerprintShingles(src []byte, roots []*sitter.Node) Shingles {
 	var toks []string
 	var walk func(n *sitter.Node)
 	walk = func(n *sitter.Node) {
@@ -68,7 +72,9 @@ func FingerprintShingles(src []byte, body *sitter.Node) Shingles {
 			walk(n.Child(i))
 		}
 	}
-	walk(body)
+	for _, root := range roots {
+		walk(root)
+	}
 
 	const k = 3
 	set := make(map[uint64]bool, len(toks))
@@ -291,7 +297,7 @@ func parseWith(parsers map[parser.LanguageID]*parser.Parser, lang parser.Languag
 func fileShingles(lang parser.LanguageID, path string, src []byte, tree *sitter.Tree, cfg NearConfig) []NearFunc {
 	var out []NearFunc
 	for _, f := range Extract(lang, path, src, tree, Config{MinLines: cfg.MinLines, MinTokens: cfg.MinTokens}) {
-		if f.body == nil {
+		if len(f.body) == 0 {
 			continue
 		}
 		out = append(out, NearFunc{Func: f, Shingles: FingerprintShingles(src, f.body)})

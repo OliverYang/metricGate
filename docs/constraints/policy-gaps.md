@@ -15,7 +15,7 @@
 ## 用法
 
 ```bash
-metricgate rules gaps [path] [-config policy.yaml] [-format text|json]
+metricgate rules gaps [path] [-config .metricgate.yaml] [-format text|json]
 ```
 
 只读、确定性（同一棵树两次审计输出逐字节相同）、不写文件、不发网络。
@@ -39,7 +39,7 @@ metricgate rules gaps [path] [-config policy.yaml] [-format text|json]
 
 ## 真实输出：一个薄策略的仓库
 
-两文件、两包、`policy.yaml` 只有 `version: 1`：
+两文件、两包、`.metricgate.yaml` 只有 `version: 1`：
 
 ```
 policy gaps: . — 2 files, 2 packages, 22 rules catalogued, 1 firing

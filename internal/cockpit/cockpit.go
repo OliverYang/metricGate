@@ -19,15 +19,19 @@ import (
 // States the update check moves through. Exactly one is reported per check,
 // and each terminal state is reached exactly once — a UI can switch on the
 // state without needing to interpret errors or payloads.
+//
+// StateNotEnabled exists because there is no release feed yet. A build with no
+// feed configured used to probe a placeholder domain and report the DNS failure
+// as StateError, which made "the product points at a host that does not exist"
+// look like a transient network problem to both users and logs. Reporting
+// "not enabled" states the truth instead: nothing was shipped to check against.
 const (
-	StateChecking  = "checking"
-	StateAvailable = "available"     // a newer release exists
-	StateNotAvail  = "not_available" // running the latest release
-	StateError     = "error"         // network or feed failure; never fatal
+	StateChecking   = "checking"
+	StateAvailable  = "available"     // a newer release exists
+	StateNotAvail   = "not_available" // running the latest release
+	StateError      = "error"         // network or feed failure; never fatal
+	StateNotEnabled = "not_enabled"   // no release feed configured; nothing probed
 )
-
-// DefaultFeedURL is the release feed probed when no override is configured.
-const DefaultFeedURL = "https://releases.metricgate.dev/latest.json"
 
 // DefaultTimeout bounds a single check so a hung connection cannot leave the
 // tab stuck in the checking state.
@@ -41,7 +45,8 @@ type Feed struct {
 
 // Status is one check's observable outcome. State is always one of the State*
 // constants; Latest and URL are populated only for StateAvailable, and Error
-// only for StateError. Time stamps when the terminal state was reached.
+// for StateError and StateNotEnabled. Time stamps when the terminal state was
+// reached.
 type Status struct {
 	State     string    `json:"state"`
 	Current   string    `json:"current"`
@@ -57,7 +62,8 @@ type Checker struct {
 	// Current is the running tool's version, compared against the feed.
 	Current string
 
-	// FeedURL is the release feed endpoint; empty means DefaultFeedURL.
+	// FeedURL is the release feed endpoint. Empty means no feed is configured:
+	// the check reports StateNotEnabled and makes no request.
 	FeedURL string
 
 	// Timeout bounds one HTTP probe; zero means DefaultTimeout.
@@ -126,12 +132,14 @@ func (c *Checker) run(ctx context.Context, gen int, checking Status, out chan<- 
 	}
 }
 
-// probe executes the synchronous feed fetch. All failure paths return a
-// StateError status; nothing here can panic into the caller.
+// probe executes the synchronous feed fetch. A missing feed is a configuration
+// state, not a failure, so it returns StateNotEnabled without touching the
+// network; every other failure path returns StateError. Nothing here can panic
+// into the caller.
 func (c *Checker) probe(ctx context.Context) Status {
 	url := c.FeedURL
 	if url == "" {
-		url = DefaultFeedURL
+		return Status{State: StateNotEnabled, Error: "no release feed configured; pass -feed URL"}
 	}
 	timeout := c.Timeout
 	if timeout <= 0 {

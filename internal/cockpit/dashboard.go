@@ -19,9 +19,19 @@ import (
 	"metricgate/internal/accept"
 	"metricgate/internal/calllog"
 	"metricgate/internal/store"
+	"metricgate/internal/webspec"
 )
 
-//go:embed web/*
+// The release asset set is the UI, not the dev harness. web/ also holds
+// render_all.mjs, smoke.mjs and fixtures.json: they are read from disk by
+// `go test` and never requested by a browser, so listing the embeds instead of
+// globbing web/* keeps them out of the binary that ships. The listing is
+// asserted by TestEmbeddedAssetsCoverTheRequestGraph.
+//
+//go:embed web/index.html
+//go:embed web/app.js
+//go:embed web/style.css
+//go:embed web/spec.json
 var webFS embed.FS
 
 // Dashboard is the stable payload consumed by the audit UI.
@@ -39,7 +49,16 @@ type Dashboard struct {
 	ArchivedFindings []DashboardFinding `json:"archivedFindings"`
 	Projects         []ProjectSummary   `json:"projects"`
 	UnassignedCalls  int                `json:"unassignedCalls"`
-	Accepted         []accept.Entry     `json:"accepted,omitempty"`
+	// UnassignedRuns is the second half of the same honesty: calls without a
+	// worktree and runs without a worktree are different populations, and the
+	// project picker needs the run count to say how much of the history its
+	// per-project cards cannot account for.
+	UnassignedRuns int `json:"unassignedRuns"`
+	// ArchivedUnassignedRuns is the same count for the archived history mode,
+	// because the archived view is a different set of runs and reusing the
+	// active count would overstate what that mode can account for.
+	ArchivedUnassignedRuns int            `json:"archivedUnassignedRuns"`
+	Accepted               []accept.Entry `json:"accepted,omitempty"`
 }
 
 // DashboardCall adds only a verified project root to the original local call record.
@@ -58,6 +77,8 @@ type ProjectSummary struct {
 	Errors           int                `json:"errors"`
 	Warnings         int                `json:"warnings"`
 	LatestActivity   string             `json:"latestActivity"`
+	RunTotal         int                `json:"runTotal"`
+	IssueOpen        int                `json:"issueOpen"`
 	Runs             []store.RunRecord  `json:"runs"`
 	ArchivedRuns     []store.RunRecord  `json:"archivedRuns"`
 	Trend            store.TrendReport  `json:"trend"`
@@ -95,43 +116,64 @@ func NewDashboard(logPath, dbPath string) (Dashboard, error) {
 	if dbPath == "" {
 		return d, nil
 	}
-	st, err := store.Open(dbPath)
-	if err != nil {
-		return d, err
-	}
-	defer st.Close()
-	d.Runs, err = st.LatestUnassignedRuns(20)
-	if err != nil {
-		return d, err
-	}
-	d.Trend, err = st.ReportUnassigned(20)
-	if err != nil {
-		return d, err
-	}
-	d.MetricTrend, err = st.MetricTrend(20)
-	if err != nil {
-		return d, err
-	}
-	d.ArchivedRuns, err = st.LatestArchivedUnassignedRuns(100)
-	if err != nil {
-		return d, err
-	}
-	d.ArchivedTrend, err = st.ReportArchivedUnassigned(100)
-	if err != nil {
-		return d, err
-	}
-	if err := attachProjectRuns(st, &d); err != nil {
-		return d, err
-	}
-	if err := attachRunFindings(st, &d.Findings, d.Runs); err != nil {
-		return d, err
-	}
-	if err := attachRunFindings(st, &d.ArchivedFindings, d.ArchivedRuns); err != nil {
+	if err := fillFromStore(&d, dbPath); err != nil {
 		return d, err
 	}
 	return d, nil
 }
 
+// fillFromStore loads everything the dashboard reads out of the history store:
+// the unassigned run lists and trends, the two whole-store run counts, and per
+// project the runs, trends and findings. It is separate from NewDashboard so
+// that the call-log half and the store half each stay readable on their own —
+// the two halves share nothing but the Dashboard value they fill.
+func fillFromStore(d *Dashboard, dbPath string) error {
+	st, err := store.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	d.Runs, err = st.LatestUnassignedRuns(20)
+	if err != nil {
+		return err
+	}
+	d.Trend, err = st.ReportUnassigned(20)
+	if err != nil {
+		return err
+	}
+	d.MetricTrend, err = st.MetricTrend(20)
+	if err != nil {
+		return err
+	}
+	d.ArchivedRuns, err = st.LatestArchivedUnassignedRuns(100)
+	if err != nil {
+		return err
+	}
+	d.ArchivedTrend, err = st.ReportArchivedUnassigned(100)
+	if err != nil {
+		return err
+	}
+	d.UnassignedRuns, err = st.UnassignedRunCount(0)
+	if err != nil {
+		return err
+	}
+	d.ArchivedUnassignedRuns, err = st.UnassignedRunCount(1)
+	if err != nil {
+		return err
+	}
+	if err := attachProjectRuns(st, d); err != nil {
+		return err
+	}
+	if err := attachRunFindings(st, &d.Findings, d.Runs); err != nil {
+		return err
+	}
+	return attachRunFindings(st, &d.ArchivedFindings, d.ArchivedRuns)
+}
+
+// attachProjectRuns fills every project card with its runs, trend and
+// findings, plus the two whole-store totals. The totals are computed once for
+// all projects before the loop rather than inside it: seven grouped queries
+// serially would make the project picker the slowest thing on the dashboard.
 func attachProjectRuns(st *store.Store, dashboard *Dashboard) error {
 	known := make(map[string]bool, len(dashboard.Projects))
 	for i := range dashboard.Projects {
@@ -147,8 +189,18 @@ func attachProjectRuns(st *store.Store, dashboard *Dashboard) error {
 		}
 	}
 	sort.Slice(dashboard.Projects, func(i, j int) bool { return dashboard.Projects[i].Name < dashboard.Projects[j].Name })
+	runTotals, err := st.RunTotalsByProject()
+	if err != nil {
+		return err
+	}
+	openTotals, err := st.OpenIssueTotalsByProject()
+	if err != nil {
+		return err
+	}
 	for i := range dashboard.Projects {
 		project := &dashboard.Projects[i]
+		project.RunTotal = runTotals[project.Root]
+		project.IssueOpen = openTotals[project.Root]
 		runs, err := st.LatestRunsForProject(20, project.Root)
 		if err != nil {
 			return err
@@ -283,7 +335,14 @@ func Handler(logPath, dbPath string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/dashboard", dashboardAPI(logPath, dbPath))
 	mux.HandleFunc("/api/runs/archive", archiveAPI(dbPath))
-	mux.HandleFunc("/api/policy", policyAPI())
+	mux.HandleFunc("/api/policy", policyAPI(logPath, dbPath))
+	mux.HandleFunc("/api/rules", rulesAPI(logPath, dbPath))
+	mux.HandleFunc("/api/issues", issuesAPI(logPath, dbPath))
+	mux.HandleFunc("/api/issues/", issuesAPI(logPath, dbPath))
+	mux.HandleFunc("/api/gate", gateAPI(logPath, dbPath))
+	mux.HandleFunc("/api/measures", measuresAPI(logPath, dbPath))
+	mux.HandleFunc("/api/source", sourceAPI(dbPath))
+	mux.HandleFunc("/api/spec", webspec.Handler())
 	webMount(mux)
 	return withLocalAPIGuard(mux)
 }
@@ -297,7 +356,7 @@ func dashboardAPI(logPath, dbPath string) http.HandlerFunc {
 		}
 		d, err := NewDashboard(logPath, dbPath)
 		if err != nil {
-			http.Error(w, "dashboard data unavailable: "+err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "dashboard data unavailable: "+err.Error())
 			return
 		}
 		d.GeneratedAt = nowUTC()
@@ -314,11 +373,11 @@ func archiveAPI(dbPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		if !sameOrigin(r) {
-			http.Error(w, "same-origin request required", http.StatusForbidden)
+			writeJSONError(w, http.StatusForbidden, "same-origin request required")
 			return
 		}
 		request, ok := decodeArchiveRequest(w, r)
@@ -326,7 +385,7 @@ func archiveAPI(dbPath string) http.HandlerFunc {
 			return
 		}
 		if dbPath == "" {
-			http.Error(w, "history store is disabled", http.StatusServiceUnavailable)
+			writeJSONError(w, http.StatusServiceUnavailable, "history store is disabled")
 			return
 		}
 		applyArchive(w, dbPath, request)
@@ -339,7 +398,7 @@ func archiveAPI(dbPath string) http.HandlerFunc {
 func decodeArchiveRequest(w http.ResponseWriter, r *http.Request) (archiveRequest, bool) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		http.Error(w, "application/json required", http.StatusUnsupportedMediaType)
+		writeJSONError(w, http.StatusUnsupportedMediaType, "application/json required")
 		return archiveRequest{}, false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -347,12 +406,12 @@ func decodeArchiveRequest(w http.ResponseWriter, r *http.Request) (archiveReques
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || !validArchiveRequest(request) {
-		http.Error(w, "invalid archive request", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid archive request")
 		return archiveRequest{}, false
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		http.Error(w, "invalid archive request", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid archive request")
 		return archiveRequest{}, false
 	}
 	return request, true
@@ -363,16 +422,16 @@ func decodeArchiveRequest(w http.ResponseWriter, r *http.Request) (archiveReques
 func applyArchive(w http.ResponseWriter, dbPath string, request archiveRequest) {
 	st, err := store.Open(dbPath)
 	if err != nil {
-		http.Error(w, "archive operation rejected", http.StatusConflict)
+		writeJSONError(w, http.StatusConflict, "archive operation rejected")
 		return
 	}
 	if err := st.SetRunsArchived(request.RunIDs, request.ProjectRoot, request.Archived); err != nil {
 		_ = st.Close()
-		http.Error(w, "archive operation rejected", http.StatusConflict)
+		writeJSONError(w, http.StatusConflict, "archive operation rejected")
 		return
 	}
 	if err := st.Close(); err != nil {
-		http.Error(w, "archive operation failed", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "archive operation failed")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -387,13 +446,30 @@ func webMount(mux *http.ServeMux) {
 	webFiles, err := fs.Sub(webFS, "web")
 	if err != nil {
 		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "dashboard assets unavailable", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "dashboard assets unavailable")
 		}))
 		return
 	}
 	webHandler := http.FileServer(http.FS(webFiles))
-	mux.Handle("/web/", http.StripPrefix("/web/", webHandler))
-	mux.Handle("/", webHandler)
+	// Embedded assets carry no modtime, so http.FileServer emits neither
+	// Last-Modified nor ETag. Without a validator a browser is free to reuse
+	// its heuristically cached copy, and a rebuilt binary then serves new
+	// bytes the browser never asks for: the operator restarts the tool and
+	// keeps looking at the previous UI. Every asset changes with the binary,
+	// so the honest header is no-store.
+	mux.Handle("/web/", noStore(http.StripPrefix("/web/", webHandler)))
+	mux.Handle("/", noStore(webHandler))
+}
+
+// noStore marks a response as uncacheable. The cockpit ships its UI inside the
+// binary, so a cached asset is always either identical to what is being served
+// or a stale copy of a previous build - and there is no way to tell the two
+// apart from inside the browser.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withLocalAPIGuard rejects non-loopback hosts on API routes while leaving
@@ -401,7 +477,7 @@ func webMount(mux *http.ServeMux) {
 func withLocalAPIGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") && !allowLocalHost(r) {
-			http.Error(w, "invalid host", http.StatusForbidden)
+			writeJSONError(w, http.StatusForbidden, "invalid host")
 			return
 		}
 		next.ServeHTTP(w, r)

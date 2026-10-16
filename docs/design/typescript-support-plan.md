@@ -50,7 +50,7 @@ func TypescriptRules() []*Rule {
 ```
 
 **关键点**：
-- banned-api 词汇表跨语言通用（policy.yaml 中定义）
+- banned-api 词汇表跨语言通用（.metricgate.yaml 中定义）
 - metrics（cyclomatic/cognitive/npath）语言无关，只需解析器支持
 - TS 特有的规则：ban `any`, ban `unknown`, ban `console.log`（可选）
 

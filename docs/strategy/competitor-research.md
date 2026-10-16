@@ -133,7 +133,7 @@ metricgate 的主线（README 原文）：**本地、毫秒级、零 token 回�
 
 - SonarQube 2026.4 的 "Agentic AI 质量门" 明确写了它的逻辑：**agent 生成的代码"失败方式不同"**——
   新依赖风险、安全缺口、可靠性问题加速引入；因此门要"对安全/可靠性/新依赖更严，对次要维护性更宽"。
-  **这正是 metricgate 该给的预设**，只是它做成了服务端，我们该做成 `policy.yaml` 里的一个 preset。
+  **这正是 metricgate 该给的预设**，只是它做成了服务端，我们该做成 `.metricgate.yaml` 里的一个 preset。
 - ast-metrics 的 MCP 宣传语是"给 AI agent 架构感知"——**同一条定位**。它的 `review`（只报 new/worsened）
   已经是我们 diff-only 的上位替代（见 4.3）。
 
@@ -216,7 +216,7 @@ metricgate 的主线（README 原文）：**本地、毫秒级、零 token 回�
    - 扩 `internal/symbols` 为 定义+引用 双索引（Go/Java 的 call/selector 节点）；`impact` 组合 符号引用 + 包依赖图 + 相关测试文件。
    - 验收：`impact` 能列出引用点、受影响文件、跨层影响；对未知符号给 near-miss；MCP `get_impact` 与 CLI 同源。
 3. **P0-3 agentic gate 预设**（定位动作，成本最低）
-   - `policy.yaml` 加 `preset:`，内置 `agentic`；`init --preset agentic` 生成。
+   - `.metricgate.yaml` 加 `preset:`，内置 `agentic`；`init --preset agentic` 生成。
    - 验收：预设可被 `rules explain` 追溯来源；默认 preset 行为与现状逐字节一致。
 4. **P1-1 仓库地图 + P1-2 新增依赖风险**（补 context 的整仓视野与幻觉包防线）。
 5. **P1-3/4/5**（评分、MCP 补齐、分布统计）——低成本批量收尾。

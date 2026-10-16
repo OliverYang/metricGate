@@ -255,17 +255,23 @@ func bannedArg(ctx *MatchCtx, values []string) (string, bool) {
 
 // stringLiteral returns the unquoted text of a string-literal node, or ""
 // when the node is not one (Go "interpreted_string_literal", Java
-// "string_literal").
+// "string_literal", C# and VB "string_literal"). SQL has no separate string
+// kind — quotes, numbers and booleans all come back as "literal" — so the
+// quotes are what decide, and an unquoted literal is not a string.
 func stringLiteral(src []byte, n *sitter.Node) string {
 	if n == nil {
 		return ""
 	}
 	switch n.Kind() {
 	case "string", "string_literal", "interpreted_string_literal":
+	case "literal":
+		if !strings.HasPrefix(strings.TrimSpace(string(src[n.StartByte():n.EndByte()])), "'") {
+			return ""
+		}
 	default:
 		return ""
 	}
-	return strings.Trim(string(src[n.StartByte():n.EndByte()]), `"`)
+	return strings.Trim(string(src[n.StartByte():n.EndByte()]), `"'`)
 }
 
 func goImportBan(b Ban) *Rule {

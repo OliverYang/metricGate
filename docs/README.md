@@ -31,11 +31,11 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 
 | 文档 | 说明 |
 |---|---|
-| [positioning.md](strategy/positioning.md) | 市场定位与差异化分析 |
+| [positioning.md](strategy/positioning.md) | **现行定位（v2.0）**：三轴结构性事实 + 规则归属，含 2026-10 五家同格竞品表与六项不做 |
 | [value-proof.md](strategy/value-proof.md) | "本地 · 0 token · 前后校验"为什么有价值，以及用什么实验证明 |
-| [competitor-analysis.md](strategy/competitor-analysis.md) | 竞品调研总结 |
+| [competitor-analysis.md](strategy/competitor-analysis.md) | 竞品调研总结（v1.0、2024-09-28，**已被 positioning.md v2.0 取代**，仅存档） |
 | [competitor-research.md](strategy/competitor-research.md) | 同级别竞品能力调研与吸收清单（2026-09） |
-| [competitor-research-summary.md](strategy/competitor-research-summary.md) | 竞品调研总结（另一版归纳，与 competitor-analysis.md 内容相近） |
+| [competitor-research-summary.md](strategy/competitor-research-summary.md) | 竞品调研总结（另一版归纳，与 competitor-analysis.md 内容相近；**同样已被取代**，仅存档） |
 
 ## [constraints/](constraints/) — 约束识别 MVP 工作流
 
@@ -90,6 +90,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [research-harness-and-constraints-2026.md](research/research-harness-and-constraints-2026.md) | 大模型产出约束工具 × harness 工程：业界全景（2026-Q3） |
 | [roadmap-research.md](research/roadmap-research.md) | 确定性约束能力补全调研与行动方案（2025-09） |
 | [digest-open-questions-research.md](research/digest-open-questions-research.md) | **digest 待解问题定向文献调研**：任务条件化注入先例（AutoGuide）+ 1.74× 成本归因实验设计（30× 方差警告 → k≥5 中位数 + 三桶模型）+ B 类惯用法提示文献支撑与空白 |
+| [product-evolution-directions-2026-10.md](research/product-evolution-directions-2026-10.md) | **产品演进方向调研（2026-10）**：短期收敛闸门可信度与交付质量（iter-19 ~ iter-20），中期扩展规则表达力（iter-21 ~ iter-23），v2 决策输入
 
 ## [design/](design/) — 设计契约与方案
 
@@ -104,6 +105,8 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [constraint-pipeline-design.md](design/constraint-pipeline-design.md) | **规约→约束原语→预检门禁→流程硬控四段流水线设计**：内置名单降为兑底，三缺口任务分解（转换工具面/DSL 原语/LC-403/404 闸门化）+ 价值主张红线 |
 | [digest-engineering-checklist.md](design/digest-engineering-checklist.md) | Constraint Digest 工程考量清单（12 条，含非标输入兼容矩阵）+ R3 前置接地实验预注册 |
 | [open-codereview-reference.md](design/open-codereview-reference.md) | Open Code Review 文档整理与工程设计参考 |
+| [cockpit-sonarqube-parity.md](design/cockpit-sonarqube-parity.md) | Cockpit 复刻 SonarQube 交互与界面：参考源调研、概念映射、逐页方案、D1–D6 决策与 P0/P1/P2 分批 |
+| [cockpit-single-file-tech.md](design/cockpit-single-file-tech.md) | Cockpit 单文件形态技术方案：8 段结构、事件委托、html 模板、store/路由、闸门补偿规则与实施顺序（承接 D4=C′） |
 
 ---
 

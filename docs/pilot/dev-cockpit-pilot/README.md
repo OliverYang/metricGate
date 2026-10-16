@@ -27,5 +27,5 @@
 
 ## Execution Notes
 - Use existing Go parser (no TS support needed)
-- Apply real policy.yaml from metricGate repo
+- Apply real .metricgate.yaml from metricGate repo
 - Record all findings, agent decisions, and remediation attempts

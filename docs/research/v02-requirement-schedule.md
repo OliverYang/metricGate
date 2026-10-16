@@ -82,6 +82,14 @@
 依赖：X1。风险：中（KV 表易滥用，靠白名单压）。
 规模：~200 行。
 
+> **状态：✅ 已完成**（2026-10-14）。交付与五性核对见
+> [docs/iterations/iter-18-trace-attrs-and-report.md](../../iterations/iter-18-trace-attrs-and-report.md)。
+> 亮点：X2 白名单丢弃有计数、X3 四入口同源（CLI `trace` / MCP `get_trace` /
+> `trends -trace|-model|-prompt-digest` / Cockpit 下拉）；`Window.TraceIDs` 用
+> nil-vs-空 区分"全部 trace"与"无匹配"，`trends -model nope` 明确回答 0 runs。
+> 自检抓到 14 条新 warning 全部当场修掉，并顺带消掉 store.go 的 file-length error。
+> 遗留：X4（宿主设 env，工具不探测）、Cockpit trace 过滤未覆盖 run 视图。
+
 ### 迭代 19 · T1 分发与版本（发布动作）
 **为什么独立排**：它的主体是仓库外动作（remote、tag、Marketplace），代码量极小（`toolVersion` 改 ldflags），但**每一步都要外部确认**。
 

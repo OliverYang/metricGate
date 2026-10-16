@@ -36,7 +36,7 @@ func cmdConstraints(args []string) {
 // land: for every rule the policy compiles to, did it fire, stay silent
 // (suspicious: clean or never-matches?), or have no files to look at.
 //
-//	metricgate constraints status [path] [-config policy.yaml] [-format text|json]
+//	metricgate constraints status [path] [-config .metricgate.yaml] [-format text|json]
 func cmdConstraintsStatus(args []string) {
 	set := flag.NewFlagSet("constraints status", flag.ExitOnError)
 	var format, configPath string
@@ -71,7 +71,7 @@ func cmdConstraintsStatus(args []string) {
 // every candidate still goes through SOP steps 2-5.
 //
 //	metricgate constraints extract -file clauses.md [-lang java]
-//	                              [-config policy.yaml] [-format text|json]
+//	                              [-config .metricgate.yaml] [-format text|json]
 //	                              [-out policy-candidates.yaml]
 func cmdConstraintsExtract(args []string) {
 	set := flag.NewFlagSet("constraints extract", flag.ExitOnError)
@@ -117,10 +117,10 @@ func (f *listFlag) Set(v string) error {
 // artifact out. With -out every node (spec / fixtures / verified policy /
 // report) lands on disk, so each step can be inspected, edited and re-run,
 // or rolled back by keeping the previous file. Automation never touches
-// policy.yaml directly: merging is a deliberate human step (SOP 4-5).
+// .metricgate.yaml directly: merging is a deliberate human step (SOP 4-5).
 //
 //	metricgate constraints rule -spec rule.json -bad bad.java [-good good.java]
-//	                            [-config policy.yaml] [-format text|json] [-out dir]
+//	                            [-config .metricgate.yaml] [-format text|json] [-out dir]
 func cmdConstraintsRule(args []string) {
 	set := flag.NewFlagSet("constraints rule", flag.ExitOnError)
 	var specPath, format, configPath, out string
@@ -386,7 +386,7 @@ func prefixLines(lines []string, prefix string) []string {
 
 // cmdConstraintsDigest renders the task-scoped constraint digest.
 //
-//	metricgate constraints digest -pkg internal/engine [-config policy.yaml]
+//	metricgate constraints digest -pkg internal/engine [-config .metricgate.yaml]
 //	                             [-lang go] [-format text|json] [-max-symbols 30] [-no-reuse]
 //
 // Compatibility matrix (degrade, never crash): no policy file → builtin

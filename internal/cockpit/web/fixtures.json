@@ -1,0 +1,318 @@
+{
+  "dashboard": {
+    "generatedAt": "2026-10-14T10:00:00Z",
+    "logPath": "/tmp/calllog.jsonl",
+    "projects": [
+      {
+        "id": "p1",
+        "root": "/repo/alpha",
+        "name": "alpha",
+        "calls": 12,
+        "flagged": 3,
+        "errors": 2,
+        "warnings": 5,
+        "latestActivity": "2026-10-13T10:00:00Z",
+        "runs": [
+          {
+            "ID": 1,
+            "StartedAt": "2026-10-13T10:00:00Z",
+            "DurationMs": 900,
+            "Files": 20,
+            "ProjectRoot": "/repo/alpha",
+            "ErrorCount": 2,
+            "WarningCount": 5,
+            "InfoCount": 1,
+            "GitCommit": "abc1234"
+          }
+        ],
+        "archivedRuns": [],
+        "findings": [
+          {
+            "runId": 1,
+            "item": {
+              "ruleId": "cyclomatic-complexity",
+              "severity": "error",
+              "file": "engine.go",
+              "startLine": 10,
+              "startColumn": 3,
+              "message": "cyclomatic complexity 14 exceeds 10"
+            }
+          }
+        ],
+        "archivedFindings": [],
+        "trend": {
+          "runs": 4,
+          "series": [
+            {
+              "StartedAt": "2026-10-12T10:00:00Z",
+              "Errors": 3,
+              "Warnings": 4,
+              "Infos": 1
+            },
+            {
+              "StartedAt": "2026-10-13T10:00:00Z",
+              "Errors": 2,
+              "Warnings": 5,
+              "Infos": 1
+            }
+          ]
+        }
+      }
+    ],
+    "unassignedCalls": 7,
+    "calls": [
+      {
+        "time": "2026-10-13T10:00:00Z",
+        "tool": "get_constraints",
+        "phase": "before",
+        "target": "path=/repo/alpha",
+        "ms": 12,
+        "verdict": "pass",
+        "session": "s1",
+        "traceId": "t1",
+        "projectRoot": "/repo/alpha",
+        "findings": 0,
+        "errors": 0,
+        "warnings": 0
+      },
+      {
+        "time": "2026-10-13T11:00:00Z",
+        "tool": "check_code",
+        "phase": "verify",
+        "target": "path=/repo/alpha x.go",
+        "ms": 88,
+        "verdict": "fail",
+        "session": "s1",
+        "traceId": "t1",
+        "projectRoot": "/repo/alpha",
+        "findings": 3,
+        "errors": 1,
+        "warnings": 2
+      },
+      {
+        "time": "2026-10-13T12:00:00Z",
+        "tool": "review_bundle",
+        "phase": "review",
+        "target": "path=/repo/alpha",
+        "ms": 40,
+        "verdict": "pass",
+        "session": "s2",
+        "traceId": "t2",
+        "error": "boom"
+      }
+    ],
+    "runs": [
+      {
+        "ID": 9,
+        "StartedAt": "2026-10-13T09:00:00Z",
+        "DurationMs": 700,
+        "Files": 18,
+        "ErrorCount": 0,
+        "WarningCount": 2,
+        "InfoCount": 0,
+        "Archived": false
+      }
+    ],
+    "archivedRuns": [],
+    "findings": [],
+    "archivedFindings": [],
+    "trend": {
+      "runs": 9,
+      "series": []
+    },
+    "metricTrend": {
+      "runs": 2,
+      "series": {
+        "cyclomatic-complexity": [
+          {
+            "runId": 1,
+            "startedAt": "2026-10-12T10:00:00Z",
+            "p50": 3,
+            "p90": 9,
+            "max": 12,
+            "samples": 40,
+            "warnThreshold": 10,
+            "errThreshold": 15,
+            "violated": 1
+          },
+          {
+            "runId": 2,
+            "startedAt": "2026-10-13T10:00:00Z",
+            "p50": 3,
+            "p90": 8,
+            "max": 11,
+            "samples": 41,
+            "warnThreshold": 10,
+            "errThreshold": 15,
+            "violated": 0
+          }
+        ]
+      }
+    },
+    "accepted": [
+      {
+        "rule": "cyclomatic-complexity",
+        "file": "engine.go",
+        "line": 42,
+        "owner": "me",
+        "reason": "generated parser",
+        "expires": ""
+      }
+    ],
+    "summary": {
+      "skipped": 0
+    }
+  },
+  "policy": {
+    "path": "/repo/alpha/policy.yaml",
+    "name": "policy.yaml",
+    "root": "/repo/alpha",
+    "found": true,
+    "content": "gate:\n  fail_on: error\nlanguages:\n  go:\n    metrics:\n      cyclomatic-complexity: { warn: 10, error: 15 }\n",
+    "modTime": "2026-10-01T00:00:00Z",
+    "extends": [],
+    "sections": [
+      {
+        "key": "gate",
+        "line": 1
+      },
+      {
+        "key": "languages",
+        "line": 3
+      }
+    ],
+    "keys": [
+      {
+        "key": "gate.fail_on",
+        "source": "policy_file",
+        "explicit": true,
+        "value": "error"
+      },
+      {
+        "key": "languages.go.metrics.cyclomatic-complexity",
+        "source": "policy_file",
+        "explicit": true,
+        "value": "{warn:10,error:15}"
+      }
+    ],
+    "candidates": [
+      ".metricgate.yaml",
+      "policy.yaml"
+    ],
+    "tried": [
+      ".metricgate.yaml"
+    ],
+    "stoppedAt": "/repo/alpha"
+  },
+  "gate": {
+    "failOn": "error",
+    "status": "failed",
+    "reason": "cyclomatic-complexity exceeds the error band",
+    "conditions": [
+      {
+        "measure": "cyclomatic-complexity",
+        "label": "圈复杂度",
+        "operator": "≤",
+        "value": 15,
+        "current": 12,
+        "hasData": true,
+        "failing": false,
+        "source": "policy_file"
+      }
+    ],
+    "runId": 1,
+    "commit": "abc1234",
+    "startedAt": "2026-10-13T10:00:00Z"
+  },
+  "measures": {
+    "foreign": false,
+    "runId": 1,
+    "startedAt": "2026-10-13T10:00:00Z",
+    "window": "last run",
+    "grade": "B",
+    "files": 20,
+    "measures": [
+      {
+        "id": "cyclomatic-complexity",
+        "label": "圈复杂度",
+        "scale": "lower",
+        "value": 12,
+        "grade": "B",
+        "exceeded": 3,
+        "warnThreshold": 10,
+        "errThreshold": 15
+      }
+    ]
+  },
+  "issues": {
+    "issues": [
+      {
+        "fingerprint": "fp1",
+        "ruleId": "cyclomatic-complexity",
+        "severity": "error",
+        "source": "rule",
+        "file": "engine.go",
+        "startLine": 10,
+        "startColumn": 1,
+        "endLine": 12,
+        "endColumn": 2,
+        "message": "cyclomatic complexity 14 exceeds 10",
+        "firstSeen": "2026-10-12T10:00:00Z",
+        "lastSeen": "2026-10-13T10:00:00Z",
+        "occurrences": 2,
+        "runIds": [
+          1,
+          2
+        ],
+        "lastRunId": 2,
+        "status": "open",
+        "anchor": "exact"
+      },
+      {
+        "fingerprint": "fp2",
+        "ruleId": "file-length",
+        "severity": "warning",
+        "source": "rule",
+        "file": "engine.go",
+        "startLine": 1,
+        "startColumn": 1,
+        "message": "file is 512 lines",
+        "lastSeen": "2026-10-13T10:00:00Z",
+        "occurrences": 1,
+        "runIds": [
+          2
+        ],
+        "lastRunId": 2,
+        "status": "false_positive",
+        "statusReason": "generated parser",
+        "anchor": "line_only"
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "pageSize": 50,
+    "totalPages": 1,
+    "severities": {
+      "error": 1,
+      "warning": 1
+    },
+    "statuses": {
+      "open": 1,
+      "false_positive": 1
+    },
+    "rules": [
+      {
+        "RuleID": "cyclomatic-complexity",
+        "Count": 1
+      },
+      {
+        "RuleID": "file-length",
+        "Count": 1
+      }
+    ],
+    "sources": {
+      "rule": 2
+    },
+    "window": "last 20 runs"
+  }
+}

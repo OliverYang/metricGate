@@ -22,7 +22,8 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 
 ## 1. 语言与解析
 
-- **支持语言**：Go、Java、TypeScript、TSX、JavaScript、Python、C、C++、C#、Rust（tree-sitter 语法，十种）。`.tsx` 使用独立语法（TypeScript 语法不带 JSX 节点），解析层之上与 TypeScript 共用同一套表。
+- **支持语言**：Go、Java、TypeScript、TSX、JavaScript、Python、C、C++、C#、Rust、SQL、Verilog、VB.NET（tree-sitter 语法，十三种）。`.tsx` 使用独立语法（TypeScript 语法不带 JSX 节点），解析层之上与 TypeScript 共用同一套表。
+- **语言能力按语法如实声明**，不是按语言一律拉齐：`internal/metrics` 的 `ProfileFor`/`callSpellingFor`/`lowererFor` 都是查表，查不到返回 nil（漏填即零产出，不再回落 Go 表）；各注册表用显式 case 区分「有意不产出」与「漏写」，并由两层 parity 测试强制：`internal/metrics/langparity_test.go` 按 map 的 key 是否存在断言本包三张表，`cmd/metricgate/registry_parity_test.go` 用一张逐语言逐注册表的实测期望表覆盖其余十处（新增语言不建行、或建了行而某处漏接，都会报红）。CK 家族只在有类构造的语言上产出（Go/SQL/Verilog/VB.NET 无）；SQL 与 Verilog 的函数级单元、VB.NET 的大小写不敏感与语法洞清单，见 `docs/metrics.md` 的能力缺口小节。
 - **容错解析**：语法错误降级成 info 级 `parse-error` 而不中断整轮——刚生成的、还没写完的代码也要能给出部分结论。
 - **单次遍历**：度量、规则、事实（facts）、跨文件引用索引、clone 指纹、类型普查都来自同一次 parse，没有第二次扫描。
 - **唯一的进程边界**：`internal/git`。策略里 `os/exec` 的禁用规则只给它和 CLI 开白名单。
@@ -148,7 +149,7 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 - 报的是"稳定包依赖了更不稳定的包"，锚定在 **import 行**；同一包有多个候选目标时取**最不稳定**的那个，并列时**按包名**决定（保证逐字节可复现）。
 - 消息给出**正确修法**并显式排除错误修法（"invert the edge behind an interface, or move the shared part down. Do not copy the code instead."）—— 因为复用是工具鼓励的行为，告警若暗示"抄一份"就等于亲手制造重复。
 - **严重度必须低于 `gate.fail_on`**：复用会新增依赖边，而新增边可能触发 SDP。默认 `warning` + 默认 `fail_on: error` ⇒ 复用永不被拦。见 [evaluation-hint-and-cost.md](evaluations/evaluation-hint-and-cost.md) §4。
-- 注意：**本仓库自己的 `policy.yaml` 有 6 个包不在任何层里**（`apisurface`/`bundle`/`clonedrift`/`clones`/`hotspots`/`symbols`）。把 `apisurface` 补进 `core` 会让 `apisurface → facts` 从一条含糊的 SDP 告警变成精确的 `layer-violation`（core→adapter）。补齐层声明是待办的架构决策，不是策略调整。
+- 注意：**本仓库自己的 `.metricgate.yaml` 有 6 个包不在任何层里**（`apisurface`/`bundle`/`clonedrift`/`clones`/`hotspots`/`symbols`）。把 `apisurface` 补进 `core` 会让 `apisurface → facts` 从一条含糊的 SDP 告警变成精确的 `layer-violation`（core→adapter）。补齐层声明是待办的架构决策，不是策略调整。
 
 ### 5.2 依赖白名单（`unknown-dependency`）
 
@@ -203,10 +204,10 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 
 ## 9. 策略文件（约束模型）
 
-`policy.yaml` 是项目的约束模型；**同一份文件**今天驱动闸门，将来驱动上下文/骨架生成。
+`.metricgate.yaml` 是项目的约束模型；**同一份文件**今天驱动闸门，将来驱动上下文/骨架生成。
 
 **发现链（eslint 式退化）**：不带 `-config` 时，从运行根（或文件所在目录）逐级上溯，按
-`.metricgate.yaml` → `.metricgate/config.yaml` → `policy.yaml` 的顺序取第一个存在的文件，
+`.metricgate.yaml` → `.metricgate/config.yaml` → `policy.yaml`（旧拼写，兼容保留）的顺序取第一个存在的文件，
 命中即停；上溯到 Git 工作树根为止，根上仍没有则用内置默认值。非 Git 目录只搜起始目录，
 避免把上层目录的习惯配置静默推到别的仓库。组合仍是显式的 `extends:`。
 显式 `-config <path>` 优先且不查存在性（打错名字应当报错，而不是静默退化）。
@@ -257,7 +258,7 @@ func Parse(a, b, c, d, e, f, g int) int { ... }
 
 **输出格式**：终端文本（默认）、JSON（多数命令 `-format json`）、**SARIF 2.1.0**（`check -sarif out.sarif`，兼容 GitHub code scanning）、**本地 SQLite**（`runs` / `findings` / `metric_snapshots` 三张表；只有 `check` 写库，`trends` 只读）。
 
-### 10.1 CLI（20 个子命令）
+### 10.1 CLI（28 个子命令）
 
 | 命令 | 作用 | 主要 flag |
 |---|---|---|
@@ -272,8 +273,9 @@ func Parse(a, b, c, d, e, f, g int) int { ... }
 | `map [path]` | 重要性排序（+风险分） | `-n` `-max-chars` `-risk` `-format` |
 | `hotspots [path]` | 改动×债务热点（+风险分） | `-since` `-max` `-format` |
 | `coupling [path]` | 共变对：无依赖却总一起改的文件；跨层对=腐蚀进行中（需 git 仓，浅克隆拒绝） | `-since` `-max` `-min-count` `-max-commit-files` `-allow-shallow` `-format` `-config` |
-| `stats` / `metrics` / `trends` / `clonedrift` / `nearclones` | 见各节 | — |
 | `trends` | 从趋势库读严重度趋势 + 高频规则 | `-runs` `-format` |
+| `trends -trace/-model/-prompt-digest` | 按 trace 或 trace 属性（模型/提示词指纹）切窗口 | `-trace` `-model` `-prompt-digest` |
+| `trace <traceID> [path]` | 单 trace 全景：runs + findings + trace 属性 + 该 trace 下的 MCP 调用 | `-format` `-log` `-config` |
 | `calls` | 把 MCP 本地调用日志压成一张表：按阶段/工具的调用次数、耗时中位数、拦截率、收敛率 | `-log` `-since` `-format` |
 | `clonedrift [path]` | 双胞胎漂移 | `-base` `-format` |
 | `nearclones [path]` | 近似重复对 | `-threshold` |
@@ -285,19 +287,29 @@ func Parse(a, b, c, d, e, f, g int) int { ... }
 | `constraints extract` | 非标规范文档→条款→三档判型（✅/⚠️/❌）+ policy 查重→候选 YAML | `-file` `-lang` `-config` `-format` `-out` |
 | `constraints status` | 约束落地后的检出情况：逐规则命中/零命中/不适用（按语言分流）+ 闸门预判 | `-config` `-format` |
 | `constraints rule` | 规则集成接口：Spec JSON+fixture → 引擎真跑验证（反例必中/正例零误伤）→ PASS/FAIL + 可合并 policy 片段（节点落盘可改可重跑可回退） | `-spec` `-bad` `-good` `-config` `-format` `-out` |
-| `version` | 版本 | — |
+| `version` | 版本号 + 实际链入的 VCS revision | — |
+| `accept add\|remove\|list` | 让步台账：已接受的 warning 仍可见但不过闸门 | — |
+| `suppressions [path]` | 两套豁免机制一起列：行内指令 + 台账（`.metricgate/accepted.yaml`） | `-format` `-ledger` |
+| `cockpit serve` / `cockpit update` | loopback 审计面板 / 手动查发布 feed（未配 feed 时报 `not_enabled`） | serve：`-addr` `-db` `-log`；update：`-feed` `-format` `-timeout` |
+| `deps scan` | 从 import 面草拟 `dependencies.allow` | `-format` `-allow` |
+| `rank F1 F2 [...]` | best-of-N：按 findings 给候选实现排序 | `-config` `-format` |
+| `reachability [path]` | 无人引用 / 无测试点名的符号 | `-exported` `-max` `-owners` `-format` `-config` |
+
+上表 28 个动词共 32 行（`constraints` 四个子命令各一行、`trends` 两条口径各一行），口径与
+`metricgate --help` 一致（help 写往 stderr，且要从当前源码取数——PATH 上的旧二进制会少几个动词；复核用
+`go run ./cmd/metricgate --help 2>&1 | grep -oE '^ {2}metricgate [a-z-]+' | awk '{print $2}' | sort -u | wc -l`）；内部命令表有 29 个键，多出的 `rules-gaps` 是 `rules gaps` 的别名，help 不单列。版本号可由发布构建用 `-ldflags "-X main.toolVersion=vX.Y.Z"` 注入（链接符号是 `main.toolVersion`，不是包路径限定名；写错 Go 不报错，版本号会静默停在 `0.1.0`）。
 
 `-max-chars` 与 `-max-tokens`、`-token-budget` 与 `-max-chars` 互斥；`-max-chars` 报的是精确 UTF-8 字节数，token 预算是 bytes/4 **估算**，信封里标 `"exact": false`——绝不当成硬保证。
 
-### 10.2 MCP stdio 服务（11 个工具）
+### 10.2 MCP stdio 服务（12 个工具）
 
-`metricgate-mcp -config policy.yaml`，供编码 agent 在会话中调用：
+`metricgate-mcp -config .metricgate.yaml`，供编码 agent 在会话中调用：
 
 | 工具 | 用途 |
 |---|---|
 | `get_constraints` | 生成**前**的稠密事实+约束包（签名/导入/规则/上限） |
 | `check_code` | 每次编辑**后**检查内存中的代码（0 token，毫秒级，不落盘） |
-| `check_path` | 检查磁盘文件，`diff_only=true` 时只报新增违规 |
+| `check_path` | 检查磁盘文件，`diff_only=true` 时走与 `check -diff` **同一条棘轮**（base=HEAD）：改动行外的隐藏计 `hidden`，值未动的度量丢掉计 `unchanged`（两个计数器说的是没报多少；`path` 取工作树根时这个保证才成立） |
 | `list_stubs` | 修复工单：空实现、`panic("not implemented")`、`UnsupportedOperationException`，各带精确定义位置 |
 | `find_symbols` | 跨文件符号索引：精确命中 + 近似建议 |
 | `get_impact` | 改这个符号会波及谁 |
@@ -305,9 +317,10 @@ func Parse(a, b, c, d, e, f, g int) int { ... }
 | `get_hotspots` | 改动×债务热点（附风险分，需 git 仓库） |
 | `get_metric_stats` | 度量分布 + 最差 scope（可按 metric 过滤） |
 | `get_trends` | 读本地趋势库（只读） |
+| `get_trace` | 单 trace 全景：存储的 runs + findings、trace 属性（model/prompt_digest/harness…）、该 trace 下的 MCP 调用（只读） |
 | `get_review_bundle` | 预算受限的复核信封（diff + 选择 + 约束 + 事实） |
 
-CLI 与 MCP **共用同一份实现**（`facts.RankedFiles`、`hotspots.FromSummary`、`store.Report`、`dist.Reports`、`bundle.Build`），因此两边的 schema 与结果不会漂移。
+CLI 与 MCP **共用同一份实现**（`facts.RankedFiles`、`hotspots.FromSummary`、`store.Report`、`dist.Reports`、`traceview.Collect`、`bundle.Build`），因此两边的 schema 与结果不会漂移。
 
 **本地调用日志（默认关闭）**：`metricgate-mcp -calllog <file>`（或 `METRICGATE_CALLLOG=1` 用默认路径
 `.metricgate/mcp-calls.jsonl`）会给每次工具调用追加一行 JSONL；`metricgate calls` 读它出汇总。

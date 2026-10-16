@@ -554,3 +554,109 @@ class Sample {
 		}
 	}
 }
+
+// A policy file that never mentions banned-api must not be *less* constrained
+// than no policy file at all. Before the floor, merely adding
+// ".metricgate.yaml" silently dropped the built-in bans.
+func TestBanFloorSurvivesPolicyWithoutBannedAPI(t *testing.T) {
+	src := []byte(`package svc
+
+import "fmt"
+
+func log() {
+	fmt.Println("hi")
+	panic("x")
+}
+`)
+	withDefault := newPolicyEngine(t, config.DefaultYAML)
+	bare := newPolicyEngine(t, "version: 1\ngate:\n  fail_on: error\n")
+	defaults, err := withDefault.CheckSource("svc/a.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyOnly, err := bare.CheckSource("svc/a.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := countRules(defaults)
+	got := countRules(policyOnly)
+	for _, id := range []string{"banned-fmt-Print*", "banned-panic"} {
+		if got[id] != want[id] || want[id] == 0 {
+			t.Errorf("%s with a bare policy file = %d, want %d (same as builtin defaults)", id, got[id], want[id])
+		}
+	}
+}
+
+// The floor can still be retuned: an explicit ban of the same kind+match
+// replaces it instead of stacking a second finding on the same call.
+func TestBanFloorOverrideDoesNotDuplicate(t *testing.T) {
+	eng := newPolicyEngine(t, `
+version: 1
+languages:
+  go:
+    rules:
+      banned-fmt-Print*:
+        severity: error
+    banned-api:
+      - match: fmt.Print*
+        reason: our house rule
+`)
+	findings, err := eng.CheckSource("svc/b.go", []byte(`package svc
+
+import "fmt"
+
+func log() {
+	fmt.Println("a")
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := countRules(findings)
+	if counts["banned-fmt-Print*"] != 1 {
+		t.Fatalf("banned-fmt-Print* = %d, want 1 (override replaces the floor, not adds to it): %v", counts["banned-fmt-Print*"], counts)
+	}
+	for _, f := range findings {
+		if f.RuleID != "banned-fmt-Print*" {
+			continue
+		}
+		if f.Severity != model.SevError {
+			t.Errorf("severity = %s, want error from the rules override", f.Severity)
+		}
+		if !strings.Contains(f.Message, "our house rule") {
+			t.Errorf("message = %q, want the policy reason", f.Message)
+		}
+	}
+}
+
+// The floor is not a cage: rules.<id>.enabled: false still switches a built-in
+// ban off, so projects that deliberately print (CLIs) keep a way out.
+func TestBanFloorCanBeDisabled(t *testing.T) {
+	eng := newPolicyEngine(t, `
+version: 1
+languages:
+  go:
+    rules:
+      banned-fmt-Print*:
+        enabled: false
+`)
+	findings, err := eng.CheckSource("svc/c.go", []byte(`package svc
+
+import "fmt"
+
+func log() {
+	fmt.Println("a")
+	panic("x")
+}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := countRules(findings)
+	if counts["banned-fmt-Print*"] != 0 {
+		t.Errorf("banned-fmt-Print* = %d, want 0 with enabled: false", counts["banned-fmt-Print*"])
+	}
+	if counts["banned-panic"] != 1 {
+		t.Errorf("banned-panic = %d, want 1 (only the named family is switched off)", counts["banned-panic"])
+	}
+}

@@ -1,0 +1,45 @@
+{
+  "apiVersion": 1,
+  "severities": [
+    "error",
+    "warning",
+    "info"
+  ],
+  "statuses": [
+    "open",
+    "confirmed",
+    "false_positive",
+    "accepted"
+  ],
+  "sorts": [
+    "severity",
+    "file",
+    "newest",
+    "rule"
+  ],
+  "views": [
+    "projects",
+    "overview",
+    "issues",
+    "gate",
+    "rules",
+    "activity",
+    "calls",
+    "runs",
+    "policy"
+  ],
+  "events": [
+    "scan",
+    "call",
+    "policy",
+    "accept"
+  ],
+  "phases": [
+    "before",
+    "explore",
+    "verify",
+    "review",
+    "other"
+  ],
+  "metricQuota": 5000
+}

@@ -207,9 +207,10 @@ func declaratorNames(src []byte, fieldDecl *sitter.Node) []string {
 // dispatch it promises.
 func (m *classMeasurer) wmc(methods []*sitter.Node) int {
 	total := 0
+	lowerer := lowererFor(m.lang)
 	for _, md := range methods {
-		if body := md.ChildByFieldName("body"); body != nil {
-			cyc, _, _ := irScore(m.lang, m.src, md)
+		if body := md.ChildByFieldName("body"); body != nil && lowerer != nil {
+			cyc, _, _ := irScore(lowerer, m.src, md)
 			total += cyc
 			continue
 		}

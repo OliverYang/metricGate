@@ -5,7 +5,20 @@ version: 1
 gate:
   fail_on: error
 
-exclude: [".git", "vendor", "node_modules", "testdata", ".data"]
+# Paths the checker never reads. Matching is by path SEGMENT (a directory
+# basename), not by prefix — an entry like "docs/a/b" would match nothing.
+#
+# `third_party` is a vendored upstream grammar (see the `replace` in go.mod):
+# its src/parser.c is generated code we do not own and must not edit, so
+# linting it produces findings no one can act on (ts_lex alone is 1112
+# cyclomatic / 12209 lines). `vendor` covers the same category for a
+# conventional Go vendor tree.
+#
+# `shots-iter2` holds archived UI evidence (PNGs + the CDP verification
+# script). It is not a package: the .mjs file there made the arch extractor
+# treat the directory as one, which the architecture snapshot then reported as
+# drift.
+exclude: [".git", "vendor", "node_modules", "testdata", ".data", "third_party", "shots-iter2"]
 
 languages:
   go:
@@ -78,6 +91,42 @@ languages:
         reason: shelling out must stay in one auditable place (the git adapter)
         use: reuse internal/git's exec helpers, or inject a command-execution port interface
         except_files: ["internal/git/git.go", "internal/git/changes.go", "internal/hotspots/hotspots.go", "internal/gittest/gittest.go", "cmd/metricgate/main.go", "_test.go"]
+
+  javascript:
+    # The cockpit frontend is deliberately ONE file (internal/cockpit/web/app.js):
+    # zero build step, no Node in the release chain, a single binary that ships
+    # its own UI (dashboard.go embeds the four served assets by name, so the dev
+    # harness in web/ stays out of the release artifact). That is a product decision with a
+    # price, and file-length is the price.
+    # See docs/design/cockpit-single-file-tech.md §1.
+    #
+    # What is relaxed here is length - NOT discipline. The readability the split
+    # would have bought back is paid for three other ways, all machine-enforced
+    # by internal/cockpit/web_contract_test.go:
+    #   1. eight fixed sections in a fixed order (TOC/order assertion);
+    #   2. one delegated event table, one DOM write, lists joined as fragments,
+    #      every data-action handled and every handler reachable;
+    #   3. every view rendered against a fixture by `go test` (render_all.mjs).
+    #
+    # 2093 lines today (warn line 2000 is crossed on purpose, recorded in §14.3).
+    # 4000 is the hard stop written into the design doc: at that line the answer
+    # is to cut a page, not to raise this number again.
+    #
+    # Structural DSL rules were tried here (scatter-listener, import-outside-S1)
+    # and removed: the DSL has no notion of position, so each fired on the one
+    # site it was written to allow. Both contracts live in the Go test, which
+    # can see line numbers.
+    metrics:
+      file-length:     { warn: 2000, error: 4000 }
+      # A single file has no module boundary to lean on, so the per-function
+      # bands are TIGHTER than the Go/Java ones, not looser. This is the trade
+      # in one place: length up, function size down.
+      function-length: { warn: 40,  error: 60 }
+      params-count:    { warn: 4,   error: 6 }
+      cognitive-complexity: { warn: 15, error: 20 }
+      cyclomatic-complexity: { warn: 10, error: 15 }
+      fan-out:         { warn: 10, error: off }
+      npath-complexity: { warn: 200, error: off }
 
   java:
     rules:
@@ -158,12 +207,17 @@ architecture:
         - internal/owners
         - internal/status
         - internal/symbols
+        - internal/trace
       may_depend_on: [core]
     - name: adapter
       packages:
         - internal/report
         - internal/store
         - internal/git
+        # baseline builds the base tree through git and runs the engine over
+        # it, so it is a process-boundary adapter exactly like internal/git —
+        # not core, which stays free of subprocesses.
+        - internal/baseline
         - internal/facts
         - internal/stubs
         - internal/sources
@@ -172,6 +226,7 @@ architecture:
         - internal/calllog
         - internal/hotspots
         - internal/scorecard
+        - internal/traceview
       may_depend_on: [core, adapter]
     - name: tools
       packages: ["scripts/**"]

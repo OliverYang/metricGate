@@ -170,7 +170,7 @@ func cmdRulesPresets(args []string) {
 
 func printPreset(p config.Preset) {
 	fmt.Printf("%s — %s\n", p.Name, p.Note)
-	fmt.Printf("  use: `preset: %s` in policy.yaml, or `metricgate init --preset %s`\n", p.Name, p.Name)
+	fmt.Printf("  use: `preset: %s` in .metricgate.yaml, or `metricgate init --preset %s`\n", p.Name, p.Name)
 	for _, lang := range sortedKeys(p.RuleSeverity) {
 		for _, ruleID := range sortedKeys(p.RuleSeverity[lang]) {
 			fmt.Printf("  [%s] rule %s severity -> %s\n", lang, ruleID, p.RuleSeverity[lang][ruleID])

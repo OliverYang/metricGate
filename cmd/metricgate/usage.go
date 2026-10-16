@@ -11,7 +11,7 @@ import (
 const usageText = `metricgate %s — deterministic code metrics and constraint gates
 
 usage:
-  metricgate init [file] [flags]      write a starter policy (default policy.yaml)
+  metricgate init [file] [flags]      write a starter policy (default .metricgate.yaml)
                                       -preset NAME starts from a built-in gate
                                       tuning (e.g. agentic)
   metricgate bundle [path] [flags]     deterministic, budgeted review input for a
@@ -64,6 +64,9 @@ usage:
                                       but not its twin (needs -base, default HEAD)
   metricgate trends [flags]           severity trend + top rules from the local
                                       history.db (P2 v1; needs store.enabled)
+                                      -trace/-model/-prompt-digest scope the window
+  metricgate trace <traceID> [path]   one trace in full: its runs, findings,
+                                      attributes and MCP calls joined by trace id
   metricgate calls [flags]            reduce the local MCP call log to call
                                       counts, intercept rate and fix rate — the
                                       evidence the gate is used in an agent loop

@@ -103,8 +103,73 @@ func TestParseDiffPureDeletion(t *testing.T) {
 
 func TestResolveBaseFallsBackOutsideRepo(t *testing.T) {
 	// A directory with no git history must not break -diff: the raw ref is used.
-	got := ResolveBase(t.TempDir(), "HEAD")
-	if got != "HEAD" {
-		t.Errorf("ResolveBase = %q, want the untouched fallback HEAD", got)
+	// "main" (not "HEAD") so the fallback path is the one under test — a HEAD
+	// base never reaches git at all (TestResolveBaseShortCircuitsForHead).
+	got := ResolveBase(t.TempDir(), "main")
+	if got != "main" {
+		t.Errorf("ResolveBase = %q, want the untouched fallback main", got)
+	}
+}
+
+func TestResolveBaseShortCircuitsForHead(t *testing.T) {
+	// The merge-base of HEAD with HEAD is HEAD, so the subprocess only re-derives
+	// a value already in hand. -diff used to pay for it twice per run (the change
+	// set and the baseline snapshot), ~0.21-0.4 s of spawn cost each on a machine
+	// where that is what a single git command costs. A directory outside any
+	// repository proves the short circuit: a real merge-base would fail there.
+	dir := t.TempDir()
+	if got := ResolveBase(dir, "HEAD"); got != "HEAD" {
+		t.Errorf("ResolveBase(dir, HEAD) = %q, want HEAD without a git round trip", got)
+	}
+	if got := ResolveBase(dir, ""); got != "" {
+		t.Errorf("ResolveBase(dir, \"\") = %q, want the empty base left untouched", got)
+	}
+}
+
+func TestRootDoesNotCacheAMiss(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	if got := Root(dir); got != "" {
+		t.Fatalf("Root before git init = %q, want empty", got)
+	}
+	// The first call was a miss. If a miss were cached, a long-lived process
+	// (the MCP server, the cockpit gate watcher) would keep reporting "no
+	// repository" after the user runs `git init` in the directory it watches.
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	if got := Root(dir); got == "" {
+		t.Fatal("Root after git init = empty, want the new worktree root")
+	}
+}
+
+func TestRepoRelativizerAgreesWithRepoRelative(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := initGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, "internal", "core"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "internal", "core")
+	for _, checkRoot := range []string{root, sub} {
+		rel, ok := NewRepoRelativizer(checkRoot)
+		if !ok {
+			t.Fatalf("NewRepoRelativizer(%s) reported failure", checkRoot)
+		}
+		for _, path := range []string{"core.go", "internal/git/git.go", "../outside.go", "/abs/outside.go"} {
+			got, gotOK := rel.Rel(path)
+			want, wantOK := RepoRelative(checkRoot, path)
+			if got != want || gotOK != wantOK {
+				t.Errorf("Rel(%q) = %q,%v; RepoRelative = %q,%v", path, got, gotOK, want, wantOK)
+			}
+		}
+	}
+	if _, ok := NewRepoRelativizer(t.TempDir()); ok {
+		t.Error("NewRepoRelativizer outside a worktree reported success")
 	}
 }

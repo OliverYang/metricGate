@@ -1,7 +1,7 @@
 // Package rulegen implements the rule-integration interface: an LLM (or any
 // external agent) describes one ban rule as a JSON spec, the engine compiles
 // it and verifies it against caller-provided fixture files, and the verified
-// artifact is returned ready to merge into policy.yaml.
+// artifact is returned ready to merge into .metricgate.yaml.
 //
 // The integration contract is data-in/data-out — the caller never reads
 // metricgate source. Every stage is a file (spec, fixture, policy, report),
@@ -26,7 +26,7 @@ import (
 )
 
 // Spec is the input contract: one ban rule described in policy vocabulary.
-// The JSON keys mirror policy.yaml field names on purpose — an LLM that can
+// The JSON keys mirror .metricgate.yaml field names on purpose — an LLM that can
 // read the policy vocabulary can emit a valid spec.
 type Spec struct {
 	Lang        string   `json:"lang"`                   // any registered language id (go, java, python, typescript, csharp, rust, ...)
@@ -64,7 +64,7 @@ type FixtureCase struct {
 
 // VerifyResult is the output contract: every node is inspectable and the
 // merge-ready artifact is included, so a green run hands back exactly what a
-// human (or a subsequent automated step) merges into policy.yaml.
+// human (or a subsequent automated step) merges into .metricgate.yaml.
 type VerifyResult struct {
 	Pass         bool          `json:"pass"` // every fixture verdict pass AND compiled
 	RuleID       string        `json:"rule_id"`
@@ -94,6 +94,9 @@ var allowedKinds = map[string][]string{
 	"cpp":        {"call", "import", "constructor"},
 	"csharp":     {"call", "import", "constructor"},
 	"rust":       {"call", "import"},
+	"sql":        {"call", "import"},
+	"verilog":    {"call", "import"},
+	"vbnet":      {"call", "import", "constructor"},
 }
 
 // langAliases maps the spellings a spec may use onto the engine's language id,
@@ -250,7 +253,7 @@ func verifyOnDisk(res *VerifyResult, s Spec, bad, good []FixtureInput) error {
 	res.stageFixtures(root, s, bad, "hit")
 	res.stageFixtures(root, s, good, "clean")
 
-	policyPath := filepath.Join(root, "policy.yaml")
+	policyPath := filepath.Join(root, ".metricgate.yaml")
 	if err := os.WriteFile(policyPath, []byte(res.PolicyYAML), 0o644); err != nil {
 		return fmt.Errorf("写入 fixture policy 失败: %w", err)
 	}

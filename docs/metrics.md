@@ -184,10 +184,60 @@ Java, TypeScript, TSX, JavaScript, Python, C++, C, C# and Rust each declare
 classes or structs in their own grammar; `internal/metrics/classes_lang.go` holds
 the per-language spelling table and `HasClasses(lang)` decides whether the five
 are advertised for a language. **Go produces none** — it has no class construct,
-so listing WMC there would tell a Go project it has rules it can never fire. The
-caveats below were written for the Java implementation and still hold; where a
+so listing WMC there would tell a Go project it has rules it can never fire.
+The caveats below were written for the Java implementation and still hold; where a
 language has no distinct type-reference node kind (JavaScript, Python, C#) CBO is
 restricted to what the grammar actually names.
+
+### Language notes: SQL / Verilog / VB.NET (added with the 13-language pass)
+
+The three are supported but **deliberately not** given the CK family, and their
+function-level units differ from the C-family shape. Each gap below is a
+statement about the grammar, not a missing feature to be filed.
+
+- **SQL** — function units are `create_function` and `create_procedure`
+  (`internal/metrics/kindset.go`). A table, view, index or schema is a schema
+  declaration, not behaviour, so it is measured by `facts` but never as a
+  function. There is no class construct, so **no CK family**. The name lives in
+  a child `object_reference` and the body in `function_body`/`procedure_body`
+  — neither is a `body` field — so the metrics layer resolves both by child
+  kind. The grammar's control flow is only `WHILE` and `CASE` (there is no `IF`
+  in routine bodies; it parses as an ERROR), and the dialects that ship in
+  real migrations (CockroachDB's `SETOF`/`DO $a$ … END $a$`, MySQL's
+  `DELIMITER`) fall outside the grammar's coverage and surface as
+  `parse-error` findings rather than partial numbers.
+- **Verilog** — function units are `function_declaration`, `task_declaration`
+  and a class's `class_constructor_declaration`. **A `module` is a file-level
+  container, not a function** (same call a SQL table gets). SystemVerilog
+  `class`/`interface`/`package`/`program` are recorded by `facts` as containers
+  with their functions as children. No `body` field and no `name` field exists
+  on any node, so the adapter reads both by child kind; a `class_method`'s
+  statements hang directly off the constructor, which the body resolver has to
+  special-case. **No CK family** — the grammar gives no member-visibility or
+  inheritance model to build LCOM/DIT from. The call spelling is `tf_call`
+  (callee = first named child); `method_call` is scored but the upstream grammar
+  turns most `obj.method()` spellings into ERRORs, so fan-out under-reports
+  receiver-chained calls.
+- **VB.NET** — function units are `method_declaration` and
+  `constructor_declaration` (the latter has no name field and is reported as
+  `New`). There is **no CK family**: `class_block` exists but the grammar gives
+  no member-visibility or inheritance model for the CK family. **Member names
+  are normalised to lower case** (`Me.Value` = `me.value`) so a rename of a
+  case-only difference does not read as two symbols. `boolean-params` counts
+  `As Boolean` parameters (`countBoolParamsVB`) rather than falling through to
+  the Go/Java-shaped default, which cannot see VB's `as_clause` type spelling.
+  Five upstream-grammar gaps are real, each reproducible as a minimal file and
+  asserted in `internal/metrics/vb_metrics_test.go` instead of papered over:
+  generic type arguments (`List(Of Boolean)`); any `Implements` clause, at
+  class level or on a member, bare or dotted (`Implements IBar` and
+  `Implements IBar.F` both fail while the interface-less class parses); an
+  attribute on a member (`<Obsolete> Sub F()`, where a file-level
+  `<Assembly: …>` is fine); a class-level `#Region` (the same directive inside
+  a method body is fine); and a file with no trailing newline. Separately,
+  `AndAlso`/`OrElse` emit no operator token at all, so VB logical operators are
+  **not** scored (a documented cyclomatic under-count, not a parse error).
+  Files hit by a gap surface as `parse-error` findings, never as partial
+  numbers.
 
 ### Deviations from strict CK (all deliberate, all conservative)
 

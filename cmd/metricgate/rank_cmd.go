@@ -17,7 +17,7 @@ import (
 func cmdRank(args []string) {
 	set := flag.NewFlagSet("rank", flag.ExitOnError)
 	format := set.String("format", "text", "output format: text|json")
-	config := set.String("config", "", "policy file (default: policy.yaml if present)")
+	config := set.String("config", "", "policy file (default: .metricgate.yaml if present)")
 	parseArgs(set, args)
 	files := set.Args()
 	if len(files) < 2 {

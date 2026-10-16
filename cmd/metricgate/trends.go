@@ -18,14 +18,17 @@ import (
 // trendsFlags is the parsed command line. A struct rather than six
 // dereferenced pointers, so the steps below read as a sequence.
 type trendsFlags struct {
-	root       string
-	configPath string
-	runs       int
-	format     string
-	metrics    bool
-	out        string
-	since      string
-	project    string
+	root         string
+	configPath   string
+	runs         int
+	format       string
+	metrics      bool
+	out          string
+	since        string
+	project      string
+	trace        string
+	model        string
+	promptDigest string
 }
 
 // parseTrendsFlags consumes the trends command line.
@@ -38,6 +41,9 @@ func parseTrendsFlags(args []string) trendsFlags {
 	out := set.String("out", "", "write the report to this file instead of stdout")
 	since := set.String("since", "", "keep only runs started at or after this time (RFC3339, or a bare date/date+time in the local zone)")
 	project := set.String("project", "", "keep only runs recorded for this project root (default: every project)")
+	trace := set.String("trace", "", "keep only runs attributed to this trace id")
+	model := set.String("model", "", "keep only runs whose trace carries this model attribute")
+	promptDigest := set.String("prompt-digest", "", "keep only runs whose trace carries this prompt_digest attribute")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {
@@ -46,10 +52,11 @@ func parseTrendsFlags(args []string) trendsFlags {
 	return trendsFlags{
 		root: root, configPath: *configPath, runs: *runs, format: *format,
 		metrics: *metrics, out: *out, since: *since, project: *project,
+		trace: *trace, model: *model, promptDigest: *promptDigest,
 	}
 }
 
-// cmdTrends reads the local trend database (see `store:` in policy.yaml) and
+// cmdTrends reads the local trend database (see `store:` in .metricgate.yaml) and
 // prints a deterministic, JSON-friendly summary: the most recent run window
 // as a severity series and the rules that fired most often in that window.
 //
@@ -98,7 +105,28 @@ func trendWindow(f trendsFlags, st *store.Store) store.Window {
 		}
 		window.ProjectRoot = root
 	}
+	window.TraceIDs = resolveTraceScope(f, st)
 	return window
+}
+
+// resolveTraceScope turns the three trace-scoping flags into one set of trace
+// ids. -trace names an id directly; -model and -prompt-digest name a value of a
+// whitelisted attribute. store.ResolveTraceFilters owns the union semantics and
+// the nil-vs-empty distinction (nil = every trace, empty = "no match"), so the
+// CLI and the MCP tool answer the same question the same way. A value that
+// resolves to no trace is a real answer, not an error: the report says "no runs
+// in this window" with the scope spelled out.
+func resolveTraceScope(f trendsFlags, st *store.Store) []string {
+	filters := []store.TraceFilter{
+		{Key: "", Value: f.trace},
+		{Key: "model", Value: f.model},
+		{Key: "prompt_digest", Value: f.promptDigest},
+	}
+	ids, err := st.ResolveTraceFilters(filters)
+	if err != nil {
+		fail(err)
+	}
+	return ids
 }
 
 // noteStoreDisabled tells the truth about a store the policy says is off but the
@@ -115,10 +143,10 @@ func noteStoreDisabled(cfg *config.Config, st *store.Store) {
 	n, err := storeRunCount(st)
 	if err == nil && n > 0 {
 		fmt.Fprintf(os.Stderr,
-			"note: store.enabled is false in policy.yaml, so `check` stores nothing new — the database still holds %d run(s) from earlier\n", n)
+			"note: store.enabled is false in .metricgate.yaml, so `check` stores nothing new — the database still holds %d run(s) from earlier\n", n)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "note: store.enabled is false in policy.yaml — `check` will store nothing new; the trend database is empty")
+	fmt.Fprintln(os.Stderr, "note: store.enabled is false in .metricgate.yaml — `check` will store nothing new; the trend database is empty")
 }
 
 // renderTrends writes one report into buf. Rendering into a buffer rather than

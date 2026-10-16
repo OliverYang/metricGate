@@ -110,3 +110,65 @@ func TestScanReportsRootRelativePaths(t *testing.T) {
 		}
 	}
 }
+
+// TestVBStubs covers the grammar with no body node: "empty" is the absence of
+// `statement` children, and the placeholder is a Throw, not a panic.
+func TestVBStubs(t *testing.T) {
+	src := `Module M
+    Function Empty() As Integer
+    End Function
+
+    Sub Todo()
+        Throw New NotImplementedException()
+    End Sub
+End Module
+`
+	items := detect(t, parser.LangVB, src)
+	if len(items) != 2 {
+		t.Fatalf("detected %d vb stubs, want 2: %+v", len(items), items)
+	}
+	if items[0].Kind != KindEmpty || items[0].Symbol != "Empty" {
+		t.Errorf("first = %+v, want an empty body named Empty", items[0])
+	}
+	if items[1].Kind != KindUnsupported || items[1].Detail != "NotImplementedException" {
+		t.Errorf("second = %+v, want a NotImplementedException placeholder", items[1])
+	}
+}
+
+// TestVerilogStubs covers the grammar whose declarations have no fields at
+// all, so the symbol name has to come from a nested identifier node.
+func TestVerilogStubs(t *testing.T) {
+	src := `module m;
+  function automatic int nothing();
+  endfunction
+
+  function automatic int later();
+    $fatal("not implemented");
+  endfunction
+endmodule
+`
+	items := detect(t, parser.LangVerilog, src)
+	if len(items) != 2 {
+		t.Fatalf("detected %d verilog stubs, want 2: %+v", len(items), items)
+	}
+	if items[0].Kind != KindEmpty || items[0].Symbol != "nothing" {
+		t.Errorf("first = %+v, want an empty body named nothing", items[0])
+	}
+	if items[1].Kind != KindUnsupported || items[1].Detail != "$fatal" {
+		t.Errorf("second = %+v, want a $fatal placeholder", items[1])
+	}
+}
+
+// TestSQLHasNoStubSurface pins the deliberate gap: the SQL grammar has no
+// throw equivalent and its PL/pgSQL RAISE form does not parse, so the pass
+// reports nothing rather than inventing a signal.
+func TestSQLHasNoStubSurface(t *testing.T) {
+	src := `CREATE FUNCTION later() RETURNS int AS $$
+  -- TODO: implement
+  SELECT NULL;
+$$ LANGUAGE sql;
+`
+	if items := detect(t, parser.LangSQL, src); len(items) != 0 {
+		t.Errorf("sql reported %d stubs, want 0: %+v", len(items), items)
+	}
+}

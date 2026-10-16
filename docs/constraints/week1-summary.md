@@ -32,7 +32,7 @@
 ## 🔍 主要发现
 
 ### 1. 现有约束
-- ✅ policy.yaml 已有 banned-api 规则
+- ✅ .metricgate.yaml 已有 banned-api 规则
 - ✅ README 有架构说明
 - ✅ AGENTS.md 有开发规范
 
@@ -92,7 +92,7 @@
 ### Week 2: 规则实现 (Day 6-10)
 
 #### Day 6-7: A-002 banned-md5-encryption
-- [ ] 查看 policy.yaml 结构
+- [ ] 查看 .metricgate.yaml 结构
 - [ ] 添加 MD5 规则
 - [ ] 创建测试文件验证
 - [ ] 调整参数消除误报
@@ -102,7 +102,7 @@
 - [ ] 分析现有代码模式
 - [ ] 生成 tree-sitter query
 - [ ] 人工验证和调整
-- [ ] 写入 policy.yaml
+- [ ] 写入 .metricgate.yaml
 - [ ] 测试规则有效性
 
 #### Day 10: D-001 require-error-handling

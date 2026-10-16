@@ -30,7 +30,7 @@
 #### 来源 1: 现有政策文件
 ```bash
 # 收集位置
-./policy.yaml              # 已有策略
+./.metricgate.yaml              # 已有策略
 ./README.md                # 项目说明
 ./docs/architecture.md     # 架构文档
 ./SECURITY.md             # 安全规范
@@ -57,7 +57,7 @@ gh pr comments <PR_NUMBER>
 **Constraint Inventory 表格**:
 | ID | 约束描述 | 来源 | 严重度 | 适用语言 | 业务理由 |
 |----|---------|------|--------|---------|---------|
-| C-001 | 禁止使用 fmt.Println | policy.yaml | error | Go | 统一日志方案 |
+| C-001 | 禁止使用 fmt.Println | .metricgate.yaml | error | Go | 统一日志方案 |
 | C-002 | Service 层不能直接调用 db.Query | CR 记录 | warning | Go | 依赖注入模式 |
 | C-003 | 禁止使用 MD5 加密 | SECURITY.md | error | Go,Java | 安全合规 |
 
@@ -116,7 +116,7 @@ PROMPT = """
 - 检查是否有误报/漏报
 - 手动微调 query
 
-#### Step 4: 写入 policy.yaml
+#### Step 4: 写入 .metricgate.yaml
 ```yaml
 rules:
   service-layer-db-access:
@@ -332,7 +332,7 @@ templates/constraints/
 
 ### Day 1-2: 调研准备
 - [ ] 列出要调研的约束类型 (5 类)
-- [ ] 收集现有文档 (policy.yaml, README, etc.)
+- [ ] 收集现有文档 (.metricgate.yaml, README, etc.)
 - [ ] 准备访谈问题清单
 - [ ] 创建 Constraint Inventory 表格
 
@@ -347,7 +347,7 @@ templates/constraints/
 - [ ] 为每个约束编写自然语言描述
 - [ ] 使用 AI 辅助生成 AST query
 - [ ] 人工验证并调整 query
-- [ ] 写入 policy.yaml
+- [ ] 写入 .metricgate.yaml
 
 ### Day 9-11: 验证测试
 - [ ] 在现有项目上运行规则

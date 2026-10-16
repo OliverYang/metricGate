@@ -46,10 +46,16 @@ type Func struct {
 	Hash      uint64
 	Tokens    int // normalised token count of the body
 
-	// body is the AST node this fingerprint was taken from. It is unexported
+	// body are the AST nodes this fingerprint was taken from. It is unexported
 	// because it is only valid while the tree is alive; the near-clone pass
 	// uses it instead of re-locating the declaration in the tree.
-	body *sitter.Node
+	//
+	// It is a slice because not every grammar wraps a body in one node: SQL and
+	// SystemVerilog name it, but VB follows the header with a flat list of
+	// `statement` children, and SystemVerilog splits declarations from
+	// statements. Fingerprinting only the first of those would make unrelated
+	// methods with the same opening line look like clones.
+	body []*sitter.Node
 }
 
 // Group is one clone class: functions whose normalised bodies hashed to the
@@ -72,16 +78,68 @@ type Group struct {
 // C/C++ keep only function_definition: nested declarator forms (pointer,
 // parenthesised) are still function_definition, so no extra kind is needed.
 var declKinds = map[parser.LanguageID][]string{
-	parser.LangGo:   {"function_declaration", "method_declaration"},
-	parser.LangJava: {"method_declaration", "constructor_declaration"},
-	parser.LangTS:   {"function_declaration", "generator_function_declaration", "method_definition"},
-	parser.LangTSX:  {"function_declaration", "generator_function_declaration", "method_definition"},
-	parser.LangJS:   {"function_declaration", "generator_function_declaration", "method_definition"},
-	parser.LangPy:   {"function_definition"},
-	parser.LangC:    {"function_definition"},
-	parser.LangCpp:  {"function_definition"},
-	parser.LangCS:   {"method_declaration", "constructor_declaration", "destructor_declaration", "local_function_statement", "operator_declaration"},
-	parser.LangRust: {"function_item"},
+	parser.LangGo:      {"function_declaration", "method_declaration"},
+	parser.LangJava:    {"method_declaration", "constructor_declaration"},
+	parser.LangTS:      {"function_declaration", "generator_function_declaration", "method_definition"},
+	parser.LangTSX:     {"function_declaration", "generator_function_declaration", "method_definition"},
+	parser.LangJS:      {"function_declaration", "generator_function_declaration", "method_definition"},
+	parser.LangPy:      {"function_definition"},
+	parser.LangC:       {"function_definition"},
+	parser.LangCpp:     {"function_definition"},
+	parser.LangCS:      {"method_declaration", "constructor_declaration", "destructor_declaration", "local_function_statement", "operator_declaration"},
+	parser.LangRust:    {"function_item"},
+	parser.LangSQL:     {"create_function", "create_procedure"},
+	parser.LangVerilog: {"function_declaration", "task_declaration", "class_constructor_declaration"},
+	parser.LangVB:      {"method_declaration", "constructor_declaration"},
+}
+
+// declBodies locates the body of a declaration for the grammars that keep it
+// outside a `body` field, as a list of roots. Without it those declarations are
+// silently skipped: the fingerprint pass would find nothing to hash and the
+// clone report would claim the language has no duplication to find.
+var declBodies = map[parser.LanguageID]func(n *sitter.Node) []*sitter.Node{
+	parser.LangSQL:     sqlBodies,
+	parser.LangVerilog: verilogBodies,
+	parser.LangVB:      vbBodies,
+}
+
+// sqlBodies returns a SQL routine's body node.
+func sqlBodies(n *sitter.Node) []*sitter.Node {
+	if body := firstChildKind(n, "function_body", "procedure_body"); body != nil {
+		return []*sitter.Node{body}
+	}
+	return nil
+}
+
+// verilogBodies returns the statements of a SystemVerilog routine. The
+// `*_body_declaration` wrapper holds the header too, so hashing it would mix
+// the signature into the fingerprint and make every routine look unique.
+func verilogBodies(n *sitter.Node) []*sitter.Node {
+	decl := firstChildKind(n, "function_body_declaration", "task_body_declaration")
+	if decl == nil {
+		return nil
+	}
+	return childKinds(decl, "function_statement_or_null", "statement_or_null")
+}
+
+// vbBodies returns the statements of a VB routine. VB has no body node: a
+// method is its header followed by a flat list of `statement` children.
+func vbBodies(n *sitter.Node) []*sitter.Node {
+	return childKinds(n, "statement")
+}
+
+// childKinds returns every child of one of the given kinds, in source order.
+func childKinds(n *sitter.Node, kinds ...string) []*sitter.Node {
+	var out []*sitter.Node
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		for _, k := range kinds {
+			if c.Kind() == k {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
 }
 
 // DeclKinds returns the function-like declaration node kinds of a language,
@@ -116,7 +174,7 @@ func Extract(lang parser.LanguageID, path string, src []byte, tree *sitter.Tree,
 			return
 		}
 		if isDecl[n.Kind()] {
-			if body := n.ChildByFieldName("body"); body != nil {
+			if body := declBodiesOf(lang, n); len(body) > 0 {
 				hash, tokens := fingerprint(src, body)
 				out = append(out, Func{
 					Lang:      string(lang),
@@ -143,8 +201,12 @@ func Extract(lang parser.LanguageID, path string, src []byte, tree *sitter.Tree,
 func funcName(src []byte, n *sitter.Node) string {
 	name := nodeText(src, n.ChildByFieldName("name"))
 	if name == "" {
+		name = declName(src, n)
+	}
+	if name == "" {
 		return "<anonymous>"
 	}
+
 	// Go methods: receiver "(t *T)" → "T.Name".
 	if recv := n.ChildByFieldName("receiver"); recv != nil {
 		r := strings.TrimSpace(nodeText(src, recv))
@@ -158,6 +220,57 @@ func funcName(src []byte, n *sitter.Node) string {
 		}
 	}
 	return name
+}
+
+// declName names a declaration whose grammar keeps the name outside a field.
+// SQL wraps it in an object_reference, SystemVerilog in a `*_identifier`
+// wrapper (or, for `function new`, nowhere at all). Without this the clone
+// report would list every such routine as "<anonymous>" and the anchor of a
+// clone class would be unreadable.
+func declName(src []byte, n *sitter.Node) string {
+	switch n.Kind() {
+	case "create_function", "create_procedure", "create_table", "create_view":
+		if ref := firstChildKind(n, "object_reference"); ref != nil {
+			return nodeText(src, ref.ChildByFieldName("name"))
+		}
+	case "class_constructor_declaration":
+		return "new"
+	case "function_declaration", "task_declaration", "class_declaration",
+		"module_declaration", "interface_declaration", "package_declaration", "program_declaration":
+		return firstDescendantText(src, n, "simple_identifier")
+	}
+	return ""
+}
+
+// firstChildKind returns the first child of one of the given kinds.
+func firstChildKind(n *sitter.Node, kinds ...string) *sitter.Node {
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		for _, k := range kinds {
+			if c.Kind() == k {
+				return c
+			}
+		}
+	}
+	return nil
+}
+
+// firstDescendantText returns the text of the first node of the given kind
+// anywhere below n, in source order.
+func firstDescendantText(src []byte, n *sitter.Node, kind string) string {
+	if n == nil {
+		return ""
+	}
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		if c.Kind() == kind {
+			return nodeText(src, c)
+		}
+		if s := firstDescendantText(src, c, kind); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // fnv1a is the 64-bit FNV-1a round function.
@@ -174,7 +287,7 @@ const idMark byte = 0x1f
 // copies still match; operators and punctuation keep their exact text so
 // `a+b` never equals `a-b`. Comments (tree-sitter "extra" nodes) are
 // skipped.
-func fingerprint(src []byte, body *sitter.Node) (hash uint64, tokens int) {
+func fingerprint(src []byte, roots []*sitter.Node) (hash uint64, tokens int) {
 	emit := func(s string) {
 		tokens++
 		hash = fnv1a(hash, idMark)
@@ -199,8 +312,22 @@ func fingerprint(src []byte, body *sitter.Node) (hash uint64, tokens int) {
 			walk(n.Child(i))
 		}
 	}
-	walk(body)
+	for _, root := range roots {
+		walk(root)
+	}
 	return hash, tokens
+}
+
+// declBodiesOf returns the body roots of one declaration: the named `body`
+// field when the grammar has one, the language's own locator otherwise.
+func declBodiesOf(lang parser.LanguageID, n *sitter.Node) []*sitter.Node {
+	if body := n.ChildByFieldName("body"); body != nil {
+		return []*sitter.Node{body}
+	}
+	if locate := declBodies[lang]; locate != nil {
+		return locate(n)
+	}
+	return nil
 }
 
 // nodeText returns the source slice covered by a node.

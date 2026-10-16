@@ -23,7 +23,6 @@ import (
 	"metricgate/internal/arch"
 	"metricgate/internal/config"
 	"metricgate/internal/engine"
-	"metricgate/internal/rules"
 	"metricgate/internal/symbols"
 )
 
@@ -68,7 +67,7 @@ type Options struct {
 type Section struct {
 	Name    string   `json:"name"`
 	Lines   []string `json:"lines"`
-	Sources []string `json:"sources"` // e.g. "policy.yaml#banned_api.go[3]", "builtin:metrics.cyclomatic"
+	Sources []string `json:"sources"` // e.g. ".metricgate.yaml#banned_api.go[3]", "builtin:metrics.cyclomatic"
 }
 
 // sectionBuilder renders one optional section; ok=false omits it.
@@ -178,10 +177,10 @@ func buildSections(cfg *config.Config, lang string, opts Options, maxSym int) []
 			return wrap("跨层惯用法", lines, srcs)
 		},
 		func() (Section, bool) {
-			if opts.Task != "" {
-				lines := append([]string{"（禁用清单已按任务文本相关度筛选；完整清单见 constraints digest 不带 -task）"}, banLines...)
-				return wrap("禁用 API/导入", lines, banSrcs)
-			}
+			// banSection already prefixes the note onto its first line when the
+			// task actually dropped something. Prepending it here as well
+			// printed the note twice, and printed it even when nothing was
+			// dropped — an empty digest claiming the list was filtered.
 			return wrap("禁用 API/导入", banLines, banSrcs)
 		},
 		func() (Section, bool) {
@@ -360,108 +359,6 @@ func layerCovered(layers []arch.Layer, pkg string) bool {
 	}
 	for _, l := range layers {
 		if arch.MatchesAny(l.Packages, pkg) {
-			return true
-		}
-	}
-	return false
-}
-
-// banSection lists bans whose exemption status does not cover the whole
-// target package. A ban the package is fully exempt from is omitted entirely
-// (anti-FP-fatigue): teaching the model about bans it may break erodes the
-// digest.
-// banSection lists bans whose exemption status does not cover the
-// target package. A ban the package is fully exempt from is omitted entirely
-// (anti-FP-fatigue): teaching the model about bans it may break erodes the
-// digest. Task-based filtering is delegated to filterBans to keep complexity low.
-func banSection(cfg *config.Config, lang, pkg string, task string) ([]string, []string, string) {
-	bans := cfg.Bans(lang)
-	// Apply task filtering early, before building lines
-	var filteredBans []config.BanConfig
-	var notePrefix string
-	if task != "" {
-		taskToks := taskTokens(task)
-		filteredBans, notePrefix, _ = filterBans(bans, taskToks, task)
-	} else {
-		filteredBans = bans
-	}
-	var lines, srcs []string
-	warn := ""
-	if pkg == "" {
-		warn = "未指定目标包：禁用 API 清单按全仓适用列出"
-	}
-	for i, b := range filteredBans {
-		if pkg != "" && fullyExempt(b, pkg) {
-			continue
-		}
-		kind := b.Kind
-		if kind == "" {
-			kind = "call"
-		}
-		var line string
-		switch kind {
-		case "call":
-			line = fmt.Sprintf("禁止调用 %s", b.Match)
-			if len(b.ArgsBan) > 0 {
-				line += fmt.Sprintf("（仅当参数为 %s）", strings.Join(b.ArgsBan, "/"))
-			}
-		case "import":
-			line = fmt.Sprintf("禁止 import %s（含其子包）", b.Match)
-		case "constructor":
-			if !rules.CanExpress(lang, rules.BanConstructor) {
-				continue // never advertise what the gate cannot enforce
-			}
-			line = fmt.Sprintf("禁止 new %s", b.Match)
-			if len(b.ArgsBan) > 0 {
-				line += fmt.Sprintf("（仅当参数为 %s）", strings.Join(b.ArgsBan, "/"))
-			}
-		default:
-			continue // unknown kind: skip, never crash
-		}
-		if b.Reason != "" {
-			line += " — " + b.Reason
-		}
-		if b.Use != "" {
-			line += "；替代写法：" + b.Use
-		}
-		if notePrefix != "" {
-			line = notePrefix + line
-			notePrefix = "" // only on first line
-		}
-		lines = append(lines, line)
-		srcs = append(srcs, fmt.Sprintf("policy#languages.%s.banned-api[%d]", lang, i))
-	}
-	return lines, srcs, warn
-}
-
-// fullyExempt reports whether every file of the target package is exempt
-// from the ban, so the digest line is omitted entirely (anti-FP-fatigue).
-// except_files are filename suffixes or path patterns (the engine matches
-// suffix / prefix / filepath.Match); without filesystem access the digest
-// approximates: (a) path-scoped entries (contain "/") must cover the whole
-// package directory; (b) bare filename suffixes match the package's file
-// names, approximated by <pkgbase>.go — which is exact for the Go convention
-// package foo_test ↔ *_test.go, the case except_files exists for.
-func fullyExempt(b config.BanConfig, pkg string) bool {
-	if len(b.ExceptFiles) == 0 || pkg == "" {
-		return false
-	}
-	p := filepath.ToSlash(pkg)
-	base := filepath.Base(p)
-	for _, ex := range b.ExceptFiles {
-		ex = strings.TrimSpace(filepath.ToSlash(ex))
-		if ex == "" {
-			continue
-		}
-		if strings.Contains(ex, "/") {
-			prefix := strings.TrimSuffix(ex, "*")
-			if strings.HasPrefix(p, prefix) || strings.HasPrefix(p+"/", prefix) {
-				return true
-			}
-			continue
-		}
-		s := strings.TrimPrefix(ex, "*")
-		if strings.HasSuffix(base+".go", s) || strings.HasSuffix(p, s) {
 			return true
 		}
 	}
@@ -727,58 +624,4 @@ func taskTokens(task string) []string {
 		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r >= 0x80)
 	})
 	return fields
-}
-
-// banRelevant decides whether one ban stays in a task-filtered digest. A ban
-// is relevant when any of its scoping identifier segments (≥3 chars) appears
-// in the task tokens. Bans whose match has no such segment (e.g. `panic`) —
-// vocabulary too generic to ever appear in a task description — are kept:
-// when in doubt, the constraint stays (fail-closed; a dropped constraint is
-// a prevention hole, a kept one costs one digest line).
-func banRelevant(b config.BanConfig, taskToks []string, taskRaw string) bool {
-	m := strings.ToLower(strings.TrimSuffix(b.Match, "*"))
-	segs := strings.FieldsFunc(m, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r >= 0x80)
-	})
-	namespaced := strings.ContainsAny(m, "./")
-	lower := strings.ToLower(taskRaw)
-	for _, seg := range segs {
-		if len(seg) < 3 {
-			continue
-		}
-		for _, tok := range taskToks {
-			if tok == seg {
-				return true
-			}
-		}
-		if strings.Contains(lower, seg) {
-			return true
-		}
-	}
-	// Bare language-level idioms (panic, no namespace) carry no scoping
-	// vocabulary a task description could echo — they stay unconditionally.
-	return !namespaced
-}
-
-// filterBans applies task-based filtering to a list of bans. Returns filtered
-// bans, a note prefix (if anything was filtered), and a boolean indicating
-// whether filtering occurred. Empty task → no filtering, full list returned.
-func filterBans(bans []config.BanConfig, taskToks []string, taskRaw string) ([]config.BanConfig, string, bool) {
-	if taskToks == nil {
-		return bans, "", false
-	}
-	var out []config.BanConfig
-	dropped := false
-	for _, b := range bans {
-		if !banRelevant(b, taskToks, taskRaw) {
-			dropped = true
-			continue
-		}
-		out = append(out, b)
-	}
-	var note string
-	if dropped {
-		note = "（禁用清单已按任务文本相关度筛选；完整清单见 constraints digest 不带 -task）\n"
-	}
-	return out, note, dropped
 }

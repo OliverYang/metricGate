@@ -358,3 +358,159 @@ func long2(xs []int) int {
 		t.Errorf("comments and layout must not affect the fingerprint, got %d groups", len(groups))
 	}
 }
+
+// sqlTwin is one member of a Type-2 pair: renamed, same shape. The bodies are
+// written in the `CASE` form the SQL grammar parses without error (the
+// PL/pgSQL `IF` and `PERFORM` forms do not survive it).
+const sqlTwinA = `CREATE FUNCTION alpha(score int) RETURNS text AS $$
+  SELECT CASE
+    WHEN score >= 90 THEN 'a'
+    WHEN score >= 80 THEN 'b'
+    WHEN score >= 70 THEN 'c'
+    WHEN score >= 60 THEN 'd'
+    ELSE 'f'
+  END;
+$$ LANGUAGE sql;
+`
+
+const sqlTwinB = `CREATE FUNCTION beta(grade int) RETURNS text AS $$
+  SELECT CASE
+    WHEN grade >= 90 THEN 'x'
+    WHEN grade >= 80 THEN 'y'
+    WHEN grade >= 70 THEN 'z'
+    WHEN grade >= 60 THEN 'w'
+    ELSE 'v'
+  END;
+$$ LANGUAGE sql;
+`
+
+// TestSQLClones covers the language whose routine name lives in an
+// object_reference child and whose body lives in a `function_body` child: both
+// are outside any field, so a naive reader finds no name and no body at all.
+func TestSQLClones(t *testing.T) {
+	fs := extract(t, parser.LangSQL, "f.sql", sqlTwinA+sqlTwinB, smallCfg())
+	if len(fs) != 2 {
+		t.Fatalf("extracted %d sql routines, want 2", len(fs))
+	}
+	if fs[0].Name != "alpha" || fs[1].Name != "beta" {
+		t.Fatalf("names = %q, %q; want alpha, beta", fs[0].Name, fs[1].Name)
+	}
+	if groups := Find(fs, smallCfg()); len(groups) != 1 {
+		t.Errorf("sql clone class missing, got %d groups", len(groups))
+	}
+}
+
+const verilogTwins = `module m;
+  function automatic int alpha(int a, int b);
+    int t;
+    t = a + b;
+    t = t * 2;
+    t = t - 3;
+    return t;
+  endfunction
+
+  function automatic int beta(int x, int y);
+    int s;
+    s = x + y;
+    s = s * 2;
+    s = s - 3;
+    return s;
+  endfunction
+endmodule
+`
+
+// TestVerilogClones covers the grammar with no fields on its declarations at
+// all: the name is behind a doubly-nested `function_identifier` and the body
+// sits under `function_body_declaration`, which also holds the header.
+func TestVerilogClones(t *testing.T) {
+	fs := extract(t, parser.LangVerilog, "m.v", verilogTwins, smallCfg())
+	if len(fs) != 2 {
+		t.Fatalf("extracted %d verilog routines, want 2", len(fs))
+	}
+	if fs[0].Name != "alpha" || fs[1].Name != "beta" {
+		t.Fatalf("names = %q, %q; want alpha, beta", fs[0].Name, fs[1].Name)
+	}
+	if groups := Find(fs, smallCfg()); len(groups) != 1 {
+		t.Errorf("verilog clone class missing, got %d groups", len(groups))
+	}
+}
+
+const vbTwins = `Module M
+    Function Alpha(a As Integer, b As Integer) As Integer
+        Dim t As Integer
+        t = a + b
+        t = t * 2
+        t = t - 3
+        t = t * 4
+        t = t - 5
+        Return t
+    End Function
+
+    Function Beta(x As Integer, y As Integer) As Integer
+        Dim s As Integer
+        s = x + y
+        s = s * 2
+        s = s - 3
+        s = s * 4
+        s = s - 5
+        Return s
+    End Function
+End Module
+`
+
+// TestVBClones covers the grammar with no body node: a VB method is its header
+// followed by a flat list of `statement` siblings, so the fingerprint has to
+// cover every one of them.
+func TestVBClones(t *testing.T) {
+	fs := extract(t, parser.LangVB, "M.vb", vbTwins, smallCfg())
+	if len(fs) != 2 {
+		t.Fatalf("extracted %d vb methods, want 2", len(fs))
+	}
+	if fs[0].Name != "Alpha" || fs[1].Name != "Beta" {
+		t.Fatalf("names = %q, %q; want Alpha, Beta", fs[0].Name, fs[1].Name)
+	}
+	if groups := Find(fs, smallCfg()); len(groups) != 1 {
+		t.Errorf("vb clone class missing, got %d groups", len(groups))
+	}
+}
+
+// TestVBFlatBodyCoversEveryStatement is the guard for the flat-statement-list
+// bug: two methods that share only their opening statements must not be
+// reported as clones. Hashing just the first statement would give them the
+// same fingerprint.
+//
+// The assertion is on the fingerprints themselves, not on Find: a truncated
+// body is also short enough that Find's size gate would drop both members and
+// report "no clones" for the wrong reason.
+func TestVBFlatBodyCoversEveryStatement(t *testing.T) {
+	src := `Module M
+    Function Alpha(a As Integer) As Integer
+        Dim t As Integer
+        t = a + 1
+        t = t * 2
+        t = t - 3
+        t = t * 4
+        Return t
+    End Function
+
+    Function Beta(a As Integer) As Integer
+        Dim t As Integer
+        t = a + 1
+        t = t / 2
+        t = t + 30
+        t = t / 4
+        Return t
+    End Function
+End Module
+`
+	fs := extract(t, parser.LangVB, "M.vb", src, Config{MinLines: 1, MinTokens: 1})
+	if len(fs) != 2 {
+		t.Fatalf("extracted %d vb methods, want 2", len(fs))
+	}
+	if fs[0].Hash == fs[1].Hash {
+		t.Errorf("methods differing after their opening line share fingerprint %d; the body is being truncated to its first statement", fs[0].Hash)
+	}
+	if fs[0].Tokens != fs[1].Tokens {
+		t.Errorf("twin token counts differ: %d vs %d", fs[0].Tokens, fs[1].Tokens)
+	}
+}

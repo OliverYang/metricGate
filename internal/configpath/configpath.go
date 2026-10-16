@@ -1,6 +1,6 @@
 // Package configpath resolves which policy file a command should read.
 //
-// A fixed "policy.yaml" relative to the process working directory is a trap:
+// A fixed ".metricgate.yaml" relative to the process working directory is a trap:
 // `check /other/repo` would either read the wrong file or silently fall back to
 // the built-in defaults. This package turns the policy location into an
 // explicit, testable rule — a search that starts at the root being analysed and
@@ -9,7 +9,7 @@
 //	.config flag (explicit, always wins)
 //	<root>/.metricgate.yaml
 //	<root>/.metricgate/config.yaml
-//	<root>/policy.yaml
+//	<root>/policy.yaml (legacy spelling)
 //	…the same names, one directory up, until the git root
 //
 // The first file that exists wins and the walk stops there: two documents are
@@ -28,7 +28,8 @@ import (
 
 // CandidateNames are the policy file names searched at each directory level,
 // most specific first. The dot-prefixed forms are the recommended home; the
-// bare policy.yaml keeps every existing repository working unchanged.
+// bare legacy policy.yaml keeps every existing repository working unchanged —
+// it is deliberately last, so a repository that has both reads the dot form.
 var CandidateNames = []string{".metricgate.yaml", filepath.Join(".metricgate", "config.yaml"), "policy.yaml"}
 
 // MaxSearchDepth caps the walk so a pathological tree cannot spin forever.
@@ -40,7 +41,7 @@ type Found struct {
 	// Path is the policy file to read, relative to the process working
 	// directory or absolute — exactly the form that os.ReadFile accepts.
 	Path string `json:"path"`
-	// Name is the candidate that matched, for display ("policy.yaml").
+	// Name is the candidate that matched, for display (".metricgate.yaml").
 	Name string `json:"name"`
 	// Root is the directory the search started from, so a UI can explain
 	// the decision back to the user.

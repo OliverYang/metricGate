@@ -33,8 +33,11 @@ func (h Halstead) Volume() float64 {
 	return n * math.Log2(eta)
 }
 
-// CountHalstead walks one file's tree and returns its census.
-func CountHalstead(src []byte, root *sitter.Node) Halstead {
+// CountHalstead walks one file's tree and returns its census. It takes several
+// roots because a declaration's body is not always one node: VB.NET follows a
+// method header with a flat run of statements and SystemVerilog splits
+// declarations from statements, so the census has to span them all.
+func CountHalstead(src []byte, roots ...*sitter.Node) Halstead {
 	var h Halstead
 	ops := map[string]int{} // operators by exact text
 	rands := map[string]int{}
@@ -59,7 +62,9 @@ func CountHalstead(src []byte, root *sitter.Node) Halstead {
 			walk(n.Child(i))
 		}
 	}
-	walk(root)
+	for _, root := range roots {
+		walk(root)
+	}
 	h.Distinct1 = len(ops)
 	h.Distinct2 = len(rands)
 	return h

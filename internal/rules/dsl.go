@@ -1,4 +1,4 @@
-// dsl.go compiles the project-authored rule DSL: policy.yaml entries that
+// dsl.go compiles the project-authored rule DSL: .metricgate.yaml entries that
 // assert a naming/pattern invariant over a tree-sitter node kind.
 //
 // The DSL closes the gap between "a convention everyone agrees on" and
@@ -7,7 +7,7 @@
 // covered, and inline `metricgate: ignore` is the wrong tool for a rule the
 // project wants enforced, not suppressed.
 //
-// Shape (policy.yaml, per language section or global via languages:):
+// Shape (.metricgate.yaml, per language section or global via languages:):
 //
 //	custom_rules:
 //	  - id: go-test-names

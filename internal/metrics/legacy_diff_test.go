@@ -224,7 +224,7 @@ func legacyCompare(spec legacySpec, path string, src []byte, root *sitter.Node, 
 				*funcs++
 				wCC := legacyCyclomatic(spec.kinds, body, src)
 				wCog, wNest := legacyCognitive(spec.kinds, body, src)
-				gCC, gCog, gNest := irScore(spec.lang, src, n)
+				gCC, gCog, gNest := irScore(lowererFor(spec.lang), src, n)
 				if wCC != gCC || wCog != gCog || wNest != gNest {
 					out = append(out, legacyDiff{
 						where: path + ":" + strconv.Itoa(int(n.StartPosition().Row)+1),

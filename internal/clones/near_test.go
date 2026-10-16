@@ -16,7 +16,7 @@ func shingleOf(t *testing.T, lang parser.LanguageID, path, src string) []NearFun
 	defer release()
 	var out []NearFunc
 	for _, f := range Extract(lang, path, []byte(src), tree, Default) {
-		if f.body == nil {
+		if len(f.body) == 0 {
 			continue
 		}
 		out = append(out, NearFunc{Func: f, Shingles: FingerprintShingles([]byte(src), f.body)})

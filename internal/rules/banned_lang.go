@@ -282,5 +282,16 @@ func langBanBuilders() map[string]map[BanKind]func(Ban) *Rule {
 		string(parser.LangRust): {
 			BanCall: rustCallBan, BanImport: rustImportBan,
 		},
+		// SQL has no import statement; the builder is registered so a policy
+		// naming one fails at compile time instead of matching nothing.
+		string(parser.LangSQL): {
+			BanCall: sqlCallBan, BanImport: sqlImportBan,
+		},
+		string(parser.LangVerilog): {
+			BanCall: verilogCallBan, BanImport: verilogImportBan,
+		},
+		string(parser.LangVB): {
+			BanCall: vbCallBan, BanImport: vbImportBan, BanConstructor: vbConstructorBan,
+		},
 	}
 }

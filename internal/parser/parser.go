@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"unsafe"
 
+	tree_sitter_sql "github.com/DerekStride/tree-sitter-sql/bindings/go"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	tree_sitter_csharp "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
 	tree_sitter_c "github.com/tree-sitter/tree-sitter-c/bindings/go"
@@ -18,43 +19,51 @@ import (
 	tree_sitter_javascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
 	tree_sitter_python "github.com/tree-sitter/tree-sitter-python/bindings/go"
 	tree_sitter_rust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
+	tree_sitter_vb "github.com/tree-sitter/tree-sitter-tree_sitter_vb_dotnet/bindings/go"
 	tree_sitter_typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
+	tree_sitter_verilog "github.com/tree-sitter/tree-sitter-verilog/bindings/go"
 )
 
 // LanguageID names a supported language.
 type LanguageID string
 
 const (
-	LangGo   LanguageID = "go"
-	LangJava LanguageID = "java"
-	LangTS   LanguageID = "typescript"
-	LangTSX  LanguageID = "tsx"
-	LangJS   LanguageID = "javascript"
-	LangPy   LanguageID = "python"
-	LangC    LanguageID = "c"
-	LangCpp  LanguageID = "cpp"
-	LangCS   LanguageID = "csharp"
-	LangRust LanguageID = "rust"
+	LangGo      LanguageID = "go"
+	LangJava    LanguageID = "java"
+	LangTS      LanguageID = "typescript"
+	LangTSX     LanguageID = "tsx"
+	LangJS      LanguageID = "javascript"
+	LangPy      LanguageID = "python"
+	LangC       LanguageID = "c"
+	LangCpp     LanguageID = "cpp"
+	LangCS      LanguageID = "csharp"
+	LangRust    LanguageID = "rust"
+	LangSQL     LanguageID = "sql"
+	LangVerilog LanguageID = "verilog"
+	LangVB      LanguageID = "vbnet"
 )
 
 // grammars is the language registry: adding a language is one entry here
 // plus a rule pack and (if needed) a metrics profile.
 var grammars = map[LanguageID]func() unsafe.Pointer{
-	LangGo:   tree_sitter_go.Language,
-	LangJava: tree_sitter_java.Language,
-	LangTS:   tree_sitter_typescript.LanguageTypescript,
-	LangTSX:  tree_sitter_typescript.LanguageTSX,
-	LangJS:   tree_sitter_javascript.Language,
-	LangPy:   tree_sitter_python.Language,
-	LangC:    tree_sitter_c.Language,
-	LangCpp:  tree_sitter_cpp.Language,
-	LangCS:   tree_sitter_csharp.Language,
-	LangRust: tree_sitter_rust.Language,
+	LangGo:      tree_sitter_go.Language,
+	LangJava:    tree_sitter_java.Language,
+	LangTS:      tree_sitter_typescript.LanguageTypescript,
+	LangTSX:     tree_sitter_typescript.LanguageTSX,
+	LangJS:      tree_sitter_javascript.Language,
+	LangPy:      tree_sitter_python.Language,
+	LangC:       tree_sitter_c.Language,
+	LangCpp:     tree_sitter_cpp.Language,
+	LangCS:      tree_sitter_csharp.Language,
+	LangRust:    tree_sitter_rust.Language,
+	LangSQL:     tree_sitter_sql.Language,
+	LangVerilog: tree_sitter_verilog.Language,
+	LangVB:      tree_sitter_vb.Language,
 }
 
 // Supported lists the registered languages in stable order.
 func Supported() []LanguageID {
-	return []LanguageID{LangGo, LangJava, LangTS, LangTSX, LangJS, LangPy, LangC, LangCpp, LangCS, LangRust}
+	return []LanguageID{LangGo, LangJava, LangTS, LangTSX, LangJS, LangPy, LangC, LangCpp, LangCS, LangRust, LangSQL, LangVerilog, LangVB}
 }
 
 // extensions is the canonical extension per language, the inverse of
@@ -63,16 +72,19 @@ func Supported() []LanguageID {
 // spelling here even when it can be read from several: ".ts" not ".mts",
 // because this direction produces a file a human will look at.
 var extensions = map[LanguageID]string{
-	LangGo:   ".go",
-	LangJava: ".java",
-	LangTS:   ".ts",
-	LangTSX:  ".tsx",
-	LangJS:   ".js",
-	LangPy:   ".py",
-	LangC:    ".c",
-	LangCpp:  ".cpp",
-	LangCS:   ".cs",
-	LangRust: ".rs",
+	LangGo:      ".go",
+	LangJava:    ".java",
+	LangTS:      ".ts",
+	LangTSX:     ".tsx",
+	LangJS:      ".js",
+	LangPy:      ".py",
+	LangC:       ".c",
+	LangCpp:     ".cpp",
+	LangCS:      ".cs",
+	LangRust:    ".rs",
+	LangSQL:     ".sql",
+	LangVerilog: ".v",
+	LangVB:      ".vb",
 }
 
 // Extension returns the canonical file extension of a language, or "" when
@@ -147,6 +159,12 @@ func LanguageForFile(name string) (LanguageID, bool) {
 		return LangCS, true
 	case ".rs":
 		return LangRust, true
+	case ".sql":
+		return LangSQL, true
+	case ".v", ".sv", ".svh", ".vh":
+		return LangVerilog, true
+	case ".vb":
+		return LangVB, true
 	default:
 		return "", false
 	}
@@ -171,6 +189,10 @@ var (
 	TsCpp    *sitter.Language
 	TsCSharp *sitter.Language
 	TsRust   *sitter.Language
+	// TsSQL, TsVerilog, TsVB are instances for the SQL, Verilog and VB.NET grammars.
+	TsSQL     *sitter.Language
+	TsVerilog *sitter.Language
+	TsVB      *sitter.Language
 )
 
 func init() {
@@ -184,4 +206,7 @@ func init() {
 	TsCpp = sitter.NewLanguage(tree_sitter_cpp.Language())
 	TsCSharp = sitter.NewLanguage(tree_sitter_csharp.Language())
 	TsRust = sitter.NewLanguage(tree_sitter_rust.Language())
+	TsSQL = sitter.NewLanguage(tree_sitter_sql.Language())
+	TsVerilog = sitter.NewLanguage(tree_sitter_verilog.Language())
+	TsVB = sitter.NewLanguage(tree_sitter_vb.Language())
 }

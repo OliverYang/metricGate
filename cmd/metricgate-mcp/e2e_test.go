@@ -64,7 +64,7 @@ func startSession(t *testing.T, dir, logPath string) *mcp.ClientSession {
 // calling it is a deterministic FAIL and the repaired snippet is a PASS.
 func writeTestPolicy(t *testing.T, dir string) *config.Config {
 	t.Helper()
-	policyPath := filepath.Join(dir, "policy.yaml")
+	policyPath := filepath.Join(dir, ".metricgate.yaml")
 	policy := `version: 1
 gate:
   fail_on: error

@@ -138,6 +138,14 @@ func archFiles(list []*facts.FileFacts) []arch.File {
 }
 
 // cleanImports turns fact-sheet import strings into bare paths.
+//
+// Java is the one language whose import separator differs from the graph's:
+// facts stores the dotted statement, but the graph node for a Java package is
+// the slashed form (archFiles slashes f.Package). Leaving the import dotted
+// made it a single segment, so the leading-segment match in matchDir could
+// never see a package deep enough — every Java edge resolved to nothing and
+// a snapshot could freeze 200 packages and 0 directions while the gate
+// reported layer violations on the same tree.
 func cleanImports(raw []string, java bool) []arch.Import {
 	out := make([]arch.Import, 0, len(raw))
 	for _, imp := range raw {
@@ -149,6 +157,7 @@ func cleanImports(raw []string, java bool) []arch.Import {
 			if i := strings.LastIndex(p, " "); i >= 0 {
 				p = p[i+1:]
 			}
+			p = strings.ReplaceAll(p, ".", "/")
 		} else if i := strings.Index(p, " "); i >= 0 {
 			p = p[i+1:] // drop the alias prefix; the path is the last word
 		}

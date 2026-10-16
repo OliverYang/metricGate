@@ -11,6 +11,7 @@ import (
 
 	"metricgate/internal/config"
 	"metricgate/internal/configpath"
+	"metricgate/internal/store"
 )
 
 // writePolicy serves PUT /api/policy: replace the discovered policy document.
@@ -21,16 +22,21 @@ import (
 // document behind (otherwise one interrupted request breaks every later run).
 // So: same-origin → parse → validate → re-check the discovered path → atomic
 // replace.
-func writePolicy(w http.ResponseWriter, r *http.Request) {
+func writePolicy(w http.ResponseWriter, r *http.Request, logPath, dbPath string) {
 	if !sameOrigin(r) {
-		http.Error(w, "same-origin request required", http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, "same-origin request required")
 		return
 	}
 	request, ok := readPolicyRequest(w, r)
 	if !ok {
 		return
 	}
-	target, ok := saveablePolicyTarget(w, request.Path)
+	window, err := policyScopeWindow(r, logPath, dbPath)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	target, ok := saveablePolicyTarget(w, request.Path, window)
 	if !ok {
 		return
 	}
@@ -43,7 +49,7 @@ func writePolicy(w http.ResponseWriter, r *http.Request) {
 // was refused.
 func savePolicy(w http.ResponseWriter, target string, request policyBody) {
 	if err := savePolicyDocument(target, request); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -69,10 +75,14 @@ func readPolicyRequest(w http.ResponseWriter, r *http.Request) (policyBody, bool
 // from saving the one in force: refusing here keeps "what the tool reads" and
 // "what the UI wrote" the same file, and a repository can still create the
 // file with an editor.
-func saveablePolicyTarget(w http.ResponseWriter, requested string) (string, bool) {
-	found := discoveredPolicy()
+//
+// The discovery runs from the request's scope, so saving while looking at one
+// project cannot write into the policy of the directory the server happens to
+// sit in — the two are different files the moment the database is shared.
+func saveablePolicyTarget(w http.ResponseWriter, requested string, window store.Window) (string, bool) {
+	found := discoveredPolicyIn(scopeOrigin(window))
 	if !found.FoundAny() {
-		http.Error(w, "no policy file found to update; create one at "+filepath.Join(policyRoot(), configpath.CandidateNames[0])+" and retry", http.StatusConflict)
+		writeJSONError(w, http.StatusConflict, "no policy file found to update; create one at "+filepath.Join(scopeOrigin(window), configpath.CandidateNames[0])+" and retry")
 		return "", false
 	}
 	return resolvePolicyTarget(w, found, requested)
@@ -99,11 +109,11 @@ type policyBody struct {
 func readPolicyBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, policyMaxBytes+1))
 	if err != nil {
-		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "read body: "+err.Error())
 		return nil, false
 	}
 	if len(body) > policyMaxBytes {
-		http.Error(w, "policy too large", http.StatusRequestEntityTooLarge)
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "policy too large")
 		return nil, false
 	}
 	return body, true
@@ -114,18 +124,18 @@ func readPolicyBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 func decodePolicyRequest(w http.ResponseWriter, body []byte) (policyBody, bool) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
-		http.Error(w, "content is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "content is required")
 		return policyBody{}, false
 	}
 	dec := json.NewDecoder(bytes.NewReader(trimmed))
 	dec.DisallowUnknownFields()
 	var payload policyBody
 	if err := dec.Decode(&payload); err != nil {
-		http.Error(w, "invalid request: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid request: "+err.Error())
 		return policyBody{}, false
 	}
 	if strings.TrimSpace(payload.Content) == "" {
-		http.Error(w, "content is required: an empty policy would disable every configured rule", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "content is required: an empty policy would disable every configured rule")
 		return policyBody{}, false
 	}
 	return payload, true
@@ -140,12 +150,12 @@ func decodePolicyRequest(w http.ResponseWriter, body []byte) (policyBody, bool) 
 // exists to prevent.
 func resolvePolicyTarget(w http.ResponseWriter, found configpath.Found, requested string) (string, bool) {
 	if requested != "" && !sameFilePath(requested, found.Path) {
-		http.Error(w, "path does not match the discovered policy "+found.Path, http.StatusConflict)
+		writeJSONError(w, http.StatusConflict, "path does not match the discovered policy "+found.Path)
 		return "", false
 	}
 	target, err := filepath.Abs(found.Path)
 	if err != nil {
-		http.Error(w, "cannot resolve the policy path", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "cannot resolve the policy path")
 		return "", false
 	}
 	return target, true

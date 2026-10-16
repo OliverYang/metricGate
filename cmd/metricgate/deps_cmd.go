@@ -67,8 +67,14 @@ func emitDepsText(out io.Writer, d *deps.Draft) {
 		fmt.Fprintf(out, "module: %s\n", d.Module)
 	}
 	missing := deps.Uncovered(d)
-	fmt.Fprintf(out, "imports: %d distinct, %d uncovered by %d declared name(s)\n\n",
+	fmt.Fprintf(out, "imports: %d distinct, %d uncovered by %d declared name(s)\n",
 		len(d.Imports), len(missing), len(d.Covered))
+	// Languages without an import extractor are skipped, so say so: otherwise
+	// an empty draft reads as "no dependencies" rather than "not scanned".
+	if noExtractor := d.LanguagesWithoutImports(); len(noExtractor) > 0 {
+		fmt.Fprintf(out, "not scanned for imports (no extractor): %s\n",
+			strings.Join(noExtractor, ", "))
+	}
 	if len(missing) == 0 {
 		fmt.Fprintln(out, "every external import is covered — nothing to draft")
 		return
@@ -81,10 +87,12 @@ func emitDepsText(out io.Writer, d *deps.Draft) {
 }
 
 type depsJSON struct {
-	Module    string        `json:"module"`
-	Covered   []string      `json:"covered"`
-	All       []deps.Import `json:"all"`
-	Uncovered []deps.Import `json:"uncovered"`
+	Module    string         `json:"module"`
+	Covered   []string       `json:"covered"`
+	All       []deps.Import  `json:"all"`
+	Uncovered []deps.Import  `json:"uncovered"`
+	Files     map[string]int `json:"files,omitempty"`
+	NoImport  []string       `json:"languagesWithoutImports,omitempty"`
 }
 
 func emitDepsJSON(out io.Writer, d *deps.Draft) {
@@ -95,5 +103,7 @@ func emitDepsJSON(out io.Writer, d *deps.Draft) {
 		Covered:   d.Covered,
 		All:       d.Imports,
 		Uncovered: deps.Uncovered(d),
+		Files:     d.Files,
+		NoImport:  d.LanguagesWithoutImports(),
 	})
 }

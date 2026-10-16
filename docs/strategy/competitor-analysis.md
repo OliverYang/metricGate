@@ -311,6 +311,12 @@ MetricGate **不是**要替代 SonarQube/golangci-lint 等传统工具，而是:
 
 ### 4. **市场机会**
 
+> ⚠️ **本节结论已被取代（2026-10-16）**：下面“填补市场空白”的说法来自 2024-09-28 的内部判断，
+> 2026-10 外部检索已推翻它（五家同格竞品：SonarQube Vortex / Claude Code 插件、Verificate Gate、
+> Vivari Guard、Trustabl Agent Analyzer，均带一级来源）。现行叙事见
+> [positioning.md v2.0](positioning.md)：**三轴结构性事实（频率 / 成本 / 确定性）+ 规则归属**。
+> 本节保留原文只作为历史判断存档，不得对外引用。
+
 MetricGate 填补了以下市场空白:
 - ✅ LLM 生成代码的实时验证
 - ✅ 团队非标约束的自动化工具
@@ -365,5 +371,6 @@ MetricGate 填补了以下市场空白:
 
 ---
 
-*版本：v1.0*  
-*最后更新：2024-09-28*
+*版本：v1.0（已被取代）*  
+*最后更新：2024-09-28*  
+*2026-10-16 注*：差异化叙事已重写，现行口径见 [positioning.md v2.0](positioning.md)。

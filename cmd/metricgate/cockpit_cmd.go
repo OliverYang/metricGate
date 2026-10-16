@@ -32,7 +32,12 @@ func cmdCockpitServe(args []string) {
 	if !isLoopbackAddress(*addr) {
 		fail(fmt.Errorf("cockpit serve only accepts loopback addresses; got %q", *addr))
 	}
-	fmt.Fprintf(os.Stderr, "metricgate cockpit: serving locally at http://%s (Ctrl-C to stop)\n", *addr)
+	// The build stamp is printed here on purpose. "I restarted it and the UI
+	// did not change" is nearly always a stale binary, and the served assets
+	// cannot tell the operator which build they came from - the page looks the
+	// same either way. Printing the revision at startup makes that one glance.
+	fmt.Fprintf(os.Stderr, "metricgate cockpit: serving locally at http://%s (build %s, Ctrl-C to stop)\n",
+		*addr, buildStamp())
 	if err := http.ListenAndServe(*addr, cockpit.Handler(*logPath, *dbPath)); err != nil {
 		fail(err)
 	}
@@ -50,7 +55,7 @@ func isLoopbackAddress(addr string) bool {
 func cmdCockpitUpdate(args []string) {
 	set := flag.NewFlagSet("cockpit update", flag.ExitOnError)
 	format := set.String("format", "text", "text|json")
-	feedURL := set.String("feed", "", "release feed URL override")
+	feedURL := set.String("feed", os.Getenv("METRICGATE_FEED_URL"), "release feed URL; empty (default) means no feed is published yet")
 	timeout := set.Duration("timeout", cockpit.DefaultTimeout, "probe timeout")
 	parseArgs(set, args)
 
@@ -98,6 +103,11 @@ func printUpdateStatus(s cockpit.Status) {
 		fmt.Printf("up to date (%s)\n", s.Current)
 	case cockpit.StateChecking:
 		fmt.Println("checking for updates…")
+	case cockpit.StateNotEnabled:
+		// Not a failure: no release feed exists to check yet. stdout, exit 0 —
+		// a script that treats a missing feed as an error would be reacting to
+		// a publishing decision, not to its own work.
+		fmt.Printf("update check is not enabled: %s\n", s.Error)
 	case cockpit.StateError:
 		fmt.Fprintf(os.Stderr, "update check failed: %s\n", s.Error)
 	default:

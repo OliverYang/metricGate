@@ -26,10 +26,10 @@
 
 | ID | 约束描述 | 来源 | 严重度 | 适用语言 | 业务理由 | 实现状态 |
 |----|---------|------|--------|---------|---------|---------|
-| A-001 | 禁止使用 fmt.Println 系列函数 | policy.yaml | error | Go | 统一日志方案，便于追踪 | ✅ 已实现 |
+| A-001 | 禁止使用 fmt.Println 系列函数 | .metricgate.yaml | error | Go | 统一日志方案，便于追踪 | ✅ 已实现 |
 | A-002 | 禁止使用 MD5 加密算法 | SECURITY.md | error | Go,Java | 安全合规要求，MD5 已被证明不安全 | ⏳ 待实现 |
 | B-001 | Service 层不能直接调用数据库查询 | CR 记录 | warning | Go | 保证依赖注入模式，提升可测试性 | ⏳ 待实现 |
-| B-002 | internal 包不能被 cmd 引用 | policy.yaml | warning | Go | 保持架构分层清晰 | ✅ 已有 |
+| B-002 | internal 包不能被 cmd 引用 | .metricgate.yaml | warning | Go | 保持架构分层清晰 | ✅ 已有 |
 
 ### P1 - 中优先级 (建议实现)
 

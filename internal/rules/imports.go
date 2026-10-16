@@ -150,6 +150,8 @@ func isStdlibTrimmed(lang parser.LanguageID, path string) bool {
 		return csBCLNamespace(path)
 	case parser.LangRust:
 		return rustStdlibImport(path)
+	case parser.LangVB:
+		return csBCLNamespace(path)
 	}
 	return false
 }

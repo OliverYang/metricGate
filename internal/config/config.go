@@ -1,4 +1,4 @@
-// Package config loads and normalises the policy file (policy.yaml) that
+// Package config loads and normalises the policy file (.metricgate.yaml) that
 // drives the whole tool: which rules run, their severities and options, the
 // metric thresholds, the gate behaviour and the trend store.
 //
@@ -32,13 +32,91 @@ type BanConfig struct {
 	ExceptFiles []string `yaml:"except_files,omitempty"` // file-name suffixes
 }
 
-// Bans returns the policy ban list of one language (nil when unset).
-func (c *Config) Bans(lang string) []BanConfig {
-	sec, ok := langSection(c, lang)
-	if !ok {
-		return nil
+// builtinBans is the ban floor: the organisation bans every policy gets even
+// when its file never mentions banned-api. It mirrors the banned-api blocks of
+// DefaultYAML, and exists separately because LoadFile does not merge with
+// DefaultYAML — without a floor, merely adding a policy file would silently
+// delete the built-in bans, leaving a repository with a policy less constrained
+// than one without. An explicit policy entry with the same kind and match
+// replaces the floor entry, so a project can retune a built-in ban instead of
+// losing it.
+var builtinBans = map[string][]BanConfig{
+	"go": {
+		{Match: "fmt.Print*", Reason: "direct fmt.Print* writes to stdout; use the project logger"},
+		{Match: "panic", Reason: "direct panic(); return an error so callers can decide", ExceptFiles: []string{"_test.go"}},
+	},
+	"java": {
+		{Match: "System.out.print*", Reason: "direct System.out.print* writes to the console; use the project logger"},
+		{Match: "System.err.print*", Reason: "direct System.err.print* writes to the console; use the project logger"},
+	},
+}
+
+// BanEntry is one effective ban plus where it came from: "builtin" for the
+// floor every policy inherits, otherwise the policy source (policy_file,
+// extends, preset) that declared the entry. Index is the entry's position in
+// the declaring banned-api block (-1 for the floor), which is what a reader
+// needs to find the line in the policy file.
+type BanEntry struct {
+	Ban    BanConfig
+	Source string
+	Index  int
+}
+
+// BanEntries returns the effective ban list of one language: the built-in
+// floor first, then the policy's own entries. A policy entry with the same
+// kind and match replaces the floor entry in place, so retuning a built-in ban
+// does not duplicate it. This is the ban analogue of EffectiveThresholds — the
+// one place that answers "which bans can fire here".
+func (c *Config) BanEntries(lang string) []BanEntry {
+	sec, _ := langSection(c, lang)
+	entries := make([]BanEntry, 0, len(builtinBans[lang])+len(sec.Banned))
+	for _, b := range builtinBans[lang] {
+		entries = append(entries, BanEntry{Ban: b, Source: "builtin", Index: -1})
 	}
-	return sec.Banned
+	// One source for the whole block: provenance is recorded per YAML key, and
+	// the sequence items share the banned-api key path.
+	src, _, _ := c.ValueSource("languages."+lang+".banned-api", "builtin")
+	for i, b := range sec.Banned {
+		if j := banFloorIndex(entries, b); j >= 0 {
+			entries[j] = BanEntry{Ban: b, Source: src, Index: i}
+			continue
+		}
+		entries = append(entries, BanEntry{Ban: b, Source: src, Index: i})
+	}
+	return entries
+}
+
+// banFloorIndex finds the built-in entry a policy entry overrides.
+func banFloorIndex(entries []BanEntry, b BanConfig) int {
+	key := banKey(b)
+	for i, e := range entries {
+		if e.Source == "builtin" && banKey(e.Ban) == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// banKey identifies a ban by kind and match. An empty kind means "call",
+// which is also how the rules layer reads it.
+func banKey(b BanConfig) string {
+	kind := b.Kind
+	if kind == "" {
+		kind = "call"
+	}
+	return kind + "\x00" + b.Match
+}
+
+// Bans returns the effective ban list of one language: the built-in floor plus
+// the policy entries. Use BanEntries when the provenance of each entry matters
+// (digests, explain).
+func (c *Config) Bans(lang string) []BanConfig {
+	entries := c.BanEntries(lang)
+	out := make([]BanConfig, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Ban)
+	}
+	return out
 }
 
 // CustomRules returns the project's DSL rule assertions for one language:
@@ -156,7 +234,7 @@ type LanguageConfig struct {
 	CustomRules []DslRuleConfig `yaml:"custom_rules,omitempty"`
 }
 
-// DslRuleConfig is one user-authored rule assertion in policy.yaml.
+// DslRuleConfig is one user-authored rule assertion in .metricgate.yaml.
 type DslRuleConfig struct {
 	ID           string   `yaml:"id"`
 	Title        string   `yaml:"title,omitempty"`

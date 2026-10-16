@@ -13,7 +13,7 @@
 |---|---|---|---|
 | ① 前馈：断言→下一次生成 | get_constraints digest · presets · provenance | ✅ 基本闭环 | — |
 | ② 度量留存：住进去→哪里疼 | trends · hotspots · store | ⚠️ 半闭环 | **A** |
-| ③ 疼→断言固化：修正判断 | inline ignore · policy.yaml | ❌ 断得最狠 | **B、C** |
+| ③ 疼→断言固化：修正判断 | inline ignore · .metricgate.yaml | ❌ 断得最狠 | **B、C** |
 | ④ 实验：产品纠正人的预期 | regress -diff · scorecard | ⚠️ 只有单次 diff 视角 | **A** |
 
 ### 断点 A：metric 维度趋势缺失（可度量/可回溯的洞）
@@ -93,7 +93,7 @@ check -diff 读取账本，warning 级 finding 区分 `accepted`（账本内且�
 
 ### 迭代 2 · 自定义规则 DSL 最小版（P0，最重杠杆）
 
-**功能**：policy.yaml 支持命名模式断言规则——标识符正则 × 节点类型 ×
+**功能**：.metricgate.yaml 支持命名模式断言规则——标识符正则 × 节点类型 ×
 包上下文（试点 P0 结论：一条 DSL 吃掉 6 条命名条款）。最小面：
 `patterns:` 规则族（match/where/message/severity），引擎加载进规则包。
 
@@ -217,3 +217,4 @@ p50/p90/max 序列）；`metricgate trends` 与 cockpit 增加 metric 维度视�
 | 迭代 15 | 组织策略 `extends:` 单继承（环检测 + 深度上限 + 来源链）与 `trace_id` 贯通四张表（`$METRICGATE_TRACE_ID`，未设置时输出逐字节不变）+ `runId` 输出 | [docs/iterations/iter-15-extends-and-trace.md](iterations/iter-15-extends-and-trace.md) |
 | 迭代 16 | 配置发现链（`.metricgate.yaml` → `.metricgate/config.yaml` → `policy.yaml`，就近停止 + 停在 Git 根）+ Cockpit 策略读写 API（发现链/分节/生效键与出处可查，yaml 校验后原子写） | [docs/iterations/iter-16-config-discovery.md](iterations/iter-16-config-discovery.md) |
 | 迭代 17 | 审计结果路由到人：`internal/owners` 解析 CODEOWNERS（GitHub 同语义 last-match-wins），`reachability` / `impact` / `rules gaps` 加 `-owners` 归属列，未匹配显式 `unknown` + 计数；`trends -out / -since / -project` 收敛为 `store.Window`，`-project` canonical 解析（macOS symlink 等价） | [docs/iterations/iter-17-ownership-and-trend-window.md](iterations/iter-17-ownership-and-trend-window.md) |
+| 迭代 18 | trace 属性（X2）与组合报表（X3）：`$METRICGATE_TRACE_ATTRS` 采集 + `trace_attrs` KV 白名单表（未知键丢弃并计数）；`internal/traceview` 把 runs/findings/attrs/calls 按 trace 汇成一个视图，`metricgate trace <id>`、MCP `get_trace`、`trends -trace/-model/-prompt-digest`、Cockpit trace 下拉四处同源；`Window.TraceIDs` 用 nil/空区分"全部 trace"与"无匹配" | [docs/iterations/iter-18-trace-attrs-and-report.md](iterations/iter-18-trace-attrs-and-report.md) |
