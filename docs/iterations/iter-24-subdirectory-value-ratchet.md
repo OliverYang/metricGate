@@ -293,10 +293,10 @@ go test ./internal/git/ -run Unrel -v
 |---|---|---|
 | **D21-1** | ✅ | `/tmp/iter24-fix`：修前子目录无 `unchanged` 子句（静默 0），修后两种 root 都是 `1 new findings, 2 pre-existing hidden, 3 unchanged metric(s) dropped` |
 | **D21-2** | ✅ | 两夹具上修前/修后输出（耗时归一化后）`cmp` identical，多轮稳定 |
-| **D21-3** | ✅ | `go test ./cmd/metricgate-mcp/ -run DiffOnly -v`：`root=.` PASS 4.83s、`root=basepkg` PASS 3.11s、`TestDiffOnlyDropsUnchangedMetrics` PASS 11.77s |
+| **D21-3** | ✅ | `go test ./cmd/metricgate-mcp/ -run DiffOnly -v`（隔离树实跑）：`TestDiffOnlyMatchesCLIOnEveryRootShape` PASS 16.86s（子测 `root=.` 6.38s、`root=basepkg` 2.21s）、`TestDiffOnlyDropsUnchangedMetrics` PASS 11.83s；包级 `ok metricgate/cmd/metricgate-mcp 29.575s` |
 | **D21-4** | ✅ | `/tmp/iter24-regress`：修前根 5 / 子目录 **0（假阴性）**，修后两种 root 都是 `regressions: 5` |
 | **N-1** | ✅ | `go build ./...` CLEAN；`go test ./...` 48 ok / 5 no-test / **0 FAIL**；`bash scripts/cockpit-observe.sh fast` → `summary: 0 errors, 16 warnings, 0 notes, 429 metric snapshots` + **`gate: PASSED (fail_on=error)`** |
-| **N-2** | ✅ | `check internal/ -diff` → `0 errors, 0 warnings, 0 notes, 21487 metric snapshots` + `gate: PASSED (fail_on=error)`，与 pristine 逐项一致 |
+| **N-2** | ✅ | `check internal/ -diff` → `0 errors, 0 warnings, 0 notes, 21487 metric snapshots` + `gate: PASSED (fail_on=error)`。与 pristine 二进制对同一命令的 `0 errors, 0 warnings, 0 notes` 及 gate 结论一致；**snapshot 计数不同（21487 vs pristine 21333）**，差 154 来自本迭代自己新增的代码行（8 文件 +827 行），不是口径差异 |
 
 ### 9.3 反向验证（断言真的会报红）
 
