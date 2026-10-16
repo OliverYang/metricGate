@@ -310,6 +310,33 @@ go test ./internal/git/ -run Unrel -v
 
 三次还原后 md5 与原始一致、复跑全绿。变异后 `internal/baseline/baseline.go` md5 仍为 `958e3a7b928715caf5a0b07e71ba98c2`。
 
+**订正一条契约预期（实测推翻，必须记录）：**验证契约写「② 重映射方向搞反 → 根路径输出变化被 D21-2 抓到」
+——**实测不是这样，方向反转在根下完全不可见**。在隔离树 `/tmp/iter24-after` 上做 M2（`Unrel`→`Rel`）
+后重建二进制，同一夹具 `/tmp/iter24-fix`：
+
+```
+[M2] check . -diff      -> 与未变异逐字相同（归一化 ms 后 cmp = IDENTICAL）
+[M2] check basepkg -diff -> 4 new findings, 2 pre-existing hidden   （unchanged 又回 0，病回来了）
+```
+
+原因是结构性的：`root == 工作树根` 时 `repoRoot == checkBase`，`rebaseOne` 对 `Rel` 与 `Unrel` **都是恒等映射**
+（internal/git/git.go:144-166 与 :190 的 `filepath.Rel(checkBase, Join(repoRoot, rel))`，两参数相等时结果就是 `rel`）。
+所以 D21-2 能钉住的是「根下行为没变」，**它没有能力发现方向反转**——方向反转只在子目录下显形。
+真正抓住 M2 的是本轮新增的三条键空间直测（`/tmp/iter24-after` 实跑原文）：
+
+```
+--- FAIL: TestSnapshotKeysTheBaseRunInTheCheckRootsOwnSpace/subdirectory_rebases_onto_the_check_root
+    has no "a.go"/file-length key; keys present: basepkg/basepkg/a.go
+--- FAIL: TestSnapshotSubdirectoryKeysJoinTheRunBeingGated
+    no base value keyed under the subdirectory joined the gated run's own keys
+    (base keys: basepkg/basepkg/a.go; run keys: [a.go]): the value ratchet compares nothing
+--- FAIL: TestFullSnapshotKeysJoinTheGatedRunUnderASubdirectory/subdirectory
+    base keys=[basepkg/basepkg/a.go|A|…] run keys=[a.go|A|…]
+```
+
+也就是说 D21-2（根下字节不变）与「方向反转」这一对**本就不是互相覆盖的关系**，把 M2 的守卫寄托在 D21-2 上是错的；
+守卫它的必须是子目录侧断言。这也是本轮补 `TestFullSnapshotKeysJoinTheGatedRunUnderASubdirectory` 的直接理由。
+
 ### 9.4 诚实边界
 
 - **真仓探针不构成证据**：`check internal/git -diff -regress` 修前 0、修后仍 0，因为该目录下确实没有上升的指标。
