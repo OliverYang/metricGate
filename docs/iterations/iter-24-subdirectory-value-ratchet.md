@@ -182,7 +182,8 @@ baseline_test.go:213: [error] cognitive-complexity (cognitive-complexity of
 这直接违反 N-2。**修法是拆函数，不是加 ignore**：把断言抽成 `assertKeySpace`、把「取两侧样本」
 抽成 `fullSnapshotAndRun`、把键集合与配对抽成 `metricKeySet` / `countJoined`；`git_test.go` 同样
 拆成 `assertUnrelIsIdentityAtRoot` / `assertRelUnrelRoundTrips`（原单函数 cyclomatic 13、npath 896）。
-拆完 `check internal/ -diff` = **0 errors, 0 warnings, 0 notes**，与 pristine 完全一致。
+拆完 `check internal/ -diff` = **0 errors, 0 warnings, 0 notes**，与 pristine 的三个计数完全一致
+（`metric snapshots` 计数不同：21487 vs pristine 21333，差 154 是本迭代新增的代码行，见 §9.2 N-2 行）。
 
 教训：**度量工具自己的迭代必须用自己的门禁量自己**。这份测试是给棘轮加棘轮的，它自己先触发了棘轮。
 
