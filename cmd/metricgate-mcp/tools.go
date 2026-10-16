@@ -51,7 +51,7 @@ func registerLoopTools(srv *mcp.Server, svc *service) {
 	}, svc.checkCode)
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "check_path",
-		Description: "Check files on disk with rules + metrics. With diff_only=true the gate applies the same ratchet as `metricgate check -diff` against base=HEAD: findings outside the changed lines are hidden (reported as `hidden`), and metric findings whose measured value did not rise since the base revision are dropped (reported as `unchanged`). Both counters say what the gate did NOT report — check them instead of trusting a clean verdict; new files have no base values, so their metric findings are always kept. Guarantee holds for path at the worktree root: under a subdirectory the base values are keyed worktree-relatively and the value test cannot join, so nothing is reported as unchanged.",
+		Description: "Check files on disk with rules + metrics. With diff_only=true the gate applies the same ratchet as `metricgate check -diff` against base=HEAD: findings outside the changed lines are hidden (reported as `hidden`), and metric findings whose measured value did not rise since the base revision are dropped (reported as `unchanged`). Both counters say what the gate did NOT report — check them instead of trusting a clean verdict; new files have no base values, so their metric findings are always kept. The base values are keyed in the same coordinate system as the run, so the value test holds at the worktree root and under a subdirectory alike.",
 	}, svc.checkPath)
 	addTool(srv, svc, &mcp.Tool{
 		Name:        "list_stubs",

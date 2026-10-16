@@ -22,7 +22,7 @@ import (
 // It returns the count rather than writing it, so the CLI shell owns every
 // byte of human-facing output.
 func applyRegressions(cfg *config.Config, base, root string, summary *model.RunSummary, changed map[string][]diff.Range) (int, error) {
-	baseMetrics, err := baseline.FullSnapshot(cfg, base)
+	baseMetrics, err := baseline.FullSnapshot(cfg, root, base)
 	if err != nil {
 		return 0, err
 	}

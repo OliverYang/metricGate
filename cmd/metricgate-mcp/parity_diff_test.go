@@ -26,16 +26,19 @@ func runMCP(t *testing.T, mcpBin, dir, root string) gateReport {
 // TestDiffOnlyMatchesCLIOnEveryRootShape compares the two gate surfaces on both
 // root shapes, because the two shapes are not equivalent.
 //
-// At the worktree root, the run-relative finding paths and the base-snapshot
-// paths coincide, so the full ratchet fires and metric findings whose value did
-// not move are dropped. Under a subdirectory, engine.Run keys findings relative
-// to the run root while baseline.Snapshot keys the base values relative to the
-// worktree, so the join misses and the value half of the ratchet degrades to
-// keep-all -- pre-existing in the CLI, and reached identically by both surfaces
-// now that they share one function. See the 遗留 note in
-// docs/iterations/iter-20-mcp-cli-ratchet-parity.md. Testing only the root would
-// hide that; testing only the subdirectory would let a divergence at the root,
-// where both surfaces are actually used, slip past.
+// Both shapes must fire the full ratchet. At the worktree root the run-relative
+// finding paths and the base-snapshot paths coincide; under a subdirectory they
+// did not -- engine.Run keys findings relative to the run root while the base
+// snapshot came back keyed relative to the worktree, so the join missed and the
+// value half of the ratchet degraded to keep-all. That was pre-existing in the
+// CLI and reached identically by both surfaces once they shared one function,
+// which is why the parity test used to read as a pass. baseline.Snapshot now
+// rebases the base values into the run's own coordinate system, so the two
+// shapes are equivalent and both are asserted. See the 遗留 note in
+// docs/iterations/iter-20-mcp-cli-ratchet-parity.md and the fix in
+// docs/iterations/iter-24-subdirectory-value-ratchet.md. Testing only the root
+// would hide a subdirectory regression; testing only the subdirectory would let
+// a divergence at the root, where both surfaces are actually used, slip past.
 func TestDiffOnlyMatchesCLIOnEveryRootShape(t *testing.T) {
 	releaseBuildGuard(t)
 	cliBin, mcpBin := buildGatePair(t)
@@ -89,6 +92,16 @@ func assertSameGate(t *testing.T, cli, mcp gateReport) {
 // assertNonVacuous fails when a passing comparison would prove nothing: if the
 // fixture produced nothing to filter, "the two surfaces agree" is only a
 // statement about empty sets.
+//
+// The unchanged clause is asserted for every root shape. It used to be gated on
+// root == "." because the value half of the ratchet genuinely could not fire
+// under a subdirectory, and asserting it there would have failed on correct
+// code. That exemption is exactly what let the defect ship: the subdirectory
+// case was the one where the ratchet was broken, and it was the one shape the
+// test declined to check. Now that the base values are rebased into the run's
+// coordinate system, a subdirectory run that drops nothing is as much a defect
+// as a root run that drops nothing, and this clause is what makes the parity
+// assertion above discriminating rather than merely symmetric.
 func assertNonVacuous(t *testing.T, root string, cli gateReport) {
 	t.Helper()
 	if cli.Hidden == 0 {
@@ -97,12 +110,10 @@ func assertNonVacuous(t *testing.T, root string, cli gateReport) {
 	if len(cli.Findings) == 0 {
 		t.Error("the filtered run reported no findings at all; there was no signal to gate")
 	}
-	// The value-delta half only survives at the worktree root, so that is the
-	// shape where its absence is a defect rather than a documented degradation.
-	if root == "." && cli.Unchanged == 0 {
-		t.Errorf("no metric finding was dropped as unchanged, so this run cannot distinguish the "+
-			"value-delta ratchet from the line-only filter: %d findings kept, %d hidden",
-			len(cli.Findings), cli.Hidden)
+	if cli.Unchanged == 0 {
+		t.Errorf("no metric finding was dropped as unchanged under root=%s, so this run cannot "+
+			"distinguish the value-delta ratchet from the line-only filter: %d findings kept, %d hidden",
+			root, len(cli.Findings), cli.Hidden)
 	}
 }
 

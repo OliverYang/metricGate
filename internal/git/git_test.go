@@ -173,3 +173,68 @@ func TestRepoRelativizerAgreesWithRepoRelative(t *testing.T) {
 		t.Error("NewRepoRelativizer outside a worktree reported success")
 	}
 }
+
+// TestRepoRelativizerUnrelInvertsRel pins both halves of the contract Unrel has
+// to keep: it must undo Rel, and at the worktree root it must be the identity.
+//
+// The identity half is not a special case of the first. Every report produced at
+// the worktree root is guaranteed to be byte-for-byte what it was before the
+// subdirectory fix, and that guarantee rests on Unrel returning the same string
+// there -- a "rebase" that normalised separators, cleaned a path or resolved a
+// symlink would pass a round-trip test and still change the output.
+func TestRepoRelativizerUnrelInvertsRel(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := initGitRepo(t)
+	sub := filepath.Join(root, "internal", "core")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	assertUnrelIsIdentityAtRoot(t, root)
+	assertRelUnrelRoundTrips(t, sub)
+}
+
+// assertUnrelIsIdentityAtRoot checks the half that protects the byte-for-byte
+// guarantee: at the worktree root Unrel must hand back exactly what it was
+// given, including for a path that does not exist on disk.
+func assertUnrelIsIdentityAtRoot(t *testing.T, root string) {
+	t.Helper()
+	atRoot, ok := NewRepoRelativizer(root)
+	if !ok {
+		t.Fatal("NewRepoRelativizer(root) reported failure")
+	}
+	for _, path := range []string{"core.go", "internal/git/git.go", "not/created/yet.go"} {
+		got, gotOK := atRoot.Unrel(path)
+		if !gotOK || got != path {
+			t.Errorf("Unrel(%q) at the worktree root = %q,%v; want the path unchanged", path, got, gotOK)
+		}
+	}
+}
+
+// assertRelUnrelRoundTrips checks the half the -diff base snapshot relies on:
+// under a subdirectory the archive is keyed worktree-relatively and the report
+// is keyed check-root-relatively, so Rel and Unrel must be inverses across that
+// boundary. A path outside the check root has no check-root-relative form, and
+// returning one would put a base value into a key space the gated run never
+// uses -- silently, which is the failure mode this whole change removes.
+func assertRelUnrelRoundTrips(t *testing.T, sub string) {
+	t.Helper()
+	rel, ok := NewRepoRelativizer(sub)
+	if !ok {
+		t.Fatal("NewRepoRelativizer(sub) reported failure")
+	}
+	for _, checkRelative := range []string{"core.go", "nested/deep.go"} {
+		repoRelative, ok := rel.Rel(checkRelative)
+		if !ok {
+			t.Fatalf("Rel(%q) failed", checkRelative)
+		}
+		back, ok := rel.Unrel(repoRelative)
+		if !ok || back != checkRelative {
+			t.Errorf("Unrel(Rel(%q)) = %q,%v; want %q", checkRelative, back, ok, checkRelative)
+		}
+	}
+	if got, ok := rel.Unrel("elsewhere/other.go"); ok {
+		t.Errorf("Unrel(%q) = %q, true; want false for a path outside the check root", "elsewhere/other.go", got)
+	}
+}

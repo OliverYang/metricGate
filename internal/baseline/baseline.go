@@ -111,7 +111,41 @@ func Snapshot(cfg *config.Config, root, base string, changed map[string][]diff.R
 	if err != nil {
 		return nil, err
 	}
-	return engine.IndexBaseValues(summary.Metrics), nil
+	return engine.IndexBaseValues(rebaseToCheckRoot(summary.Metrics, root)), nil
+}
+
+// rebaseToCheckRoot moves base-revision snapshot paths out of the worktree's
+// coordinate system and into the check root's, so they can be joined against
+// the run being gated.
+//
+// The archive is built from the worktree, so the second engine run reports
+// paths relative to it; the run the gate is filtering reports paths relative
+// to the check root. At the worktree root those two are the same string, which
+// is why this looked unnecessary: under a subdirectory they share no key at
+// all, so every value comparison missed and the metric half of the ratchet
+// degraded to keep-everything without saying so.
+//
+// Metrics outside the check root are dropped, not guessed at. They cannot
+// correspond to anything in the gated run, and inventing a path for them would
+// be exactly the silent substitution this function exists to remove. A check
+// root that is not inside a git worktree yields the metrics unchanged, which
+// is the conservative direction: the callers treat an unjoinable key as "no
+// base value" and keep the finding.
+func rebaseToCheckRoot(ms []model.MetricResult, root string) []model.MetricResult {
+	rel, ok := git.NewRepoRelativizer(root)
+	if !ok {
+		return ms
+	}
+	out := make([]model.MetricResult, 0, len(ms))
+	for _, m := range ms {
+		path, ok := rel.Unrel(m.File)
+		if !ok {
+			continue
+		}
+		m.File = path
+		out = append(out, m)
+	}
+	return out
 }
 
 // FullSnapshot is Snapshot over the whole base tree, returned as raw metric
@@ -120,9 +154,10 @@ func Snapshot(cfg *config.Config, root, base string, changed map[string][]diff.R
 // The regression report needs every scope at the base revision, not only the
 // touched ones, because "this change made the file's fan-out worse" is one
 // question and "these measurements drifted" is another. Paths come back
-// worktree-relative so they join against the current run's snapshots without
-// leaking a machine absolute path into the comparison.
-func FullSnapshot(cfg *config.Config, base string) ([]model.MetricResult, error) {
+// relative to root — the same coordinate system the current run's snapshots
+// use — so the two sides join without leaking a machine absolute path into the
+// comparison, and without depending on root being the worktree root.
+func FullSnapshot(cfg *config.Config, root, base string) ([]model.MetricResult, error) {
 	dir, cleanup, err := git.Archive("", git.ResolveBase("", base))
 	if err != nil {
 		return nil, err
@@ -137,7 +172,7 @@ func FullSnapshot(cfg *config.Config, base string) ([]model.MetricResult, error)
 	if err != nil {
 		return nil, err
 	}
-	return RelativizeMetrics(summary.Metrics, dir), nil
+	return rebaseToCheckRoot(RelativizeMetrics(summary.Metrics, dir), root), nil
 }
 
 // RelativizeMetrics rewrites every snapshot path relative to root, so two
@@ -146,6 +181,12 @@ func FullSnapshot(cfg *config.Config, base string) ([]model.MetricResult, error)
 // Exported because the current tree's snapshots need the same treatment as the
 // base tree's before the two are compared; a caller that relativizes only one
 // side joins on nothing.
+//
+// Note the asymmetry it hides: this only rewrites *absolute* paths (see
+// selection.SanitizePath). A caller that hands it an already-relative path gets
+// it back unchanged, so passing a check root while holding worktree-relative
+// paths silently produces the wrong key space. rebaseToCheckRoot is the
+// conversion for that case.
 func RelativizeMetrics(ms []model.MetricResult, root string) []model.MetricResult {
 	out := make([]model.MetricResult, len(ms))
 	for i, m := range ms {
@@ -162,6 +203,12 @@ func RelativizeMetrics(ms []model.MetricResult, root string) []model.MetricResul
 // The result is sorted: git.ArchivePaths feeds it straight into a subprocess
 // argument list, and an unsorted slice built from a map would make the base
 // run — and therefore the verdict — depend on map iteration order.
+//
+// This is only half of the round trip. The archive comes back keyed
+// worktree-relatively, and the run being gated is keyed check-root-relatively,
+// so whichever caller indexes the archive's metrics must map them back with
+// git.RepoRelativizer.Unrel before comparing. RepoRelative alone joins the two
+// systems only when the check root is the worktree root.
 func repoRelativePaths(root string, changed map[string][]diff.Range) ([]string, error) {
 	rel, ok := git.NewRepoRelativizer(root)
 	if !ok {

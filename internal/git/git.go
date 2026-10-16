@@ -149,6 +149,22 @@ func (r RepoRelativizer) Rel(path string) (string, bool) {
 	return filepath.ToSlash(joined), true
 }
 
+// Unrel is Rel's inverse: it maps one worktree-root-relative path onto the
+// check root, reporting false when the path lies outside it.
+//
+// It exists for the callers that hold both coordinate systems but produce
+// their results in the wrong one. The base-revision snapshot is the case that
+// needed it: `git archive` materialises the whole worktree, so the second
+// engine run reports paths relative to the worktree root, while the run being
+// gated reports paths relative to the check root. Under a subdirectory the two
+// key spaces do not intersect and the comparison silently degrades to
+// keep-everything; Unrel is what puts the base values back into the run's own
+// coordinate system. At the worktree root it is the identity, which is why the
+// root-relative guarantee survives it.
+func (r RepoRelativizer) Unrel(path string) (string, bool) {
+	return rebaseOne(path, r.repoRoot, r.checkBase)
+}
+
 // rebaseChanges rewrites worktree-root-relative change paths into paths
 // relative to checkBase, dropping anything outside the check scope. Paths use
 // forward slashes so they match the engine's report paths on every platform.
