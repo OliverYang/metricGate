@@ -1,0 +1,170 @@
+{
+  "_about": "Commit-replay raw data for dev-cockpit (marein/dev-cockpit), used by docs/claims.md #19 and docs/evaluations/evaluation-commit-replay-results.md. This file is the summary form: the 1.3 GB of per-commit JSON it was derived from is NOT in git and has never been tracked (`.data/` is gitignored).",
+
+  "corpus": {
+    "repo": "https://github.com/marein/dev-cockpit",
+    "cloned_to": "/tmp/dev-cockpit (and /tmp/dev-cockpit-b)",
+    "tip_sha": "396cd3cd8f77b9becae31576272ffcb80f06ba02",
+    "tip_date": "2026-10-08",
+    "commits_replayed": 289,
+    "commit_list": "docs/evaluations/data/commit-replay/commits.txt (289 full shas, chronological: 5065169f69 2026-05-14 initial commit ... 396cd3cd8f 2026-10-08)",
+    "roots_per_commit": "check . (whole tree)"
+  },
+
+  "criterion_versions": {
+    "_note": "A finding count is meaningless without the commit of metricgate that produced it AND the policy file it was given. The original report used a pair that is neither of the two below; iter-30 proved that a 29-line policy difference (186-line policy.yaml at 59e0a24^ instead of the 157-line version at d5cb01c) inflated every metric count and added 5 rule families the archive has at zero.",
+    "archive_original_report": {
+      "metricgate_commit": "unknown / not recoverable (between c701576 and d5cb01c)",
+      "policy": "policy.yaml (157 lines)",
+      "policy_reconstruction": "/tmp/policy-era.yaml = git show d5cb01c:policy.yaml",
+      "verification": "mg-era-bin check . -config /tmp/policy-era.yaml at 396cd3cd8f -> total 2174 / files 555 / errors 222, equal to devcockpit/396cd3cd8f.json line for line"
+    },
+    "iter30_old": {
+      "metricgate_commit": "275ee3817cd3d6f5d9095c7772fb64fa6d17ac88",
+      "policy": "policy.yaml (186 lines, = git show 59e0a24^:policy.yaml)",
+      "note": "test-no-assert results are DIRECTLY comparable to the archive's (identical 1783/215); the other rule families are NOT, because of the policy version"
+    },
+    "iter30_new": {
+      "metricgate_commit": "739aa11 (main at the time of the replay)",
+      "policy": "same 186-line policy as iter30_old",
+      "note": "one variable only: the criterion"
+    },
+    "test_no_assert_iter31": {
+      "metricgate_commit": "d2bcf9b",
+      "criterion": "Benchmark* removed from scope (prefix gate is Test* only, signature gate is *testing.T only)"
+    }
+  },
+
+  "rule_family_totals": {
+    "_note": "Summed over the 289 archived per-commit JSON files. These five rows are exactly reproducible from the archive: fan-out, cyclomatic-complexity, npath-complexity, cognitive-complexity, function-length. The other rows are archive-derived but the report's table disagrees with them for 13 of 18 rows (see unreproducible_rows below).",
+    "unit": "findings instances (one per (commit, file, line, rule))",
+    "fan-out": 85771,
+    "cyclomatic-complexity": 38150,
+    "npath-complexity": 37093,
+    "cognitive-complexity": 22926,
+    "function-length": 22361,
+    "file-length": 9903,
+    "function-clone": 7647,
+    "banned-os-exec": 3388,
+    "params-count": 2749,
+    "test-no-assert": 1783,
+    "nesting-depth": 1507,
+    "banned-panic": 883,
+    "sdp-violation": 283,
+    "banned-fmt-Print*": 148,
+    "call-chain-depth": 14,
+    "boolean-params": 0,
+    "todo-comment": 0,
+    "silent-catch": 0,
+    "empty-block": 0
+  },
+
+  "unreproducible_rows": {
+    "_note": "docs/evaluations/evaluation-commit-replay-results.md section 2 prints a 'rule-family total' table. 5 of its 18 rows equal the archive findings total; the other 13 match neither findings, nor commit counts, nor distinct files, nor distinct anchors, nor metric-snapshot threshold counts. Every aggregation tried is listed in evaluation-iter30-tna-recalibration.md section 5. Treat those 13 rows as an unknown aggregation, NOT as a different measurement.",
+    "report_value_vs_archive": {
+      "params-count": [9847, 2749],
+      "file-length": [5296, 9903],
+      "function-clone": [4912, 7647],
+      "test-no-assert": [3492, 1783],
+      "call-chain-depth": [279, 14],
+      "nesting-depth": [44, 1507],
+      "banned-os-exec": [43, 3388],
+      "banned-panic": [3, 883],
+      "banned-fmt-Print*": [3, 148],
+      "boolean-params": [334, 0],
+      "todo-comment": [87, 0],
+      "silent-catch": [55, 0],
+      "empty-block": [21, 0]
+    },
+    "four_zero_rows_are_explained_by_the_policy": {
+      "boolean-params": "warn: 2, error: off -- warnings land in metric snapshots only, never as findings",
+      "todo-comment": "enabled: false (both the go and java sections)",
+      "empty-block": "configured only in the java section, severity: warning with no threshold that fires",
+      "silent-catch": "no section at all"
+    }
+  },
+
+  "test_no_assert_recalibration": {
+    "_note": "This is the table docs/claims.md #19 and the results report's 215/289 sentence now rest on. findings = instances; commits = commits with at least one; anchors = distinct (file, line); the archive column and iter30_old agree exactly, which is what establishes the archive as trustworthy.",
+    "unit": "289 replayed commits",
+    "columns": {
+      "archive_original_report": {
+        "findings": 1783,
+        "commits": 215,
+        "anchors": 31,
+        "files": 6,
+        "max_per_commit": 15,
+        "mean_per_commit": 8.3,
+        "benchmark_findings": 18,
+        "test_findings": 1765
+      },
+      "iter30_old (275ee38 criterion)": {
+        "findings": 1783,
+        "commits": 215,
+        "anchors": 31,
+        "files": 6,
+        "max_per_commit": 15,
+        "benchmark_findings": 18,
+        "test_findings": 1765
+      },
+      "iter30_new (helper-capability criterion, ecd57b5)": {
+        "findings": 233,
+        "commits": 215,
+        "anchors": 2,
+        "files": 2,
+        "max_per_commit": 2,
+        "mean_per_commit": 1.1,
+        "benchmark_findings": 18,
+        "test_findings": 215
+      },
+      "iter31_criterion (benchmarks out of scope, d2bcf9b)": {
+        "findings": 215,
+        "commits": 215,
+        "anchors": 1,
+        "files": 1,
+        "max_per_commit": 1,
+        "histogram": {"1": 215},
+        "sole_name": "TestPublishDoesNotBlockOnFullSubscriber"
+      }
+    },
+    "the_215_mechanism": {
+      "introduced_at_commit_index": 75,
+      "introduced_sha": "444b31ec97",
+      "introduced_date": "2026-07-15",
+      "introduced_subject": "UI updates on server changes",
+      "contiguous": true,
+      "holes": 0,
+      "reading": "215/289 is one function counted once per commit in 215 consecutive commits, not 215 independent events. It was introduced at index 75 and present in every commit afterwards.",
+      "anchor": "internal/eventbus/eventbus_test.go:40",
+      "source_note": "the test asserts by not returning: 'If Publish blocked on a full subscriber this would deadlock and the test would time out.'"
+    },
+    "old_per_file": {
+      "internal/assistant/memory_test.go": [1207, 21],
+      "internal/eventbus/eventbus_test.go": [215, 1],
+      "internal/assistant/job_test.go": [174],
+      "internal/docker/service_test.go": [155],
+      "internal/filesystem/quickopen_bench_test.go": [18, 1],
+      "internal/cost/price/price_test.go": [14]
+    },
+    "corpus_suite": {
+      "_note": "the 5-package corpus, 110 _test.go files, is a different corpus from dev-cockpit; these numbers are the criterion comparison on it",
+      "row": "go-humanize v1.0.1, google/uuid v1.6.0, google/pprof, mattn/go-isatty, modelcontextprotocol/go-sdk v1.8.0",
+      "before": {"findings": 55, "benchmarks": 41, "tests": 14},
+      "after_helper_capability": {"findings": 19, "benchmarks": 14, "tests": 5},
+      "after_benchmarks_removed": {"findings": 5, "benchmarks": 0, "tests": 5}
+    }
+  },
+
+  "reproduce": {
+    "recompute_rule_family_totals": "python3 -c \"import json,glob,collections; c=collections.Counter(); [c.update([x['ruleId']]) for f in glob.glob('.data/commit-replay/devcockpit/*.json') for x in json.load(open(f))['findings']]; print(c.most_common())\"",
+    "replay_one_commit_era_correct": "git worktree add /tmp/mg-era d5cb01c && go -C /tmp/mg-era build -o /tmp/mg-era-bin ./cmd/metricgate && git show d5cb01c:policy.yaml > /tmp/policy-era.yaml && (cd /tmp/dev-cockpit && git checkout -q 396cd3cd8f && /tmp/mg-era-bin check . -config /tmp/policy-era.yaml -format json | python3 -c \"import json,sys; d=json.load(sys.stdin); print(d['files'], len(d['findings']), sum(1 for f in d['findings'] if f['severity']=='error'))\")",
+    "replay_289_both_criteria": "cli? no: use /tmp/replay30/run.sh shape -- one clone per binary, sequential checkouts, per-commit JSON. Parallel shards on one clone fail with checkout_failed (index.lock).",
+    "note": "the 1.3 GB of raw per-commit JSON is not in this repository. If it is gone, only the totals in this file survive, and the 13 unreproducible rows become unfixable."
+  },
+
+  "history": {
+    "collected": "2026-10-09/10 (original report)",
+    "aggregated_and_annotated": "2026-10-18 (iter-30)",
+    "why_this_file_exists": "iter-30 found that the claim this data supports was being read off a machine-local directory. The data still existed, so the claim was re-derived rather than re-flagged as an upper bound; this summary keeps the derivation reproducible without committing 1.3 GB."
+  }
+}

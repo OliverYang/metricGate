@@ -1,0 +1,289 @@
+5065169f699bdd71e8f0d8712563b3c5948590d8 2026-05-14 Initial commit
+989950a2d1b5995ae2f25f2605b6ac5315453375 2026-06-15 Replace pipe-pane log with control stream
+9cd3bcfdcb1cfb0d2ee35b0a0ba02e3c81ea795c 2026-06-15 Push updates every 33ms
+a4cd45da1fa572dd38b8a735b1ccd3f243776721 2026-06-15 Use canvas renderer to align boxes
+ee2b5f1354d6bcd4b4c9976a9412ca074abf6fc6 2026-06-15 Intercept mouse mode
+f518da5d73b62d7e5d489d96c9e39ccec471b253 2026-06-16 Login rate limit
+44aa99dc8bf0f1657f7d109e22cc0a8ef5d95230 2026-06-17 Pass through copy commands
+f04259d9294ea245dd892d8f98ba5b81e715ea9b 2026-06-17 Add release downloads
+ca6252608d17a4bc685932127bf3017f80db27e0 2026-06-17 Add shells
+2486d6db22e8fd668762d4f58e38caf4ff87daea 2026-06-17 Add link plugin
+bf2ac9edfeb2a3de7e371e111fcc1393710d4422 2026-06-19 Line based scrolling
+c46b67d72a260b1a04c68c998d85e296a3f7947c 2026-06-19 Page control button swipes again
+2fee75c23711a72721b25848b0b7996a6abd11dc 2026-06-19 Input performance improvements
+814b7cf337c2b6edcd7e63484813771c6c369de4 2026-06-19 Disable smooth scroll on mobile
+12bde54959fb0ce90235d847a1b79dad9b8fda82 2026-06-19 Bigger threshold for direction pads
+653d12475c89cdbdd60479016745b838710d38dc 2026-06-19 Auto mouse mode for copilot
+3227359a07ba9ea24129248da4e05e2c9a904424 2026-06-19 Quick nav for sessions and shells
+c8ff35506bc499af5d5c7de968603eb1acf7d2cf 2026-06-19 Always show quick nav
+2655b1d18930ec85673dbdf3539853d8c749a91c 2026-06-20 Add code editor
+7f0e110c6fda4ae05cca508d241c33dd34e12ca2 2026-06-20 Remove size and reduce git info
+b0cc9811f959fa2425ef3201a0d27322d16c2e2a 2026-06-20 Replace esm with jsdelivr
+600490a8781b3b5e64212f2c2097326e69645130 2026-06-20 Keep editor tree state on file operations
+e18c91a856a1cf17b84fe77972579ffbedf52094 2026-06-21 Add error pages and messages
+10a6eadf29e6aa5244e211a9cd5b7de1ef47092c 2026-06-21 Document more details
+f1e3d92a3df760ff58f4f4182d001b22f84e24e2 2026-06-21 Show app version
+d3136a3a3f82cd47a5bd94651f88c4776c8cc982 2026-06-21 Focus terminal on page load
+6a648f41e69b7b71ce443f7e6c0d2b5a7f4de133 2026-06-22 Redesign page
+49fea36058293be12bb26ad9fedfedfd3ac9b82d 2026-06-22 Add self update via web
+2be49aea7637ae9b53e5f143513b98b9e8031391 2026-06-22 Persist update indicator across reloads
+41574529adb7fb3070323985dc24f5ed4a79d7c2 2026-06-22 Refresh quick nav on click
+bec6613ee59bc7528d18b581f52ca9248ed8fe08 2026-06-23 Remove terminal control buttons on desktop
+d6b72104cfd223e476eb4d354705a77a02b20a06 2026-06-23 Rework mobile terminal input
+07ea97de505308df22a09f2951caf7db554bcfb4 2026-06-23 Parse markdown for release notes
+65aad587b76b5c1b6ee08c388857c7cdfa83576f 2026-06-23 Drag and drop files into terminal
+7d8de309c99238289d8bafad066230ab7fd7d3fe 2026-06-23 Refresh session files on click
+2c29480c531914b18a0016b785b5bd9028ba4258 2026-06-24 Make project list sortable
+36404b5e319ca3c249877d2c6a644f614bc17d3b 2026-06-24 Add toast for SSE connection status
+0a1b1283e14e79fb489342714df52783c183d684 2026-06-24 Activity indicator for control buttons
+64c88a14c1f69b48de01fc705724815752fc3383 2026-06-24 Replace files with upload icon
+7557aeb08a9502050b4ba306b7b6c4d683406a8a 2026-06-25 Support .editorconfig in editor
+562457fdce6352a1fa0d7215c665efe9c1d4c326 2026-06-25 Toasts can be closed manually
+2184b9bb41b911458047776f59e13dc7bbafb996 2026-06-27 Display project name in subpages
+030d8572fe62760d1c231f2cb0249038ebb44355 2026-06-27 Restructure quick nav
+d6ad5b8fc454592da4fd8a88650a66f680ab3ef0 2026-06-28 Fix open redirect vulnerabilities
+af924923274fc75394a0f2d2763d3ab514a38d4f 2026-06-30 Use custom elements everywhere
+325cad127abdf6264907692222910bb5fcbbaf80 2026-07-03 Add e2e testsuite
+6b02e95bc2364017f2a26a0e99b4cd3a057ff784 2026-07-03 Truncate names in breadcrumbs
+eacddec6766414888600ecbc1c089935691bf301 2026-07-03 Show daily dialog on new update
+d0cc72eea9e0feb35ed68e85bc635782d8fa0929 2026-07-03 Align header with content on every page
+285db4e212ac6918949597a141adf5afb8d10e9c 2026-07-03 Bring back native-like swiping to mobile
+5d4eb05f1d0f423920a2aea7df2e4bf75bb73dd5 2026-07-06 Single server handles multiple AI coders
+fdd2e9175c6b370c84e8fcf02f155b63c1dfcdb5 2026-07-06 Ignore orphaned copilot sessions
+dc633a1a6bd8ab308abd0c32c4504d55174be060 2026-07-04 Add in-app notification center
+8b764b28b3574b24e7c7d3b6378e0cc1bf65b41b 2026-07-07 Progressively enhance HTML
+ea007bd6264238fd8a4e7d3473134493c0758bd7 2026-07-07 Remove remote control option
+7eb5b93977862933cb327ce5bb77f3c5b37ef141 2026-07-07 All actions scroll to project again
+d762df3cb7eab73c3fe100c1caead0df80ea585a 2026-07-07 Group coder config in nav
+021d7dd1266fdaa896651c040b31e51016c8d1ee 2026-07-08 Add push channels for notifications
+adb42c2753d85d10699c31aa507817d12b3c2de6 2026-07-08 Fix redirect destination for web push buttons
+9509c75b1c4b407ff6a239bacaffc2b060073db2 2026-07-09 Rework the project editor
+03b5b73b964f5f7300ab04702e766b2115679036 2026-07-09 Update README to reflect current state
+d5abfd6a6739d0dae2f76ebdd0619ec7d6501ce1 2026-07-09 Change keymap in editors
+9991a9c079ab48743f5708c500993179bd447318 2026-07-09 Document HTTPS requirement for web push
+3adea69ea5a3a11695adcdc7af68bb28ddaccce9 2026-07-10 Fix update installing a newer version than shown
+a4c3d130be1bee840b50b45864f7589447a3d994 2026-07-09 Add tabs to terminals
+fb02d9b192a5aad1b3189bafe690413da724989c 2026-07-11 Normalize trackpad scrolling
+05655630ae6ad703b330415d9c4a67420cb51623 2026-07-11 Show a terminal end as info instead of an error
+7cf2a152ec97397c9e31dc5825a6df3d2d23eb55 2026-07-12 Try to fix claude's rendering glitch
+8ec70dea5cd2a35b3626820d7b59b5a3634c8283 2026-07-12 Follow the OS light and dark mode
+b44d8dce49630789af31b5db7147562e815128ec 2026-07-13 Show a release only once its assets exist
+2076ac76b6ef07bc561e20c7f41a760f5294a625 2026-07-13 Raise the tab switcher above the attach footer
+4190772b00c59f7d8a16df0aeb594cb4dabc1750 2026-07-13 Show coder and shell status on the icon
+e3a4b3e683c0b49990943e4bb3b809bc5ffeb2de 2026-07-13 Ctrl + Tab switches tabs directly
+68a6e8a677a7848ad5f8ff846116fd2e0aa29bc2 2026-07-13 Quick nav show terminals in tab order
+444b31ec97e3a3f2bcf59d78f4ef502b4d3f535c 2026-07-15 UI updates on server changes
+bf01953d465d71dd506cc04ec3ac0c6f76c07af6 2026-07-15 Mobile improvements
+09ff496e8b3405d7e0cf3b88b242e9d73f0304e3 2026-07-15 Add fullscreen to terminal on desktop
+9e4ea2d0b0e9a3ca256b3064726c0c8a085d5ad3 2026-07-15 Add contextmenu to editor and terminal
+6135187e594dc645115a8b850d07624d8722c2c7 2026-07-15 Fix swal's light and dark switch
+9bd67af76713ab3881a9c19a4ca10ffb535fe681 2026-07-15 Add fullscreen and project switcher to the editor
+274b48f66e45ba431ce78ac5dd6f162699f8aeab 2026-07-15 Disable the agent view in claude coders
+c4992cc02e1acf7e686920e0e3b1c2f272da11ce 2026-07-16 Add terminal restore
+5d3a5997ebdd8b4719574506122b79f7f2e29023 2026-07-16 Add terminal split view
+3b6aabb236bf7f9d78e7d4b2d3a72736da2779e0 2026-07-19 Fix wordings
+bc566466535ad8c6ff0fb8543568df3806fd5f40 2026-07-20 Add more swipe options to quick nav
+7bcf33b866164e007e06d899ef4494fd936790f3 2026-07-20 Fix quick nav loading bar visibility
+6843efd37153ca3662fabc6e9d46ada3ba06c8cb 2026-07-20 Improve editor find and quick open shortcuts
+a33d9672aa1e0f87196bf5d81b814232b0847c9d 2026-07-20 Add drag reorder for editor tabs
+a43ea9df6a97d8b6997780dc358594371f4b12bd 2026-07-20 Make the terminal switcher an app wide palette
+43deb7855897fe6f482a7c36fd52e1730978f19d 2026-07-20 Show type badge on mobile split panes
+c4de806971c6a22d669f40d5c59519cd84c488df 2026-07-21 Redesign project list
+b57484947a7abe8e4792c01a4711b7d92b674390 2026-07-21 Ring notifications while the app is unfocused
+7cd78d6f9e4d35f463e4fce48a60396a48591a85 2026-07-21 Add optional separate command history per shell
+948558b300f7b4eb317b9bf5a3b45c74876c66e1 2026-07-21 Cap quick nav swipe actions to the row width
+6738636a124476cc52a741bdee99f5206a6c75bf 2026-07-21 Stop the web terminal replying to device queries
+f1d67280cecf1e45814bad4fcddfbb1bb740acc3 2026-07-21 Notify only shell commands over 2s
+deace7b1586471d24bb06786f3b44b94c333fc00 2026-07-21 Update coder icon, new chips and breadcrumbs
+e0c11e2fd7076d7c2be6c2c2db986543bc8bb510 2026-07-22 Support Shift+Enter in Coder TUIs
+55226e3c4631e85ad600288cbbfc333cf539408a 2026-07-22 Repeat split pane switch while the key is held
+18ed6dc569920904a60bea786c0aa48bd1c178ef 2026-07-22 Read the .bashrc in coder sessions
+3916c73cfd417d1d50fef229ed49196e5f3f6f6d 2026-07-23 Fix broken HTML error pages
+13370059c4778850bac82c413542694fa61f65f0 2026-07-23 Back out the backup feature shipped by accident
+3c76d596a80f86bb629c7d4038458d6bd20dc9b8 2026-07-23 Add backup export and import
+f1dab17d9704f80a0341b853958635d04a8ad022 2026-07-23 Offer to follow the Claude login link
+1333837fc918dd502b4f598b19d9b12f0f4ca462 2026-07-23 Cache the Claude session scan per transcript
+831db2140bd84d2f38fa8825ab9582dea1c46917 2026-07-25 Keep sessions whose transcript holds an image
+3dc6c7e686a35398b376994a3198763eb6889be5 2026-07-25 Add my internally used release skill
+e27043d348537cae282c7ff7b49ba932cc7d62e8 2026-07-25 Add a short docs page
+4ada6ba49a8ad6736ac70e73ad2bfb18de7a0e3c 2026-07-25 Cycle the terminal switcher with the arrows only
+ad6bb48264463a92d6e5cd4cb4cf0bb9281d6a66 2026-07-25 Add a delete coder option in the menus
+1906e04281719933c9bd263ffb58f5b5ed4971d8 2026-07-25 Keep the split title in sync with renames
+959331cb39b1f150360d14d13b8c046aef57788b 2026-07-25 Document how shell notifications work
+427a8cee8c981f81864fab3f55dc24d30d52e642 2026-07-25 Fix pasting into a terminal
+0970b1f98d30e3db67fe7b221e1fe94c84f0f898 2026-07-25 Stop the editor from jumping on a tab switch
+c3819e23087dbe4c6139ba20d2866f68b048d02e 2026-07-25 Editor improvements
+508d7d6b7347ed2dc859f7306297fd71b64951a4 2026-07-27 Add an AI assistant
+2d1d341df682f5773f9b7fa631202daad99ee0bf 2026-07-30 Fix opening of claude's login link
+07f21fc1fe5b80f5b85d0a835e87b0e9dcc2c00e 2026-07-30 Fix pasting text that starts with a dash
+55e14ab7aa4c97ac3cb0587a7f93982299e89407 2026-07-30 File upload improvements for coders
+f3e28de5953ff5b13a69d76d67861a4f5830afaf 2026-07-30 Move coder settings to the settings page
+d7f514d51824b866e06a39e6a4eff3c9bc8b84a0 2026-07-30 Remove terminal header actions on desktop
+be2a71623fce20c2b3599516358507746cfe299c 2026-08-03 Add first git capabilities to editor
+0f36fdaaab8ef7dd41c94e7f3e138b07e0dc6655 2026-08-03 Home + End jump to the edge within a textarea
+caee61a3bb80018be421883e0bafd48650d4e50c 2026-08-03 Add shortcut to add a new terminal tab
+68045325bb6f5acaaa1ff859c8ae5d4cd454d43f 2026-08-03 Fix automatic diff view
+6ec20f7fd07ad6aaa575ba481d77660187e2573d 2026-08-03 Add shortcut to close tabs
+42275c1f37a8438a955703937803bd6abe6ae177 2026-08-03 Apply jingle changes without reload
+d43fe50255932358030a62071f6dbd69496a9f1e 2026-08-03 File upload improvements for the editor
+11d905748ab8e5a879675451e5cdb8aa93122aa4 2026-08-03 Add server stats to header nav
+4d29b5407703bc6c2d5e1461f50364f4d1890dd6 2026-08-04 Improve editor file and text search
+7dd7d54681f8027ff76e582eed0947ba7e7766a0 2026-08-04 Server stats are floatable
+a7ae4b1b876ca6d15e25c247b42869ca9a7ec2fe 2026-08-04 Show changed lines in the editor gutter
+adae19feeaaba0ec596fbca33d4836c28880af4d 2026-08-04 Show the project's terminals in the editor
+4654077e5098ab2a8a3e815e5094340766a037e1 2026-08-05 Retry a failed assistant capability probe
+6e7138b0103ec9a71d1e960c580fe4878b091556 2026-08-05 Add docker integration
+e3fd4de90794ed2d737cde869fed76473ca17c9c 2026-08-06 Explain the assistant how to share its content
+7fe6b15c4e63cc419025649bad918243c958eb44 2026-08-06 Fix compose action logs
+8a8f2aa6b131fcd2adeae33c76443b30df4d41c5 2026-08-06 Make docker actions sortable
+8a2bb058de14290205ead2582c710853d0b7d51e 2026-08-06 Differentiate between added and untracked files
+83e6c4b281676cbe7799d87aefa3aa21a929df23 2026-08-06 Read real CPU on Linux, keep load on Mac
+e79ad309f1ce40afd70ba3b720b084a69fb6ad05 2026-08-06 Commit directly from the editor
+fbcb6e6aded9ef135ce78db32c41e93ddd8b26e7 2026-08-09 Add more git actions to the editor
+ca455e463f2c2556ebfef8bf28943592ee78b4f3 2026-08-09 Toasts don't close dialogs anymore
+1ee8b7267dad257dbe92fea78b6b4e774ef8b190 2026-08-09 Fix scroll position in assistant panel
+b30d4ea91b4ec2afccb2d82f40776e65f48a544a 2026-08-10 Revert files and folders from the editor
+d95c3c567891e627651513cbe58b241bb242eb04 2026-08-10 Fix flag injection in coder prompts and tasks
+5179edabfe9de126c1839810fdd9105014b2fae3 2026-08-10 Navigate editor sheets with keyboard
+6652b040473db929258317b25e7f14b9551d9c48 2026-08-10 Editor saves don't overwrite newer work
+0bb9f1a6df05e75eabfd7c4bac100eaf4a31386c 2026-08-10 Free the quick open index of a deleted project
+916e0f4585db5032445fd933fcba876f8bf97b73 2026-08-10 Truncate long file names in the editor
+0f48ce71a3aa6c236dc85ee4a14fa49591f0c948 2026-08-10 Side by side views scroll sideways together
+6e775475c82e5bd8379e4634c174aa3c61ee5b52 2026-08-11 Stack split view panes in shared columns
+878393f88fcc95a0ee771148d9eb2efb208624d8 2026-08-11 Assistant turns survive unknown coder output
+47a4f33d853a70d0592b05c3dad329833d49c599 2026-08-11 Tighten the double tap on bare modifiers
+909ca073ed7b3ebe56561a6d246cd789e5e381a3 2026-08-11 Plus menu follows the active split pane
+b42a95fbd87da85cb81ec38f45a2d82569fd560a 2026-08-11 Animate split pane and editor tab drags
+e4722cb008f1a42fac29c325c5192a857e21c488 2026-08-13 Jump to definitions and usages in the editor
+b3554413f80004abd5be1de337d5565e7992e85d 2026-08-13 Sort containers by status and show docker at work
+fc379c6ef70ca00138bb56b0a31b8286f42700d7 2026-08-13 Proxy git through the cockpit for locked ssh keys
+e7e9b801fb5ef3ef9ae0b54a25dfc7c143423418 2026-08-13 Highlight Twig and Go template files in the editor
+bc0229bb20754b4d7ff8c5b09d377cc8650a0e60 2026-08-13 Copy a file's contents from the editor menus
+0384c8d1046fbee16b8c5576c23f4387eab0360f 2026-08-14 Jump into the code outside the project
+a1244ceae354ccc23c2d6bfed294024465ffa8fb 2026-08-14 Leave the swipe out of a focused editor
+f9672a108538ccdb21e13a179326ea918e086230 2026-08-14 Navigate JS and TS in the editor
+1d886d90531cc85d390531a1a205688dec7356b2 2026-08-14 Push a branch that has no upstream yet
+6981a2805ceaf7b840d1ca2bfbf43db6e140e5fd 2026-08-14 Switch projects by name in the editor
+066e8b0075125f5b82cd2632b9680edce72dd57e 2026-08-14 Add link to show editor shortcuts
+cf61c695d756d70dfd598d3821bffe80dd96e1ff 2026-08-15 Tag commits from the git history
+a20ac056498cb0f2d67098c42fd4d925221df68e 2026-08-15 Keep a streaming assistant answer on screen
+b286fdf3a532ad716f294fb717a45bbd30a1c1bf 2026-08-16 Split an assistant answer into its blocks
+6fb967876334a3ea7bc69eea9be33f6d85320b1b 2026-08-18 Allow custom distributions
+ebfb79a0e8572042f10956b2c64ee21bd475d0af 2026-08-19 Add per file shortcuts to the editor
+524933fcd484996cb6e9cbdc78c871fa73498973 2026-08-19 Center the revealed row in the file tree
+be3b44991c3a8cfcebaf3b2ff99f7a4d68b7fed3 2026-08-19 Tokenize name filters like quick open
+f95fe7da71ca8b6838fbe8a915ccfb740fc9c741 2026-08-19 Filter the usages sheet on the phone
+6458658944f5481e2b517e91022e12ed02e4c1e5 2026-08-19 Add a regex mode to find in files
+6b318c238795f4e123b70e8f99ef2cfa361bceac 2026-08-20 Fix dead notification links of deleted projects
+c6e3dcff41d2c1a92ecd565bcf8d7b969b985e1e 2026-08-21 Run LSP containers as the cockpit user
+47a4f5ed33129724efa63cff732b06168cad8175 2026-08-22 Flash the server stats float on every press
+536be034d01132ffc0ff0c998e23eddc741e25d9 2026-08-22 Change the Go module path
+b0e74eb6d99156eac114e6cd2acd3a96e99baeac 2026-08-22 Make it importable for distributions
+373da607ab3e022cd7a7737ef1d01491539a9866 2026-08-22 Add first plugin api
+4183700da458b01524a3ae5ac8d7145e589fd910 2026-08-23 Fix quick nav links on editor pages
+a4d2a88ee0e7fcaaa590f0262e595f3e986d5358 2026-08-23 Fix the active tab in the editor's terminal panel
+b9b63ae7403a9aaa4f719ba029a506780b0bcd9a 2026-08-24 Apply project list sorting to all forms
+acdc599f06f640b3d7e4419b210f66171d3405d9 2026-08-25 Add voice capabilities for assistant
+f552105fb0d764a65acfd249b7ab94840d33707e 2026-08-25 Add OpenCode
+abb9cf5a54cc4101f66b97245650797071592f10 2026-08-27 Add line comments to the editor
+b340c387e8ca35e68cafe866c330ffd7b24df5d6 2026-08-27 Mute auto answered opencode permission requests
+acf51ab15e771eb1eec349cb6deaa2dc5018b4d0 2026-08-28 Add worktree support to the projects list
+2f3626417bc13292077ab46da7b5d00267ff1299 2026-08-28 Add a docker log formatter
+7659fe48bafb606be7de456e635b97e4302b4eb9 2026-08-28 Add a theme switcher to the header
+5b65ad3608f004adb282c7729be4fbe9fcb7798a 2026-08-28 Add CSS color boxes to the editor
+6ed4d4ff1ba5cb2ad65117a31db42af1416504f5 2026-08-29 Add loading spinner to busy coders
+6872d920685970a77a291241dcf81e1fe8e1550a 2026-08-29 Progressively enhance the create project select
+4f0d44745c738a2797f94d5a726368f9fa3229ce 2026-08-29 Stop the spinner after a local slash command
+7f7e6aad507f4019943648d784b0449d6ee4f3d0 2026-08-29 Keep umlauts in OpenCode after reboot
+c330e8315138f8fbf3c7f8ba185a3042117d1dd1 2026-08-29 Stop the editor from selecting text on gestures
+f8b69b1b279cb8cb89337f38abda0e85556e3150 2026-08-29 Center and flash the linked project row
+3edd5a9bc484782c2a57933e652ec849215262d9 2026-08-29 Show coder renames live
+163eff5d6998f787ce2079b3d26d34257e735c27 2026-08-30 Enhance search capabilities in the editor
+d67b2646c0c086ad14fd65a6a48810a9804efca0 2026-08-30 Add replace in files to the editor palette
+ead61f759c4bbba97a98fede65db8ab12aa6e505 2026-08-30 Play assistant answers at full volume
+ebcd45d51095bf3a456d8030033632efbd2ac610 2026-08-30 Fix initial theme switcher transition
+802cdb273a3ecbdfbdd3b2d16182a22245101ee9 2026-08-30 The editor follows the disk
+32046be7644f868345a1fba758aeb9cbdd66e7f1 2026-08-31 Offer git fetch during worktree creation
+de420ee4309fd3646de907717af1fe9ac6f6e2f6 2026-08-31 Count running containers as an active project
+da6ff1bf73949e5420503e1fabd1949dd585f678 2026-09-01 Keep the open burger menu inside the viewport
+a4ac695cf08408835ffd163c4eb39ca4f744a171 2026-09-02 Enhance commit view for large changesets
+381760622dd77915457948a1710bdb1b5c8f0594 2026-09-03 Add search field to all editor sheets
+06d3a88c85b4c8060b05449c915dbcf06126faee 2026-09-03 Compare two revisions in the editor
+c2098b5035efea62e7d68f35f244b23eacfe3811 2026-09-04 Make selected text readable in both themes
+14f378206e3a331251e0a9b243eeeadecff3774b 2026-09-04 Add git operations to project card
+a02bbbe3dde8dea66118546ceffc0c98bd941ba5 2026-09-04 Group worktrees in project list
+59be07a260e854e32c181a1084785dd937e44077 2026-09-05 Group worktrees in the editor's project switcher
+5ba876cef3172838587d12ca369a39dfab5e553a 2026-09-06 Group worktrees in mobile's quick nav
+07350b462c259c22ed1297d31be05ce41e1fcc6a 2026-09-06 Use modal for new projects, coders and shells
+a49953caa86f8ff271d0774897eea2fb7454fa5e 2026-09-06 Use editor's search bar style in quick nav
+62c1735d4a321f0002146db838407beec9a21697 2026-09-06 Align quick nav project view icons
+855d5621d747e6c5dc6d83417c4b8c85235f066c 2026-09-07 Keep editor layout per project
+ffcb534ea95b1b6f056a322e63a7820349310091 2026-09-08 Save changed editor files after 1s
+3ab868e2cafdf29ec9153cba2c7e7bfbfac4e197 2026-09-08 Allow empty coder names
+684b87c68fa2a9c8b2ba9a040d5038d6458a8e6a 2026-09-09 Fix folder replace and history sheet
+4766db42013f9f635eeb69419c5783b6faa78453 2026-09-09 Use link tags for some dropdown actions
+55e111dd782df46d591899bcae5e8442e56ffe95 2026-09-09 Fix broken links from previous release
+34469f24d5ee5bbc78421be7615c669051da3b7f 2026-09-11 Restructure the app
+513d828dcb0a249e9f49d977664d58544a3cf191 2026-09-14 Fix plugin positioning and scrollbars
+4c10adad87e709990be29f57269b8a95f9316cae 2026-09-14 Fix chip marks, assistant width and copy sheet
+49121a54c19a8b205aa3e2eab76455b4008d3baa 2026-09-15 Allow multiple assistant chats in parallel
+fb4f89b7d8bd9c74c6dc9c39e8c5ca333bc230a1 2026-09-17 Normalize branch names
+4866736ad22531c582c7a62b1dc13e980dd4ede5 2026-09-17 Terminal leaves horizontal wheel to browser
+648d3ef0fac5bbd887f944f4d919e1dbfd24c171 2026-09-17 Add a counter to taken coder upload names
+5ad495b60f0047f07c4a678def7aa86dbabad6f4 2026-09-17 Add padding to terminals
+c3af33594d144c4a19f81c090cd0611142405902 2026-09-17 Keep chip list unfolded after stop or delete
+57fc9555a5ec23cc1103d9350c6b12643cbe0677 2026-09-18 Add a context menu to the projects column
+7a174e92f151beb52fd1ea79ca158a85fdaec074 2026-09-18 Menus keep their arrows and follow the pointer
+2dea7484ca4697bcd362e8f5f7ef7c6cdc7c5655 2026-09-19 A check is instructed to not release its coder
+ebab0d8d0b8e931ccbc6ccc5175ee03d74903744 2026-09-19 Unblock OpenCode's assistant turns
+c8b995e4b775adb49adfe7f5598d0a9423ed88ec 2026-09-19 Add assistant triggers
+fb1fa0e64b4e21f00b00ba0cfcee2cb32327dc61 2026-09-22 Set PWD explicitly for assistant turns
+a4aaa7f9124304ac4379ce03552d1f1fa09fa970 2026-09-24 Add model choice for assistants and coders
+1a435b5787c623651ffbe8e51cc7451b0acc939c 2026-09-24 Fix assistant CLI and working mark on coder start
+10ab775eece9fc7cf6b2089554e8d2eb793eb814 2026-09-24 Highlight active editor  search filters
+c3a56b0ff2bcbed9514af91c50f00fe6423fa835 2026-09-25 Give dropdowns visible border in dark mode
+f254dddbc3f05e063342ecd3840be6afd5f7a885 2026-09-25 Fill context ring for OpenCode in assistant
+ad2b8b20eddb0b7f90c229936888b6cb78d9b4bc 2026-09-25 Make voice capabilities more prominent
+55809cdeb2e0c01e63e4425fa7d837492574fe15 2026-09-26 Improve blame gutter in the editor
+852e05e9c1c62c92d5202455fbf8c98fe6d25962 2026-09-26 Teach assistant how to run compose actions
+3ff6d9f91d0654c5f892390184147af5f24ff465 2026-09-27 Enhance copy modes in terminal
+044223c50e77886bbb0596b7931a2dd2a82c2412 2026-09-27 An assistant is now allowed to delete itself
+7a192424b21b9a6041d605399a5a75e8d8822a06 2026-09-27 Ask the user before any assistant deletes
+27008684a2984a5e85c92e4434f885ff411ad63d 2026-09-27 Skip Claude's classifier for the assistant's CLI
+8faadd84fe43ebeee6f23b0e70a830ecc191e3e8 2026-09-27 Delete several targets with one approval
+040d17492f16b980ecfba394e43e132b4c7c83bc 2026-09-27 Queue questions behind an open dialog
+87ae6870121d6e0aae14be5fef8b7ad9d0c4d7c5 2026-09-28 Make e2e green and fix the races it found
+c63386d3db9d12d5cf871161dc7cf853ca00223a 2026-09-28 Compose run page goes back where you were
+b7d9c3f9b558655dd178bd127526b8c9c6065f4d 2026-09-28 Swipe between assistants on mobile
+1bac3a2ffa36afe46b1916133c896f81eb2cd9da 2026-09-28 Improve terminal panel and layout in the editor
+4a7d6c1e27693e640fe3e65aaec6175261fbab9b 2026-09-28 Show all running terminals in the project overview
+c08022f293fe02aadc352c075470b190f24e5c29 2026-09-28 Make LSP limits configurable in settings
+fa583f4d9c53626c12e5bc8aed6f0964cd6e0054 2026-09-28 Swap the phone Settings tab for a control center
+dca2e30ee35d7b1a8976e33bd3e806f7f0aff3c0 2026-09-29 Rewrite human docs and agent instructions
+1fa4d106cb87f428968a5ee5da41fb8e011f827e 2026-09-29 Keep typing fast with large changes in the editor
+eb05581ead819f4c0d8833fad06b22d2991d6bb1 2026-09-29 Mark and center the active Cockpit tab entry
+a959dbd35ed59abbf7178da43d8fdbcebfe96c01 2026-09-29 Make the whole assistant row clickable
+441e26161b74e83889961ea9f3759ef157c00195 2026-09-29 Fix push of new worktree branches from remote
+004e3afed7c2c6895673b163bd1cc086505649a2 2026-09-29 Focus the empty editor terminal panel for Ctrl+T
+2530caee3fcdf75a374fbb27f4a25b4b71d8d19f 2026-09-29 Add each assistant to Ctrl+Ctrl menu
+7838820c96323f4e972266971a24300232dd055a 2026-09-29 Wait for reactions and notes in assistant tests
+da2d7319a5dd00fcd44e440d3293cd564a1fda72 2026-09-30 Show links of running stacks in the status line
+2626fe4f88d9b8d8287fa57adcd39323a2daedce 2026-09-30 Add Ollama launcher for Claude
+9de61b462fb82216fc4cbe70564149f40616fef3 2026-10-01 Share ranking algorithm across name searches
+c7faefa4b09abb9588245da0cbafcd76d9cdb6d9 2026-10-01 Sharpen the input line rule for steered coders
+3a83f4c9a109f178b053c4d8f81c94f175b92222 2026-10-01 Hand the Ollama context window to Claude
+46546019219a4d114a48e2db11c237b045720ec7 2026-10-01 Log port when listening on port 0
+cbfb2d089678ac44abbec54c2e633dee8bb7a315 2026-10-02 Add cost statistics
+cec786c89f4d82f77bdea08b649661975c7a9e1a 2026-10-05 Price Ollama Cloud models
+63a861dc63b3cbe1eab9e8c8adfe5db725b0ecc5 2026-10-05 Polish the cost page
+e641454292abbfc7461c38ed14f8841ecbd2d158 2026-10-05 Force an update check from the Cockpit tab
+76fd7c38cb93531416a56b8adeb5d2f5d22c8a9b 2026-10-05 Add worktree post scripts and assistant commands
+768d719bef5583d4b3e169db1ed24a9f3c34c0cb 2026-10-06 Keep the new terminal links at a fixed spot
+7f5373483daf55bbd2846a0d623947dce7565cd6 2026-10-06 Name the worktree script variables for assistants
+ad3f3db0da4d8a46008ac4ccf7aced4b7b2db752 2026-10-06 Make OSC 8 links in the terminal clickable
+9da53aed6267cd074b8a89ddb832701e12a7214a 2026-10-06 Rename coders from menus and headings
+d49a13b50242c8b8da5e5b2569ff24c917d124c7 2026-10-06 Copy OSC 52 clipboard writes to the browser
+e24c6e70ab100a582203fe7300ab4a12e4f6bed8 2026-10-08 Add tab groups to the editor
+a935e0243e7e93d3d11a8a188d12d8e4e5b1afb0 2026-10-08 Link file paths in terminals to the project editor
+ed338b2232b07326ba0c056b96fff5b8138af0e1 2026-10-08 Fix editor tests
+396cd3cd8f77b9becae31576272ffcb80f06ba02 2026-10-08 Fix empty cost bars and fold small series
