@@ -1304,20 +1304,39 @@ export const scopeAggregate = (s) => {
   const archived = s.historyMode === "archived";
   const key = archived ? "archivedRuns" : "runs";
   const fkey = archived ? "archivedFindings" : "findings";
+  const runs = unionRunsBy([d[key], ...(d.projects || []).map((p) => p[key])]);
+  const findings = [...(d[fkey] || []), ...(d.projects || []).flatMap((p) => p[fkey] || [])];
+  return { ...d, [key]: runs, [fkey]: findings };
+};
+
+/**
+ * unionRunsBy merges the store's run list with every project's, newest first,
+ * without counting one run twice.
+ *
+ * The store already returns the global runs, and each project repeats the runs
+ * that resolved into its worktree, so a plain concat would show a run once per
+ * project that claims it. Deduping is by id, and a row with no id is kept: a
+ * missing identity is not a duplicate of anything, and dropping it would hide
+ * data nobody attributed (which unassignedRunCount then has to explain).
+ */
+const unionRunsBy = (lists) => {
   const seen = new Set();
   const runs = [];
-  const findings = [];
-  for (const row of [...(d[key] || []), ...(d.projects || []).flatMap((p) => p[key] || [])]) {
-    const id = field(row, "id");
-    if (id !== undefined && id !== null && seen.has(id)) continue;
-    if (id !== undefined && id !== null) seen.add(id);
+  for (const row of lists.flat().filter(Boolean)) {
+    const id = runId(row);
+    if (id !== null) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
     runs.push(row);
   }
-  for (const row of [...(d[fkey] || []), ...(d.projects || []).flatMap((p) => p[fkey] || [])]) {
-    findings.push(row);
-  }
-  runs.sort((a, b) => String(field(b, "startedAt") || "").localeCompare(String(field(a, "startedAt") || "")));
-  return { ...d, [key]: runs, [fkey]: findings };
+  return runs.sort((a, b) => String(field(b, "startedAt") || "").localeCompare(String(field(a, "startedAt") || "")));
+};
+
+/** runId is a run's identity, or null when the payload did not carry one. */
+const runId = (row) => {
+  const id = field(row, "id");
+  return id === undefined || id === null ? null : id;
 };
 
 /** runsInScope is the runs+findings pair for the live scope and history mode. */
@@ -2229,57 +2248,104 @@ const policyPane = (s) => {
       <p class="policy-intro">发现顺序自上而下，命中的那一份生效；其余候选未被读取。保存写回同一路径，因此界面改动不可能与下一次检查不一致。</p>
       <div class="policy-layout">
         <aside class="policy-side">
-          <div>
-            <h3>发现链</h3>
-            <div class="policy-chain">
-              ${list(p.candidates || [], (c) => {
-                const inForce = p.found && c === p.name;
-                const mark = inForce ? "◉" : tried.has(c) ? "○" : "·";
-                const klass = inForce ? "in-force" : tried.has(c) ? "missed" : "";
-                const suffix = inForce ? " · 生效" : tried.has(c) ? " · 未命中" : "";
-                return html`<div class="policy-chain-step ${klass}"><span class="mark">${mark}</span><span>${c}${suffix}</span></div>`;
-              }) || html`<div class="empty">—</div>`}
-            </div>
-          </div>
-          <div>
-            <h3>分节</h3>
-            <div class="policy-sections">
-              ${list(p.sections || [], (sec) => html`<button type="button" class="policy-section-chip" data-action="policy.jump" data-line="${Number(sec.line) || 1}">${sec.key}</button>`)
-              || html`<span class="subtle">无可解析的分节</span>`}
-            </div>
-          </div>
+          ${policyChainPanel(p, tried)}
+          ${policySectionsPanel(p)}
         </aside>
-        <div class="policy-editor">
-          <div class="policy-editor-bar">
-            <span class="policy-file-label">${p.found ? p.name : "policy.yaml"}</span>
-            <span class="policy-hint" ${p.error ? "" : raw("hidden")}>${p.error}</span>
-            <span class="policy-dirty" id="policyDirty" ${draft ? "" : raw("hidden")}>有未保存的改动</span>
-            <span class="policy-editor-actions">
-              <button class="button" data-action="policy.reload">重新读取</button>
-              <button class="button primary" data-action="policy.save" ${p.found ? "" : raw("disabled")}>保存配置</button>
-            </span>
-          </div>
-          <textarea class="policy-textarea" id="policyContent" spellcheck="false" data-action="policy.edit">${s.policyDraft ?? p.content ?? ""}</textarea>
-          <p class="subtle">${p.modTime ? `磁盘版本 ${formatTime(p.modTime)}` : p.found ? "读取时间未知" : "（不存在）"}</p>
-        </div>
+        ${policyEditorPanel(s, p, draft)}
       </div>
-      <div class="policy-keys-panel panel">
-        <div class="panel-head"><div><p class="eyebrow">EFFECTIVE</p><h2>生效键与出处</h2></div><span class="subtle">${(p.keys || []).length ? `${p.keys.length} 个已显式设置的键` : "全部为内置默认值"}</span></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>键</th><th>取值来源</th></tr></thead>
-            <tbody>
-              ${(p.keys || []).length
-              ? list(p.keys || [], (k) => html`<tr><td>${k.key}</td><td>${policySourceLabel(k)}</td></tr>`)
-              : html`<tr><td colspan="2" class="table-empty">该文档没有显式设置任何键，全部沿用内置默认值。</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-        <p class="privacy-note">取值列不显示实际数值：服务端的 entry 只带 key 与来源（policyKeys → {Key, Source}），没有解析出的值；真值在左侧的磁盘版本文本框里，那一份才是会被写回的内容。</p>
-      </div>
+      ${policyKeysPanel(p)}
     </section>
   </div>`;
 };
+
+/** policyEditorPanel is the read/write half of the policy page. */
+const policyEditorPanel = (s, p, draft) => html`
+  <div class="policy-editor">
+    <div class="policy-editor-bar">
+      <span class="policy-file-label">${p.found ? p.name : "policy.yaml"}</span>
+      <span class="policy-hint" ${p.error ? "" : raw("hidden")}>${p.error}</span>
+      <span class="policy-dirty" id="policyDirty" ${draft ? "" : raw("hidden")}>有未保存的改动</span>
+      <span class="policy-editor-actions">
+        <button class="button" data-action="policy.reload">重新读取</button>
+        <button class="button primary" data-action="policy.save" ${p.found ? "" : raw("disabled")}>保存配置</button>
+      </span>
+    </div>
+    <textarea class="policy-textarea" id="policyContent" spellcheck="false" data-action="policy.edit">${s.policyDraft ?? p.content ?? ""}</textarea>
+    <p class="subtle">${policyDiskVersion(p)}</p>
+  </div>`;
+
+/**
+ * policyDiskVersion says when the text in the box was last read from disk.
+ *
+ * "unknown" and "does not exist" are different claims and the payload can tell
+ * them apart: a file that was found but carries no mtime means the server read
+ * it and could not date it, while no file at all means there is nothing to date.
+ */
+const policyDiskVersion = (p) => {
+  if (p.modTime) return `磁盘版本 ${formatTime(p.modTime)}`;
+  return p.found ? "读取时间未知" : "（不存在）";
+};
+
+/** policyKeysPanel lists which keys the document sets and where each came from. */
+const policyKeysPanel = (p) => {
+  const keys = p.keys || [];
+  return html`
+  <div class="policy-keys-panel panel">
+    <div class="panel-head"><div><p class="eyebrow">EFFECTIVE</p><h2>生效键与出处</h2></div><span class="subtle">${keys.length ? `${keys.length} 个已显式设置的键` : "全部为内置默认值"}</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>键</th><th>取值来源</th></tr></thead>
+        <tbody>
+          ${keys.length
+          ? list(keys, (k) => html`<tr><td>${k.key}</td><td>${policySourceLabel(k)}</td></tr>`)
+          : html`<tr><td colspan="2" class="table-empty">该文档没有显式设置任何键，全部沿用内置默认值。</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <p class="privacy-note">取值列不显示实际数值：服务端的 entry 只带 key 与来源（policyKeys → {Key, Source}），没有解析出的值；真值在左侧的磁盘版本文本框里，那一份才是会被写回的内容。</p>
+  </div>`;
+};
+
+/**
+ * policyChainPanel lists the candidate files in discovery order and marks the
+ * one in force.
+ *
+ * Three states, not two: "this is the file that runs", "we looked and it was
+ * not there", and "we never read it" (a later candidate, once one matched).
+ * Collapsing the last two into one mark would tell an operator they had a
+ * missing file when they had a shadowed one.
+ */
+const policyChainPanel = (p, tried) => html`
+  <div>
+    <h3>发现链</h3>
+    <div class="policy-chain">
+      ${list(p.candidates || [], (c) => {
+        const step = policyChainStep(p, c, tried);
+        return html`<div class="policy-chain-step ${step.klass}"><span class="mark">${step.mark}</span><span>${c}${step.suffix}</span></div>`;
+      }) || html`<div class="empty">—</div>`}
+    </div>
+  </div>`;
+
+/** policyChainStep decides one candidate's mark, class and suffix. */
+const policyChainStep = (p, candidate, tried) => {
+  if (p.found && candidate === p.name) {
+    return { mark: "◉", klass: "in-force", suffix: " · 生效" };
+  }
+  if (tried.has(candidate)) {
+    return { mark: "○", klass: "missed", suffix: " · 未命中" };
+  }
+  return { mark: "·", klass: "", suffix: "" };
+};
+
+/** policySectionsPanel offers the jump targets the server parsed out. */
+const policySectionsPanel = (p) => html`
+  <div>
+    <h3>分节</h3>
+    <div class="policy-sections">
+      ${list(p.sections || [], (sec) => html`<button type="button" class="policy-section-chip" data-action="policy.jump" data-line="${Number(sec.line) || 1}">${sec.key}</button>`)
+      || html`<span class="subtle">无可解析的分节</span>`}
+    </div>
+  </div>`;
 
 /** policySourceLabel keeps an inherited value visibly unlike a written one. */
 const policySourceLabel = (entry) => {

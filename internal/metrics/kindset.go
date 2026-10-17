@@ -58,14 +58,18 @@ var (
 	// tsFuncKinds serves both the .ts and .tsx grammars: TSX is TypeScript
 	// with JSX elements added, and the constructs a class declares are the
 	// same. The two grammars only differ where a JSX node can appear.
-	tsFuncKinds   = NewKindSet(parser.TsTypescript, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration", "abstract_class_declaration")
-	tsxFuncKinds  = NewKindSet(parser.TsTsx, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration", "abstract_class_declaration")
-	jsFuncKinds   = NewKindSet(parser.TsJavascript, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration")
-	pyFuncKinds   = NewKindSet(parser.TsPython, "function_definition", "class_definition")
-	cFuncKinds    = NewKindSet(parser.TsC, "function_definition")
-	cppFuncKinds  = NewKindSet(parser.TsCpp, "function_definition")
-	csFuncKinds   = NewKindSet(parser.TsCSharp, "method_declaration", "constructor_declaration", "destructor_declaration", "operator_declaration", "local_function_statement")
-	rustFuncKinds = NewKindSet(parser.TsRust, "function_item")
+	tsFuncKinds  = NewKindSet(parser.TsTypescript, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration", "abstract_class_declaration")
+	tsxFuncKinds = NewKindSet(parser.TsTsx, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration", "abstract_class_declaration")
+	jsFuncKinds  = NewKindSet(parser.TsJavascript, "function_declaration", "generator_function_declaration", "method_definition", "class_declaration")
+	// jsNamedFuncUnit is shared by all three grammars: the shape it recognises
+	// is the same in JS, TS and TSX, and the TS-only type annotations do not
+	// change which node is a module-level binding.
+	jsNamedFuncUnit = isJSModuleFunc
+	pyFuncKinds     = NewKindSet(parser.TsPython, "function_definition", "class_definition")
+	cFuncKinds      = NewKindSet(parser.TsC, "function_definition")
+	cppFuncKinds    = NewKindSet(parser.TsCpp, "function_definition")
+	csFuncKinds     = NewKindSet(parser.TsCSharp, "method_declaration", "constructor_declaration", "destructor_declaration", "operator_declaration", "local_function_statement")
+	rustFuncKinds   = NewKindSet(parser.TsRust, "function_item")
 	// sqlFuncKinds names the two declarative units SQL actually has. A table
 	// or a view is not a unit of behaviour, and the grammar's
 	// `function_declaration` is a PL/SQL local assignment, not a function.
@@ -83,6 +87,14 @@ var (
 // LangProfile holds the node kinds a language measures functions on.
 type LangProfile struct {
 	FuncKinds *NodeKindSet
+	// NamedFuncUnit covers the function units a grammar does not spell as a
+	// declaration. JS and TS bind a module's function to a name with
+	// `const f = (x) => {…}`, which is a variable_declarator holding a
+	// function expression: no kind set can see it, because the same kind
+	// (`arrow_function`) is also an inline closure that must stay folded into
+	// its enclosing unit. nil means "the kind set is the whole answer", which
+	// is true for every other language.
+	NamedFuncUnit func(n *sitter.Node) bool
 }
 
 // HasFunc reports whether n opens a function-like unit in this language. A nil
@@ -91,7 +103,10 @@ func (p *LangProfile) HasFunc(n *sitter.Node) bool {
 	if p == nil {
 		return false
 	}
-	return p.FuncKinds.Has(n)
+	if p.FuncKinds.Has(n) {
+		return true
+	}
+	return p.NamedFuncUnit != nil && p.NamedFuncUnit(n)
 }
 
 // langProfiles is the per-language function-kind table, the single source of
@@ -101,9 +116,9 @@ func (p *LangProfile) HasFunc(n *sitter.Node) bool {
 var langProfiles = map[parser.LanguageID]*LangProfile{
 	parser.LangGo:      {FuncKinds: goFuncKinds},
 	parser.LangJava:    {FuncKinds: javaFuncKinds},
-	parser.LangTS:      {FuncKinds: tsFuncKinds},
-	parser.LangTSX:     {FuncKinds: tsxFuncKinds},
-	parser.LangJS:      {FuncKinds: jsFuncKinds},
+	parser.LangTS:      {FuncKinds: tsFuncKinds, NamedFuncUnit: jsNamedFuncUnit},
+	parser.LangTSX:     {FuncKinds: tsxFuncKinds, NamedFuncUnit: jsNamedFuncUnit},
+	parser.LangJS:      {FuncKinds: jsFuncKinds, NamedFuncUnit: jsNamedFuncUnit},
 	parser.LangPy:      {FuncKinds: pyFuncKinds},
 	parser.LangC:       {FuncKinds: cFuncKinds},
 	parser.LangCpp:     {FuncKinds: cppFuncKinds},

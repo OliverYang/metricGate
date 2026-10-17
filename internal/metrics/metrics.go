@@ -248,6 +248,12 @@ func measureFunc(lang parser.LanguageID, src []byte, fn *sitter.Node) FuncStats 
 	if params := paramsNode(lang, fn); params != nil {
 		st.Params = countParams(lang, params)
 		st.BoolParams = countBoolParams(lang, src, params)
+	} else if jsSingleParamNode(fn) != nil {
+		// `x => x + 1` holds its one parameter in the `parameter` field as a
+		// bare pattern with no list node to count. It cannot carry a type
+		// annotation — TypeScript requires the parentheses for that — so the
+		// boolean count is zero by construction, not by omission.
+		st.Params = 1
 	}
 	fillBodyMetrics(&st, lang, src, fn)
 	return st
@@ -404,6 +410,11 @@ func measureName(lang parser.LanguageID, src []byte, fn *sitter.Node) string {
 // "this language has no such fallback", and the caller keeps looking.
 func langDeclName(lang parser.LanguageID, src []byte, fn *sitter.Node) string {
 	switch lang {
+	case parser.LangJS, parser.LangTS, parser.LangTSX:
+		// `const f = () => {…}` keeps its name on the declarator, and only for
+		// the module-level spelling: an inline closure is anonymous because it
+		// is not a unit of its own (isJSModuleFunc).
+		return jsDeclName(src, fn)
 	case parser.LangSQL:
 		return sqlDeclName(src, fn)
 	case parser.LangVerilog:

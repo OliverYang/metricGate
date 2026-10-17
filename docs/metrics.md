@@ -249,14 +249,35 @@ statement about the grammar, not a missing feature to be filed.
 - DIT outside the file under-counts (1 instead of the true depth), never
   over-counts.
 
-### Language notes: TypeScript / TSX
+### Language notes: JavaScript / TypeScript / TSX
 
 - function units are `function_declaration`, `generator_function_declaration`,
-  `method_definition` and the class/interface declarations themselves; **arrow
-  functions are not measured as separate units** (they are folded into the
-  enclosing scope, like Go func literals), so `const C = () => {…}` contributes
-  no function-level snapshot — only file-length and the class-level CK family
-  see it
-- TSX is the same census as TypeScript: JSX elements appear inside method
+  `method_definition` and the class/interface declarations themselves, **plus a
+  module-level binding of a function expression**: `export const handler =
+  (x) => {…}` is a unit named `handler`, and so are the `function (x) {…}` and
+  `async (x) => {…}` spellings of the same shape.
+- The binding rule is structural, not kind-based, because one kind serves two
+  purposes. `arr.map((y) => y * 2)` is an inline closure and must stay folded
+  into its enclosing unit — the same rule Go's `func_literal` and Java's
+  `lambda_expression` follow, and it is why a kind set alone cannot express
+  this. A node is a unit only when a `const`/`let`/`var` at the top of the
+  module (bare, or inside `export_statement`) binds it.
+- `export default () => {…}` is **not** a unit: it has no name, and inventing
+  one would put a fake identifier into every snapshot of a file that has none.
+- A local binding inside a function (`function f() { const g = () => 1; }`) is
+  a local and belongs to `f`, exactly like an inline closure.
+- The name comes from the declarator's `name` field, since the grammar keeps it
+  there and not on the function node.
+- `x => x + 1` holds its single parameter in the `parameter` field as a bare
+  pattern with no list node; it counts as one parameter and can never carry a
+  boolean type annotation, because TypeScript requires parentheses to annotate.
+- TSX is the same census as TypeScript: JSX elements appear inside function
   bodies and are walked as ordinary subtrees, so they add fan-out (the `.map`
-  call) but no decision points
+  call) but no decision points.
+- **History**: until iter-29 the module-level arrow spelling was not measured at
+  all, and this file recorded that as a design note. The note was wrong about
+  its own consequence — a file written entirely in that shape reported zero
+  functions, zero complexity and passed every function-level threshold by being
+  invisible. Fixing it exposed 27 previously unmeasured functions in this
+  repository's own `internal/cockpit/web/app.js`, three of which were real
+  threshold breaches.

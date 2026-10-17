@@ -300,7 +300,7 @@ CI 流程控制（3 个 workflow + composite action）、
 | — | 让步系统问责化：inline directive 加 owner/reason/expiry + 过期告警 | ⬜ 遗留，见迭代 12 日志「遗留」节 |
 | — | ~~MCP `check_path -diff_only` 改用 value-delta 棘轮（与 CLI 对齐）~~ | ✅ 已完成（迭代 20）→ [docs/iterations/iter-20-mcp-cli-ratchet-parity.md](iterations/iter-20-mcp-cli-ratchet-parity.md)：基线取数抽到 `internal/baseline`，两入口同走 `baseline.Split`；同一脏树实测 MCP 由 3 条收到 1 条（与 CLI 全等） |
 | ~~—~~ | ~~TSX / JSX 支持~~ | ✅ 已完成（迭代 13）→ [docs/iterations/iter-13-tsx.md](iterations/iter-13-tsx.md) |
-| — | TS/TSX 箭头函数不计入函数级度量（`const C = () => {}` 无 cyclomatic/cognitive 快照） | ⬜ 遗留，见迭代 13 日志「遗留」节 |
+| ~~—~~ | ~~TS/TSX 箭头函数不计入函数级度量（`const C = () => {}` 无 cyclomatic/cognitive 快照）~~ | ✅ 已完成（迭代 29）→ [docs/iterations/iter-29-midterm-backlog-audit.md](iterations/iter-29-midterm-backlog-audit.md) §2.4：改为「模块级绑定的函数表达式算一个单元」的结构判据（不是「凡箭头函数都算」，否则 `a.map(f)` 会被双算）。本仓库自食其果：`app.js` 里 27 个此前不可见的函数被量到，其中 3 个真的越了 error 阈值，已重构收敛 |
 | ~~—~~ | ~~策略指纹落库（`runs.policy_digest`）~~ | ✅ 已完成（迭代 14）→ [docs/iterations/iter-14-policy-fingerprint.md](iterations/iter-14-policy-fingerprint.md) |
 | ~~—~~ | ~~组织策略 `extends:` 单继承~~ | ✅ 已完成（迭代 15）→ [docs/iterations/iter-15-extends-and-trace.md](iterations/iter-15-extends-and-trace.md) |
 | ~~—~~ | ~~`trace_id` 贯通 runs/findings/snapshots + calllog + bundle + `runId` 输出~~ | ✅ 已完成（迭代 15）→ 同上 |
