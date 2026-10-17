@@ -253,6 +253,117 @@ func TestGoTestNoAssert(t *testing.T) {
 	}
 }
 
+// A project's own helper is an assertion when it is handed the *testing.T:
+// that is the capability to fail the test, and it is how most real Go suites
+// assert. Without this the rule flags a quarter of a working test file
+// (this repository's own suite was 8-for-8 false positives), and a rule that
+// cries wolf trains people to ignore the ones that are real.
+const goHelperAssertSrc = `package t
+
+import "testing"
+
+func wantEqual(t *testing.T, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Errorf("got %d, want %d", got, want)
+	}
+}
+
+func TestUsesHelper(t *testing.T) {
+	wantEqual(t, 1, 1)
+}
+
+func TestUsesHelperOnSubtest(t *testing.T) {
+	t.Run("inner", func(t *testing.T) {
+		wantEqual(t, 2, 2)
+	})
+}
+
+func TestHelperWithoutT(t *testing.T) {
+	// describe(1) cannot fail the test: it never received the means to.
+	describe(1)
+}
+
+func describe(x int) int { return x }
+
+func TestOnlyLogs(t *testing.T) {
+	t.Log("nothing checked")
+}
+
+func TestParallelOnly(t *testing.T) {
+	t.Parallel()
+}
+`
+
+func TestGoTestNoAssertHelperCapability(t *testing.T) {
+	fs := findingsByRule(runRules(t, parser.LangGo, goHelperAssertSrc), "test-no-assert")
+	var names []string
+	for _, f := range fs {
+		names = append(names, f.Message)
+	}
+	// Two flagged: TestHelperWithoutT and TestOnlyLogs and TestParallelOnly.
+	if len(fs) != 3 {
+		t.Fatalf("findings = %d, want 3 (%v)", len(fs), names)
+	}
+	for _, want := range []string{"TestHelperWithoutT", "TestOnlyLogs", "TestParallelOnly"} {
+		found := false
+		for _, m := range names {
+			if contains(m, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s should be flagged; got %v", want, names)
+		}
+	}
+	for _, ok := range []string{"TestUsesHelper", "TestUsesHelperOnSubtest"} {
+		for _, m := range names {
+			if contains(m, ok) {
+				t.Errorf("%s must not be flagged (it hands *testing.T to a helper); got %v", ok, names)
+			}
+		}
+	}
+}
+
+// A *testing.B is the same capability in a benchmark, and a differently named
+// parameter is still the test's own value: matching the type, not the letter
+// "t", is what keeps tb/tx/worker-style suites from being false positives.
+func TestGoTestNoAssertNamesAnyTParam(t *testing.T) {
+	src := `package t
+
+import "testing"
+
+func check(tb *testing.B, ok bool) { tb.Helper(); if !ok { tb.Error("bad") } }
+
+func BenchmarkViaHelper(b *testing.B) {
+	check(b, true)
+}
+
+func TestRenamedParam(t *testing.T) {
+	check(t, true)
+}
+
+func TestPassesAnAlias(t *testing.T) {
+	tt := t
+	check(tt, true)
+}
+`
+	fs := findingsByRule(runRules(t, parser.LangGo, src), "test-no-assert")
+	// One flagged: the alias. The rule matches the *testing.T parameter by
+	// name, so a *testing.B benchmark and a differently named parameter both
+	// work, and an aliased handle does not — chasing aliases would mean data
+	// flow, which this rule has deliberately never done. The alias case is the
+	// documented floor of the rule's precision, recorded here so a future
+	// relaxation has something to compare against.
+	if len(fs) != 1 {
+		t.Fatalf("findings = %d, want 1 (%+v)", len(fs), fs)
+	}
+	if !contains(fs[0].Message, "TestPassesAnAlias") {
+		t.Errorf("message %q should name the test that passes an alias", fs[0].Message)
+	}
+}
+
 // Java-lambda bodies, Go closures and multi-line chains must not break the
 // queries; a quick smoke over both languages.
 func TestChainRuleSmoke(t *testing.T) {

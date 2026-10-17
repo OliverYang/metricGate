@@ -9,12 +9,13 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-// goTestNoAssert flags test functions that never call an assertion — the
-// Go twin of javaTestNoAssert (testsmells.org, FSE'20 UT test smell): the
-// test exercises code but verifies nothing, so it cannot fail. Detection
-// is existence-based over the whole function subtree, so assertions inside
-// t.Run subtest closures count. panic() counts as a deliberate failure
-// assertion; go vet enforces the Test*/Benchmark* signature.
+// goTestNoAssert flags test functions that cannot fail — the Go twin of
+// javaTestNoAssert (testsmells.org, FSE'20 UT test smell): the test exercises
+// code but verifies nothing, so a regression walks straight through it.
+// Detection is existence-based over the whole function subtree, so assertions
+// inside t.Run subtest closures count. panic() counts as a deliberate failure
+// assertion, and so does handing the test's *testing.T to a helper; go vet
+// enforces the Test*/Benchmark* signature.
 func goTestNoAssert() *Rule {
 	return &Rule{
 		ID:              "test-no-assert",
@@ -40,7 +41,7 @@ func goTestNoAssert() *Rule {
 				return nil
 			}
 			blk := ctx.Captures["body"]
-			if goBlockHasAssertion(ctx, blk) {
+			if goBlockHasAssertion(ctx, blk, testingTParam(params)) {
 				return nil
 			}
 			return &model.Finding{
@@ -52,11 +53,27 @@ func goTestNoAssert() *Rule {
 	}
 }
 
-// goBlockHasAssertion reports whether the block calls anything that looks
-// like an assertion; the vocabulary lives in isAssertionCallee. AST-only
-// and naming-based by design (deterministic, no type info). t.Parallel and
-// t.Log do NOT count.
-func goBlockHasAssertion(ctx *MatchCtx, blk *sitter.Node) bool {
+// goBlockHasAssertion reports whether the block contains anything that can
+// fail the test. Two ways qualify, and both are naming-based on purpose
+// (deterministic, no type info):
+//
+//  1. a call whose own name is in the assertion vocabulary — isAssertionCallee;
+//  2. a call that receives the test's *testing.T value as an argument, which is
+//     how a project's own helper gets the power to fail the test.
+//
+// The second tier is what makes the rule usable on a real codebase: a test that
+// reads `wantVis(t, sym, "package")` does assert, and a rule that says
+// otherwise is not finding a smell but teaching people to distrust the finding.
+// The repo's own test suite was 8-for-8 false positives before this existed.
+//
+// It is a *capability* test, not a proof: a helper that takes *testing.T and
+// only calls t.Log will hide the smell. That is the same trust the rule already
+// places in `require(t, cond)`, and it is the direction the rule should err in,
+// because the cost of a false positive here is a warning nobody reads.
+//
+// t.Parallel, t.Log and t.Run do NOT count on their own: they are receivers,
+// and a receiver is never an argument to itself.
+func goBlockHasAssertion(ctx *MatchCtx, blk *sitter.Node, testName string) bool {
 	found := false
 	walkNodes(blk, func(n *sitter.Node) {
 		if found || n.Kind() != "call_expression" {
@@ -64,9 +81,48 @@ func goBlockHasAssertion(ctx *MatchCtx, blk *sitter.Node) bool {
 		}
 		if fn := n.ChildByFieldName("function"); fn != nil && isAssertionCallee(ctx, fn) {
 			found = true
+			return
+		}
+		if args := n.ChildByFieldName("arguments"); args != nil && passesValue(ctx, args, testName) {
+			found = true
 		}
 	})
 	return found
+}
+
+// passesValue reports whether an argument list holds the bare identifier name.
+// It matches the argument itself, not an expression that mentions it, so
+// `run(t)` counts and `run(1)` does not.
+func passesValue(ctx *MatchCtx, args *sitter.Node, name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		arg := args.NamedChild(i)
+		if arg.Kind() == "identifier" && ctx.Text(arg) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// testingTParam is the name a test function's *testing.T parameter goes by,
+// which is almost always t and sometimes tb or tx. Returning "" means the
+// signature has no such parameter, so no call can pass it.
+func testingTParam(params string) string {
+	for _, field := range strings.Split(strings.Trim(params, "()"), ",") {
+		field = strings.TrimSpace(field)
+		if !strings.HasSuffix(field, "*testing.T") && !strings.HasSuffix(field, "*testing.B") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(field, "*testing.T"), "*testing.B"))
+		// A variadic or unnamed parameter has no identifier to match against.
+		if name == "" || strings.HasPrefix(name, "...") {
+			return ""
+		}
+		return name
+	}
+	return ""
 }
 
 // isAssertionCallee matches the Go assertion vocabulary against a call's

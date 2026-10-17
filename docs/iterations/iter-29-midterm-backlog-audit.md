@@ -47,7 +47,7 @@
 **判据**：`gh run list --workflow=triage.yml` 里出现 `event=push` 的 run，
 且该 run 建出的 issue 带 `metricgate` / `agent` label。
 
-### §1.2 P3 · `test-no-assert` 的 8 条误报
+### §1.2 P3 · `test-no-assert` 的 8 条误报 —— ✅ 已修（迭代 29 之后，见 §5）
 
 **现状**：`internal/rules/go_test_no_assert.go:75` 的 `isAssertionCallee` 白名单只认
 `assert` / `require` / `must` 前缀、`Error` / `Fatal` / `Fail` / `panic`。
@@ -228,3 +228,49 @@ Node 的代码几乎全部用这种写法，所以**这个适配器对现代 TS 
 
 本轮实测把三类分开了，并且找到了其中唯一一条会让产品数字直接错的缺陷
 （TS 箭头函数）。
+
+---
+
+## §5 P3 的实际修法（修完之后补记）
+
+原计划列了两个候选判据（跨函数分析 helper 内部是否调用 `testing.T` 的方法；
+或引入显式配置 `assertion_helpers: [...]`）。**两个都没用**，因为都存在更简单
+且更准的结构事实可用：
+
+> 一个 helper 能失败这个测试，当且仅当它拿到了失败这个测试的手段 ——
+> 也就是 `*testing.T`。所以判据是**调用是否把测试自己的 `*testing.T` 值
+> 当参数传出去**，而不是 helper 叫什么、内部写了什么。
+
+`goBlockHasAssertion` 因此接受第二个参数（从签名里解析出的 T 参数名），
+两档判据：① 调用名在断言词表里（原有逻辑）；② 调用的实参里有那个裸标识符。
+
+**为什么这个判据比两个候选都好**：
+- 不需要跨函数分析，所以不引入「helper 在另一个文件」的失效
+- 不需要用户配置，所以不会有「配置漂移」
+- `*testing.B` 与改名参数（`tb`/`tx`）天然覆盖，因为匹配的是**类型解析出的名字**
+  而不是字面量 `t`
+
+**精度下界（写进测试，不是写进注释）**：`tt := t; check(tt, true)` 仍被 flag。
+追别名要做数据流，这条规则从来不做，所以这是**已知且被记录的下界**，
+而不是待修缺陷 —— `TestGoTestNoAssertNamesAnyTParam` 把它钉住了。
+
+**实测（同一份真实 Go 语料，5 个开源包 / 110 个 `_test.go`）**：
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| `test-no-assert` 命中 | 55 | 19 |
+| 其中 Benchmark | 41 | 14 |
+| 其中 Test | 14 | 5 |
+
+剩下的 19 条**逐条抽查全部为真**：`TestTerminal` 只有 `t.Log`（注释写着
+"test for non-panic"）、`TestSetTools` 只调两次 `bu.SetTools("")`
+（注释 "Test that multiple calls work"）。**误报清零，真报未减。**
+
+本仓库自身：8 条 → **0 条**，全树 422 → 428 warnings（R1 新暴露的 JS 函数
+贡献了增量），gate 仍 PASSED。
+
+**一个必须记录的副作用**：`docs/evaluations/evaluation-commit-replay-results.md`
+用旧版规则在 dev-cockpit 上得到「test-no-assert 215/289 commit 触发」，
+并据此在 `docs/claims.md` #19 上调了证据。**那个数字现在偏高且无法在本机重算**
+（语料仓库不在本地）。新判据会滤掉其中"传 `*testing.T` 给 helper"的部分。
+`claims.md` #19 的该项证据需要重新标定 —— 已记入 `iter-29` 之后的待办。
