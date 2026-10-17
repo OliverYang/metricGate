@@ -538,6 +538,31 @@ go vet ./...
 gofmt -l .
 ```
 
+### Cockpit (local dashboard)
+
+```bash
+scripts/cockpit-run.sh            # build, then serve http://127.0.0.1:8787/
+scripts/cockpit-run.sh 8899       # same, on another port
+scripts/cockpit-run.sh 8899 -db /tmp/x/history.db -log /tmp/x/calls.jsonl
+```
+
+The build is unconditional because the frontend is `go:embed`-ed
+(`internal/cockpit/dashboard.go:31-34`): editing `web/style.css` and restarting
+without a rebuild serves the previous CSS from a process that looks healthy. The
+server prints its own build stamp on the first line (`+dirty` when the tree is
+modified), so "which build is this?" never needs guessing. The script also
+refuses to start when the port is already held, and creates the `-db` / `-log`
+parent directories — a lazily-opened database does not fail on a missing
+directory, it silently records nothing.
+
+Serving only accepts loopback addresses; the port is the first argument rather
+than `-addr` so the URL that gets printed is the one that gets bound.
+
+```bash
+bash scripts/cockpit-observe.sh quick   # ~10s: node render + web contract tests
+bash scripts/cockpit-observe.sh fast    # ~60s: adds go build/test + full gate
+```
+
 The cross-file symbol index is also a CLI verb — "does this helper already
 exist?" answered deterministically:
 
