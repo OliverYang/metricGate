@@ -960,8 +960,13 @@ export const phaseBar = (key, counts) => {
  * trendColumn is one bar of the run-to-run severity chart. The stack is
  * proportional inside itself so the error share of a small run is still
  * readable next to a big one.
+ *
+ * `clock` swaps the axis label from the date to the time of day. A day's worth
+ * of runs all carry the same "10-17", so the axis said the same thing twenty
+ * times and the one thing it could have said — when in that day — was the one it
+ * left out. The caller decides, because only it knows the span of the series.
  */
-export const trendColumn = (point, max) => {
+export const trendColumn = (point, max, clock) => {
   const errors = Number(field(point, "errors")) || 0;
   const warnings = Number(field(point, "warnings")) || 0;
   const infos = Number(field(point, "infos")) || 0;
@@ -974,8 +979,19 @@ export const trendColumn = (point, max) => {
         <i class="bar-warning" style="height:${total ? (warnings / total) * 100 : 0}%"></i>
         <i class="bar-info" style="height:${total ? (infos / total) * 100 : 0}%"></i>
       </div>
-      <small>${String(when).slice(5, 10)}</small>
+      <small>${clock ? String(when).slice(11, 16) : String(when).slice(5, 10)}</small>
     </div>`;
+};
+
+/**
+ * sameDaySeries is true when every point falls on one calendar day, which is
+ * the case that makes a date axis say nothing. Empty and single-point series
+ * count as not-same-day: one label is never ambiguous.
+ */
+export const sameDaySeries = (points) => {
+  if (!points || points.length < 2) return false;
+  const day = (p) => String(field(p, "startedAt") || "").slice(0, 10);
+  return points.every((p) => day(p) === day(points[0]));
 };
 
 /** callRow is one row of the local call trace. */
@@ -993,25 +1009,46 @@ export const callRow = (call) => {
     </tr>`;
 };
 
-/** runRow is one stored run, selectable for archive/restore. */
+/**
+ * runRow is one stored run, selectable for archive/restore.
+ *
+ * A table row rather than a card, for the same reason the findings became a
+ * table: the operator compares runs down a column (which run took longer, which
+ * one carried errors) and a card stack makes that comparison a scrolling task.
+ * The status glyph stays its own column because it is the first thing scanned.
+ */
 export const runRow = (run, findings, archived) => {
   const id = field(run, "id");
   const errorCount = Number(field(run, "errorCount")) || 0;
   const warningCount = Number(field(run, "warningCount")) || Number(field(run, "warnings")) || 0;
   const count = findings.filter((entry) => Number(field(entry, "runId")) === Number(id)).length;
   return html`
-    <article class="run-row">
-      <label class="run-select"><input type="checkbox" data-action="run.select" data-run="${id}" ${state.runSelection.has(String(id)) ? raw("checked") : ""} aria-label="选择运行 #${id}"></label>
-      <div class="run-status ${errorCount ? "has-errors" : "is-clean"}">${errorCount ? "!" : "✓"}</div>
-      <div class="run-main">
-        <div class="run-title"><strong>运行 #${id}</strong>${badge(errorCount ? "发现问题" : "通过")}
-          <span class="run-commit">${field(run, "gitCommit") || "本地工作区"}</span>${archived ? html`<span class="badge flagged">已归档</span>` : ""}</div>
-        <div class="run-meta">${formatTime(field(run, "startedAt"))}<span>·</span>${field(run, "files") || 0} 个文件<span>·</span>${field(run, "durationMs") || 0} ms</div>
-      </div>
-      <div class="run-counts"><span class="error-text">${errorCount} errors</span><span class="warning-text">${warningCount} warnings</span><span>${count} 条发现</span></div>
-      <button class="text-button" data-action="run.findings" data-run="${id}">查看发现 ↗</button>
-    </article>`;
+    <tr class="run-row${errorCount ? " has-errors" : " is-clean"}">
+      <td class="col-pick"><input type="checkbox" class="run-select" data-action="run.select" data-run="${id}" ${state.runSelection.has(String(id)) ? raw("checked") : ""} aria-label="选择运行 #${id}"></td>
+      <td class="col-status"><span class="run-status">${errorCount ? "!" : "✓"}</span></td>
+      <td class="col-run"><span class="run-id">#${id}</span>${archived ? html`<span class="badge flagged">已归档</span>` : ""}</td>
+      <td class="col-verdict">${badge(errorCount ? "发现问题" : "通过")}</td>
+      <td class="col-commit"><code class="run-commit">${field(run, "gitCommit") || "本地工作区"}</code></td>
+      <td class="col-when">${formatTime(field(run, "startedAt"))}</td>
+      <td class="col-size">${field(run, "files") || 0} 个文件<span class="muted"> · </span>${field(run, "durationMs") || 0} ms</td>
+      <td class="col-counts"><span class="error-text">${errorCount}</span><span class="muted"> errors · </span><span class="warning-text">${warningCount}</span><span class="muted"> warnings · ${count} 条发现</span></td>
+      <td class="col-act"><button class="text-button" data-action="run.findings" data-run="${id}">查看发现 ↗</button></td>
+    </tr>`;
 };
+
+/** runTable is the run history as one table, so the columns line up. */
+export const runTable = (rows, findings) => html`
+  <div class="table-wrap">
+    <table class="runs-table">
+      <thead><tr>
+        <th class="col-pick"></th><th class="col-status">结果</th><th class="col-run">运行</th>
+        <th class="col-verdict">结论</th><th class="col-commit">提交</th><th class="col-when">开始时间</th>
+        <th class="col-size">规模</th><th class="col-counts">计数</th><th class="col-act"></th>
+      </tr></thead>
+      <tbody>${rows.length ? list(rows, (run) => runRow(run, findings, Boolean(field(run, "archived"))))
+        : html`<tr><td class="table-empty" colspan="9">没有运行记录</td></tr>`}</tbody>
+    </table>
+  </div>`;
 
 /**
  * metricStep flags a row whose threshold moved since the previous run.
@@ -1773,7 +1810,40 @@ export const breadcrumbs = (s) => {
     ${s.scope !== null ? html`<span>›</span><strong>${scopeLabel(s)}</strong>` : ""}`;
 };
 
-/** metricCards are the four headline numbers of a workspace. */
+/**
+ * ratingCard is the one page-level rating the payload can actually justify.
+ *
+ * SonarQube's landing puts three letters at the top — Reliability, Security,
+ * Maintainability — and this payload has exactly one: MeasuresView.grade
+ * (internal/cockpit/gate_api.go:455, worstGrade). Three tiles would mean
+ * inventing two of them, and an invented grade is the one number on this page
+ * that would be believed without evidence.
+ *
+ * So it renders one letter, large, and says in the caption what it is the worst
+ * of — which is the fact worstGrade actually encodes.
+ */
+export const ratingCard = (s) => {
+  const measures = s.measures || {};
+  const grade = measures.grade;
+  const counted = (measures.measures || []).length;
+  if (!grade) {
+    return html`<section class="panel rating-card is-empty">
+      <p class="eyebrow">OVERALL RATING</p>
+      <p class="rating-letter rating-none">?</p>
+      <p class="rating-caption">没有度量快照，无法评级</p>
+    </section>`;
+  }
+  return html`<section class="panel rating-card">
+    <p class="eyebrow">OVERALL RATING</p>
+    <p class="rating-letter rating-${grade}">${grade}</p>
+    <p class="rating-caption">${counted} 项度量里最差的一项</p>
+    ${measures.runId ? html`<p class="rating-run">运行 #${measures.runId}</p>` : ""}
+  </section>`;
+};
+
+/**
+ * metricCards are the four headline numbers of a workspace.
+ */
 export const metricCards = (s) => {
   const summary = summarizeCalls(callsInScope(s));
   const project = projectOf(s);
@@ -1959,7 +2029,7 @@ VIEWS.runs = {
           <button class="button primary" data-action="runs.restore" ${s.historyMode === "archived" && s.runSelection.size ? "" : raw("disabled")}>恢复所选</button>
         </div>
         <div class="runs-list" id="runsList">
-          ${runs.length ? list(runs, (run) => runRow(run, findings, Boolean(field(run, "archived"))))
+          ${runs.length ? runTable(runs, findings)
           : s.error ? loadError(s)
           : s.loading ? loadPending(s)
           : html`<div class="empty-state run-empty"><span class="empty-icon">◷</span><strong>还没有运行记录</strong><small>运行 metricgate check 后，每次检查都会落到这里，带项目的按项目分开。</small></div>`}
@@ -2013,8 +2083,9 @@ const workspaceOverview = (s) => {
       <section class="panel">
         <div class="panel-head"><div><p class="eyebrow">SEVERITY TREND</p><h2>运行趋势</h2></div><span class="subtle">${field(series, "runs") || 0} 次运行</span></div>
         ${points.length
-        ? html`<div class="trend-chart">${list(points, (p) => trendColumn(p, max))}</div>
-            <div class="legend"><span><i class="dot error"></i>error</span><span><i class="dot warning"></i>warning</span><span><i class="dot info"></i>info</span></div>`
+        ? html`<p class="chart-caption">每根柱一次运行，单位是 finding 条数（error / warning / info 堆叠）；纵轴峰值 <strong>${max}</strong>，横轴是${sameDaySeries(points) ? "运行时刻" : "运行日期"}。</p>
+            <div class="trend-chart">${list(points, (p) => trendColumn(p, max, sameDaySeries(points)))}</div>
+            <div class="legend"><span><i class="dot error"></i>error</span><span><i class="dot warning"></i>warning</span><span><i class="dot info"></i>info</span><span class="legend-scale">峰值 ${max}</span></div>`
         : html`<div class="empty-state"><span class="empty-icon">⌁</span><strong>还没有运行趋势</strong><small>${trendEmptyNote(s)}</small></div>`}
         <p class="facet-note">${trendScope(s, series)}</p>
       </section>
@@ -2083,9 +2154,12 @@ VIEWS.overview = {
     <div class="view-stack">
       ${gateBanner(s.gate)}
       ${emptyProjectPanel(s)}
-      <section class="measures-grid">
-        ${list(s.measures?.measures || [], measureCard)}
-      </section>
+      <div class="overview-head">
+        ${ratingCard(s)}
+        <section class="measures-grid">
+          ${list(s.measures?.measures || [], measureCard)}
+        </section>
+      </div>
       ${s.measures?.foreign
         ? html`<p class="subtle measure-foreign">以上度量来自另一次运行的快照（不属于当前项目），不是本项目的结论。</p>`
         : ""}
@@ -2318,8 +2392,8 @@ VIEWS.activity = {
     <div class="view-stack">
       ${points.length ? html`<section class="panel">
         <div class="panel-head"><div><p class="eyebrow">HISTORY</p><h2>运行趋势</h2></div><span class="subtle">${field(series, "runs") || 0} 次运行 · ${field(series, "window") || ""}</span></div>
-        <p class="chart-caption">每根柱一次运行，单位是 finding 条数（error / warning / info 堆叠）；纵轴峰值 <strong>${max}</strong>，横轴是运行日期。</p>
-        <div class="trend-chart" role="img" aria-label="运行趋势：每根柱一次运行的 finding 条数，纵轴峰值 ${max}">${list(points, (p) => trendColumn(p, max))}</div>
+        <p class="chart-caption">每根柱一次运行，单位是 finding 条数（error / warning / info 堆叠）；纵轴峰值 <strong>${max}</strong>，横轴是${sameDaySeries(points) ? "运行时刻" : "运行日期"}。</p>
+        <div class="trend-chart" role="img" aria-label="运行趋势：每根柱一次运行的 finding 条数，纵轴峰值 ${max}">${list(points, (p) => trendColumn(p, max, sameDaySeries(points)))}</div>
         <div class="legend"><span><i class="dot error"></i>error</span><span><i class="dot warning"></i>warning</span><span><i class="dot info"></i>info</span><span class="legend-scale">峰值 ${max}</span></div>
       </section>` : ""}
       <section class="panel">

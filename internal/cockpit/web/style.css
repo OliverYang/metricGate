@@ -501,7 +501,8 @@ code, pre, .mono { font-family: var(--mono); }
 
 /* ---------------------------------------------------------------- 4. SURFACES */
 
-.panel, .metric-card, .measure-card, .issue-card, .project-card, .run-row,
+.panel, .metric-card, .measure-card, .issue-card, .project-card,
+.project-entry, .accepted-entry, .converge-row, .unassigned-card, .empty-state,
 .policy-side, .policy-editor, .issues-sidebar, .source-view, .accepted-item {
   background: var(--panel);
   border: var(--e-border-width) solid var(--line);
@@ -1155,7 +1156,16 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 .trend-column { display: flex; flex: 1; min-width: 0.5rem; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; gap: 0.375rem; }
 .bar-stack { display: flex; width: min(1.5rem, 70%); min-height: 0.25rem; flex-direction: column; overflow: hidden; border-radius: var(--e-radius-sm) var(--e-radius-sm) 0 0; background: var(--e-color-background-neutral-bolder); }
 .bar-stack i { display: block; min-height: 0; }
-.trend-column small { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
+.trend-column small { color: var(--muted); font-family: var(--mono); font-size: 0.625rem; white-space: nowrap; }
+/*
+ * Sparse ticks. Twenty runs in a 560px panel is a ~20px slot per column, and a
+ * "10-17" label is ~30px — every label drawn at once overlaps its neighbour and
+ * the axis reads as "10-170-170-17". So the label is drawn on every fourth
+ * column and on the last one, which is what an axis with more data than room
+ * always does; the date is still in each column's title, so nothing is lost.
+ */
+.trend-column small { visibility: hidden; }
+.trend-column:nth-child(4n + 1) small, .trend-column:last-child small { visibility: visible; }
 /* The chart reads the payload nothing else in the tool can: an axis without a
    stated scale makes the operator guess whether the peak is 1 or 1000, so the
    unit and the peak live beside the legend rather than inside the picture. */
@@ -1168,14 +1178,18 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.875rem 1rem;
+  /* Taller than a table row on purpose: this is the page's conclusion, and the
+     condition table below is its evidence. At 36px it read as one more line of
+     chrome above the fold; at 4.5rem it reads as the verdict. */
+  min-height: 4.5rem;
+  padding: 0.875rem 1.125rem;
   border: var(--e-border-width) solid var(--line);
   border-left: 4px solid var(--e-color-border-bold);
-  border-radius: var(--e-radius-lg);
+  border-radius: var(--e-radius-md);
   background: var(--panel);
   font-size: var(--e-font-size-md);
 }
-.gate-banner strong { font-size: var(--e-font-size-md); font-weight: 700; letter-spacing: 0.04em; }
+.gate-banner strong { font-size: 1.125rem; font-weight: 700; letter-spacing: 0.06em; }
 /* The glyph is what carries the verdict at a glance; the word is for the
    reader who does not trust a shape. Sized and spaced like SonarQube's
    check/cross in the Quality Gate block. */
@@ -1183,11 +1197,12 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
   border-radius: var(--e-radius-md);
   background: var(--e-color-background-neutral-subtle);
-  font-size: var(--e-font-size-lg);
+  font-size: 1.25rem;
   line-height: 1;
 }
 .gate-banner .gate-reason { color: inherit; opacity: 0.85; }
@@ -1208,6 +1223,26 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 .gate-banner.is-unknown strong { color: var(--text); }
 
 /* Measure cards: label, grade chip, value, bands. */
+/*
+ * The overview's first screen: one page-level rating next to the measures it is
+ * the worst of. The rating column is fixed at 11rem and the measures fill the
+ * rest, because the letter is one glyph and the tiles are a wrapping grid —
+ * giving the letter a third of the row would make it the loudest thing on a page
+ * whose actual evidence is the tiles beside it.
+ */
+.overview-head { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 0.75rem; align-items: start; }
+.rating-card { display: grid; justify-items: center; gap: 0.25rem; padding: 1rem; margin-bottom: 0; text-align: center; }
+.rating-letter { margin: 0; font-size: 3rem; font-weight: 700; line-height: 1; }
+.rating-letter.rating-A { color: var(--e-rating-a-text); }
+.rating-letter.rating-B { color: var(--e-rating-b-text); }
+.rating-letter.rating-C { color: var(--e-rating-c-text); }
+.rating-letter.rating-D { color: var(--e-rating-d-text); }
+.rating-letter.rating-E { color: var(--e-rating-e-text); }
+/* No snapshot is not a grade. The letter is the muted ink and the caption says
+   why, so "never measured here" cannot be read as a comfortable pass. */
+.rating-letter.rating-none { color: var(--muted); }
+.rating-caption { margin: 0; color: var(--muted); font-size: var(--e-font-size-xs); }
+.rating-run { margin: 0; color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
 .measures-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.75rem; }
 .measure-card { padding: 0.875rem 1rem; }
 .measure-head { display: flex; align-items: center; justify-content: space-between; gap: 0.625rem; min-width: 0; }
@@ -1258,17 +1293,32 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 
 /* Runs. */
 .runs-panel { margin-top: 1rem; }
-.runs-list { margin-top: 1rem; display: grid; gap: 0.5rem; }
-.run-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0.875rem; }
-.run-status { display: grid; place-items: center; flex: none; width: 1.75rem; height: 1.75rem; border-radius: var(--e-radius-pill); font-size: var(--e-font-size-md); }
+.runs-list { margin-top: 1rem; }
+/*
+ * The run table. Same density contract as the findings table: 36px rows, fixed
+ * column widths declared once on the header, and only the free-form column
+ * (the commit id) allowed to be clipped.
+ */
+.runs-table { table-layout: fixed; }
+.runs-table .col-pick { width: 2rem; padding-right: 0; }
+.runs-table .col-status { width: 3rem; }
+.runs-table .col-run { width: 6rem; }
+.runs-table .col-verdict { width: 7rem; }
+.runs-table .col-commit { width: 9rem; }
+.runs-table .col-when { width: 11rem; }
+.runs-table .col-size { width: 9rem; }
+.runs-table .col-counts { width: 13rem; }
+.runs-table .col-act { width: 6.5rem; text-align: right; }
+.runs-table .run-commit, .runs-table .col-commit code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runs-table .col-counts { font-family: var(--mono); font-size: var(--e-font-size-xs); white-space: nowrap; }
+.runs-table .col-size { color: var(--muted); font-size: var(--e-font-size-xs); white-space: nowrap; }
+.runs-table .col-when { color: var(--muted); font-size: var(--e-font-size-xs); white-space: nowrap; }
+.runs-table tbody tr:hover { background: var(--panel2); }
+.runs-table .run-id { color: var(--text-strong); font-family: var(--mono); font-size: var(--e-font-size-sm); }
+.runs-table .run-status { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: var(--e-radius-pill); font-size: var(--e-font-size-sm); }
 .run-status.is-clean { background: var(--e-color-success-weak-active); color: var(--e-color-success-deep); }
 .run-status.has-errors { background: var(--e-color-danger-weak-active); color: var(--e-color-danger-deep); }
-.run-main { flex: 1; min-width: 9rem; }
-.run-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.run-title strong { color: var(--text-strong); font-size: var(--e-font-size-md); }
 .run-commit { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
-.run-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; color: var(--muted); font-size: var(--e-font-size-xs); }
-.run-counts { display: grid; gap: 0.125rem; min-width: 7rem; color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
 .run-select { display: grid; place-items: center; flex: none; }
 .run-select input { accent-color: var(--e-color-accent); }
 .error-text { color: var(--e-color-danger-text); }
@@ -1628,6 +1678,13 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 
 @media (max-width: 1100px) {
   .layout-grid { grid-template-columns: minmax(0, 1fr); }
+  /* The rating sits above the tiles rather than beside them: at this width the
+     11rem column would leave the tile grid two per row and the tiles are the
+     evidence the letter is derived from. */
+  .overview-head { grid-template-columns: minmax(0, 1fr); }
+  .rating-card { grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; text-align: left; }
+  .rating-card .eyebrow { grid-column: 1 / -1; }
+  .rating-letter { font-size: 2rem; }
   .issues-layout, .issues-layout.has-detail { grid-template-columns: minmax(0, 1fr); }
   .issues-sidebar { position: static; }
   /* Below the breakpoint there is no column beside the list to float in, and a
