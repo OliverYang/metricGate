@@ -269,11 +269,15 @@ Node 的代码几乎全部用这种写法，所以**这个适配器对现代 TS 
 本仓库自身：8 条 → **0 条**，全树 422 → 428 warnings（R1 新暴露的 JS 函数
 贡献了增量），gate 仍 PASSED。
 
-**一个必须记录的副作用**：`docs/evaluations/evaluation-commit-replay-results.md`
+**一个必须记录的副作用（已于 iter-30 结清）**：`docs/evaluations/evaluation-commit-replay-results.md`
 用旧版规则在 dev-cockpit 上得到「test-no-assert 215/289 commit 触发」，
-并据此在 `docs/claims.md` #19 上调了证据。**那个数字现在偏高且无法在本机重算**
-（语料仓库不在本地）。新判据会滤掉其中"传 `*testing.T` 给 helper"的部分。
-`claims.md` #19 的该项证据需要重新标定 —— 已记入 `iter-29` 之后的待办。
+并据此在 `docs/claims.md` #19 上调了证据。本文当时写「那个数字现在偏高且无法在本机重算
+（语料仓库不在本地）」——**这句是错的**：语料可重克隆，归档 JSON 也在 `.data/commit-replay/` 里。
+iter-30 已用双判据二进制全量重跑 289 个 commit（见
+[evaluation-iter30-tna-recalibration.md](../evaluations/evaluation-iter30-tna-recalibration.md)）：
+commit 计数 **215 不变且可复现**，findings 1,783 → 233 → 215（再排除 benchmark），
+distinct anchor 31 → 1——即那 215 全部是同一个函数被逐 commit 重复计数。
+claims #19 的措辞已按此改正，#19 该项证据**不再上调**。
 
 ---
 

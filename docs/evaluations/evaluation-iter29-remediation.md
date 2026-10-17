@@ -226,15 +226,15 @@ gate 从 FAILED（3 errors）回到 PASSED。抬阈值能在一分钟内让这 3
 R1 与 R2 的纯效应，没有一行代码在本轮之间被改过。`app.js` 那 12 条里已经扣掉了
 §3.5 的拆分成果。作为对照：R1 落地后、拆分前，同一判据下本仓是 **3 条 error / gate FAILED**（`policyPane` cyclomatic 30 与 length 68、`scopeAggregate` cyclomatic 22）；拆完才回到 PASSED。
 
-## 7. 一处必须记录的副作用
+## 7. 一处必须记录的副作用（已于 iter-30 结清）
 
-`docs/evaluations/evaluation-commit-replay-results.md` 的「**test-no-assert 在 215/289 commit 触发**」是**旧判据**得到的数字，而 R2 改了判据。那个语料仓库（marein/dev-cockpit）不在本地，本轮无法重算。
+`docs/evaluations/evaluation-commit-replay-results.md` 的「**test-no-assert 在 215/289 commit 触发**」是**旧判据**得到的数字，而 R2 改了判据。本文当时说那个语料仓库（marein/dev-cockpit）不在本地、本轮无法重算——**这句错了**：语料可重克隆，归档 JSON 也在 `.data/commit-replay/`。iter-30 已全量重跑（见 [evaluation-iter30-tna-recalibration.md](evaluation-iter30-tna-recalibration.md)）：
 
-`docs/claims.md` #19 的证据链引用了这个数字，所以它现在处于**待重新标定**状态：
+- 能说的：**按 commit 计数 215/289 在新旧判据下都成立**，且与归档逐条一致（findings 1,783）。
+- 不能说：**215 个独立的伪绿测试**。215 个命中全部来自 `internal/eventbus/eventbus_test.go:40` 同一个函数（自 commits.txt 第 75 个 `444b31ec97` 起，75..289 零漏网）；distinct anchor 31 → 2 → **1**；findings 1,783 → 233 → 215（排除 benchmark）。而且那个函数靠「阻塞即死锁 → 超时」失败，属规则精度下界。
+- 本文原先的估计（「按 55→19 的比例，真实数可能显著低于 215」）**方向对、量级错得远**：commit 数根本未变，变的是 anchor 数。读这类比例外推时要记住：它推不出 per-commit 计数。
 
-- 能说的：伪绿测试形态在真实 LLM 仓库密集存在（215/289 是上界）。
-- 不能说：215 是当前判据下的检出数。按本轮 110 文件语料的误报比例（55 → 19，去掉 65%），真实数可能显著低于 215。
-- 待办：恢复网络访问后重跑 commit replay，或至少在 #19 标注"旧判据"。
+同类问题在 R1 也存在：`docs/metrics.md` 里任何关于"TS 代码函数级度量覆盖率"的表述都必须在两个二进制下分别标注，否则读者无法判断数字来自失明前还是失明后。
 
 同类问题在 R1 也存在：`docs/metrics.md` 里任何关于"TS 代码函数级度量覆盖率"的表述都必须在两个二进制下分别标注，否则读者无法判断数字来自失明前还是失明后。
 
@@ -275,8 +275,8 @@ go vet ./... && go test ./... -count=1 && node --check internal/cockpit/web/app.
 
 | 项 | 为什么是 P0 | 验收 |
 |---|---|---|
-| **重跑 commit replay 标定 `test-no-assert`** | §7 的债：claims #19 现在引的是一个已知偏高的数字 | 215/289 换成新判据数字，或文档明确标"旧判据上界" |
-| **`Benchmark*` 是否单开一档** | R2 剩的 14/19 条都是 benchmark，判据合理但产品噪音 | 定口径后本仓与语料各跑一次，写进 `docs/metrics.md` |
+| **重跑 commit replay 标定 `test-no-assert`** | §7 的债：claims #19 现在引的是一个已知偏高的数字 | ✅ **iter-30 已做**（289 commit × 双判据重放，215/289 可复现但含义已改；见 `evaluation-iter30-tna-recalibration.md`） |
+| **`Benchmark*` 是否单开一档** | R2 剩的 14/19 条都是 benchmark，判据合理但产品噪音 | ✅ **iter-30 已定口径**：`test-no-assert` 改为只管 `Test*`（实测 0 条真阳丢失）；「benchmark 其实什么都没测」归 iter-31 开新规则 |
 | **别名追踪（`tt := t`）** | R2 的已知精度下界，已钉进测试 | 要么做（需要一份局部数据流），要么在规则文档明写不追 |
 | **C/C++/C# 的等价失明排查** | R1 修的是 JS 系；同类"kind-set 漏掉某种声明形态"在别的语言适配器里大概率还有 | 每种语言写一个"全 lambda/全属性/全表达式体"的 fixture，FUNCS 必须 > 0 |
 | **pre-commit 改 scoped check 根** | iter-29 §2.2 实测未做，纯性能（省 1.6–2.05 秒），但它是唯一每天跑的入口 | 同一脏树 `hooks/pre-commit` 前后耗时中位数对比 |

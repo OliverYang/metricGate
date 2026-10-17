@@ -262,7 +262,12 @@ MCP 的 OAuth token 存在 `~/.pi/agent/mcp-auth.json`（本机），不进仓�
 
 ## §3 顺带记录（不阻塞，但别丢）
 
-### §3.1 `test-no-assert` 不认自定义断言 helper（误报源头）
+### §3.1 `test-no-assert` 不认自定义断言 helper（误报源头）—— ✅ 已于 iter-29 修掉
+
+> **现状（iter-29 `ecd57b5` + iter-30）**：本仓的 8 条误报已到 **0**。判据加了第二条——调用的实参里
+> 出现从签名解析出的 `*testing.T` 参数名就算断言（helper 能失败这个测试，当且仅当它拿到了失败的手段）。
+> iter-30 又把 `Benchmark*` 从范围里拿掉（benchmark 按设计不能失败）。下面这段是修复前的记录，
+> 其中「两个候选修法」都没采用：实际走的是第三条——既不跟定义做跨函数分析，也不放宽到「任何本地 helper」。
 
 PR #1 上那 2 条 warning 就是它。`internal/rules/go_test_no_assert.go:75 isAssertionCallee` 的
 白名单是：名字含 `assert` / `require`、`must` 前缀、精确等于
@@ -317,7 +322,9 @@ internal/metrics/grammar_probe_test.go:83
 - [x] **B3** `pi mcp login github`（§2.3）—— **已可用**（46 tools），但走的是 Bearer header 路线，不是 OAuth。
       要换成 OAuth 需先跑 login 再删 header，顺序见 §2.5
 - [x] **B4** 用 MCP 读 `GET /branches/main/protection` —— **已实测：404，确认未配置**（不是 401）
-- [ ] **B5** 决定 `test-no-assert` 的口径（§3.1），单开迭代 —— 未做
+- [x] **B5** 决定 `test-no-assert` 的口径（§3.1）—— **已做**：iter-29 `ecd57b5` 加入「拿到 `*testing.T` 的 helper 即算断言」
+      （本仓 8→0，110 个真实 `_test.go` 语料 55→19），iter-30 再排除 `Benchmark*`（语料 19→5）并用 289 commit
+      重放重标定了 215/289 的含义（见 `evaluation-iter30-tna-recalibration.md`）
 - [x] **B6** `triage` 的 label 自举缺失，见 §5.2 —— **已修**：`triage.yml` 用
       getLabel→createLabel，`agent-claim.sh` 用 `gh label create --force`，三个 label 已建好
 - [ ] **B7** MCP 凭证路线二选一（§2.5）—— 当前停在 A 路线，可用但不可跨机复现
@@ -552,7 +559,10 @@ label 列表回到 13 个。**删掉再跑**是这里唯一可信的验证方式
 2. **`triage` 只跑在 cron + dispatch 上**，从未在 push/PR 上跑过。这意味着新引入的 error
    要等到次日 03:00 UTC 才会变成 issue。是否加 `push` 触发是下一个决策点
    —— 加会让每次 push 都扫全树（贵），不加则发现延迟一天。
-3. **`test-no-assert` 8 条误报仍在**（§3.1，B5 未做）。
+3. ~~`test-no-assert` 8 条误报仍在~~ —— **已修**（iter-29 `ecd57b5` 加 helper 能力判据，本仓 8→0；iter-30 再排除 `Benchmark*`）。
+4. **iter-30 留下的新开口**：「benchmark 其实什么都没测」从一个真缺陷，现有规则里无人回答（见
+   `evaluation-iter30-tna-recalibration.md` §8 第 4 条）；以及 C# `accessor_declaration` / Java
+   `static_initializer` 的分支不在任何单元里（§6）。
 
 ## §8 第三轮：自动合并之后才发现的两个断点
 

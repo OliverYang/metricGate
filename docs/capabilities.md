@@ -50,7 +50,7 @@ CLI 与 MCP 只是两个外壳，且这份"内核纯净"由项目自己的 `arch
 | `print-stack-trace` | Java | warning | `e.printStackTrace()` 绕过日志管道 |
 | `silent-catch` | Java | warning | 捕获异常后既不抛也不记，异常参数也没被引用（catch 体非空 + 异常参数未引用 + 无 throw/log 三信号判据） |
 | `call-chain-depth` | Go · Java | warning（可调 `max_depth`，默认 3） | 消息链超过 `max_depth`（Lanza & Marinescu *chain-size > 3* 检测策略）：每多一节链，就多耦合一个类的内部导航；只报最外层整链，修法是把中间步提取成具名变量/函数 |
-| `test-no-assert` | Java | warning | 测试方法无任何断言（testsmells.org UT test smell，FSE'20）：要么加 Assert/fail，要么声明预期异常，否则该测试不可能失败 |
+| `test-no-assert` | Go · Java · TS · JS · Python · Rust · C#（C/C++ 故意不做） | warning | 测试函数里无任何断言（testsmells.org UT test smell，FSE'20）：要么加 Assert/fail，要么声明预期异常，否则该测试不可能失败。识别“哪个函数是测试”按语言而异：Go 看 `Test*` 前缀 + `*testing.T` 签名（**`Benchmark*` 不在范围——它按设计不能失败，iter-30 重算发现它占剩余命中的 14/19**）；Java/TS/JS/Python/C# 看命名约定（`test`/`Test` 前后缀、`test_*`/`*_test`）；Rust 看 `#[test]` 属性而非名字。C/C++ 无主流命名约定（Check/CppUTest/gtest 各不相同），名字判据会大量误伤，所以上述规则从未内置。断言判据是存在性的：词表命中（assert/require/must*/Error/Fatal/Fail/panic）**或把本测试的 `*testing.T` 变量递给一个 helper**（iter-29 `ecd57b5`）都算；递别名（`tt := t`）不算，这是已钉住的下界。 |
 | `unknown-dependency` | Go · Java | warning | import 既不是标准库/JDK，也不在已声明依赖里（详见 §5.2） |
 
 ### 3.2 由策略编译出的规则

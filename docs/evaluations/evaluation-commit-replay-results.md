@@ -21,8 +21,9 @@
 
 - **0/289 零检出 commit**——最干净的首个 commit 也有 75 条（7 error）；findings 随仓库增长 75→2174 持续累积，无自然消亡趋势。
 - 全历史规则族触发总量：fan-out 85,771 / cyclomatic 38,150 / npath 37,093 / cognitive 22,926 / function-length 22,361 / params-count 9,847 / file-length 5,296 / function-clone 4,912 / test-no-assert 3,492 / boolean-params 334 / call-chain-depth 279 / todo-comment 87 / silent-catch 55 / nesting-depth 44 / banned-os-exec 43 / empty-block 21 / banned-panic 3 / banned-fmt-Print* 3。
-- **test-no-assert 在 215/289 commit 触发**——M2-B 里未 materialize 的「无断言测试」形态，在真实 LLM 仓库大规模存在。
-  - ⚠️ **该数字待重新标定（2026-10-18）**：本报告跑的是 iter-29 之前的判据。`ecd57b5` 把规则改为「拿到 `*testing.T` 的 helper 即算断言」后，110 个真实 `_test.go` 语料上命中 55→19（其中 `Test*` 38→5，见 [iter-29 整改实测](evaluation-iter29-remediation.md) §4）。dev-cockpit 仓库不在本地，本轮无法重算 ⇒ **215 应读作上界**，方向不变（伪绿测试仍密集存在），量级待重跑。
+  - ⚠️ **这行里只有 5 个数字能从归档复现（2026-10-18 重算，见 [iter-30 重标定](evaluation-iter30-tna-recalibration.md) §5）**：fan-out 85,771 / cyclomatic 38,150 / npath 37,093 / cognitive 22,926 / function-length 22,361 与 `.data/commit-replay/devcockpit/*.json` 的 findings 实例数逐条相等。**其余 13 行既不等 findings、也不等 commit 数 / distinct file / distinct anchor / 快照超阈计数，口径不可考**（test-no-assert 归档实际 1,783，不是 3,492；nesting-depth 1,507，不是 44；banned-os-exec 3,388，不是 43；boolean-params / todo-comment / silent-catch / empty-block 归档为 0——前者 `error: off`，后三条在当时的策略里 `enabled: false` / 只配 java / 未配置）。引用本行时：**要么用归档 findings 数，要么注明口径待重算**，不要直接引用原行。
+- **test-no-assert 在 215/289 commit 触发**——M2-B 里未 materialize 的「无断言测试」形态，在真实 LLM 仓库持续触发。
+  - ⚠️ **「大规模存在」已被重算否证（2026-10-18，[iter-30 重标定](evaluation-iter30-tna-recalibration.md)）**：当时与现在的判据下 commit 计数都是 215/289、且与归档一致，但 215 个命中全部来自 `internal/eventbus/eventbus_test.go:40` **同一个函数**（自 commits.txt 第 75 个 `444b31ec97` 起，75..289 零漏网）；distinct anchor 只有 31 个、新判据下剩 1 个。findings 实例 1,783（旧）→ 233（iter-29 后）→ 215（再排除 benchmark）。那个函数源码注释明写靠「阻塞即死锁 → 超时」失败，属规则精度下界。**per-commit 计数不是 per-event 计数**：引用本行时请说「按 commit 计数 215/289」，不要说「215 个伪绿测试」。
 - npath 极值：218,160 / 92,160（人类基线 max 4,752，超 40×）；fan-out error 30 vs 人类 max 20。
 - **layer-violation 全 0**：dev-cockpit 未声明 layers，无约束可违——是「未配置」不是「干净」，如实记录。
 - LLM 仓库自身无门禁约束下的形态：每 commit 约 10% findings 为 error 级（75/7 → 2174/200+ 线性），错误密度不随规模下降。
@@ -62,7 +63,7 @@
 
 - H1 检出力：真实 LLM 仓库的 100% commit 检出率 + error 密度 ~10%，补上了 R1（合成任务 31.8%）之后「仓库尺度」的缺口。
 - H2：R2 的 7/7 是合成任务单文件修复；本实验是仓库级多文件重构——修复闭环「有效但不便宜」的定量刻画。
-- test-no-assert 215/289：M2-B H3「该形态未出现」的结论限定于合成任务，真实仓库大规模存在——claims #19 该项证据上调。
+- test-no-assert 215/289：M2-B H3「该形态未出现」的结论限定于合成任务——真实仓库里它**每个 commit 都在**，但集中在极少数函数（iter-30 重算：anchors 31→1）。**不足以把 claims #19 该项上调**，原上调已改判。
 - side-effect 率（2 warning / 0 error / 5 任务）首次量化修复闭环的安全性。
 
 ## 7. 复现
@@ -94,5 +95,5 @@ git clone https://github.com/marein/dev-cockpit /tmp/corpus/dev-cockpit
 ### 8.3 本实验数据特有增量
 
 - 0/289 零检出 + 线性累积无消亡：无门禁 LLM 仓库质量债单调增长的 commit 级实测（公开文献未见同粒度）。
-- test-no-assert 215/289：伪绿测试直接攻击「测试即验收」假设——比复杂度更独特的 LLM 信号。
+- test-no-assert 215/289（按 commit 计数；独立事件只含 1 个函数，见 iter-30 重算）：伪绿测试形态确实长期驻留在 LLM 仓库里——比复杂度更独特的 LLM 信号，但**量级必须按 anchor 而非 commit 报**。
 - 副作用率 2 warning / 0 error：修复闭环安全性首次量化。
