@@ -505,7 +505,10 @@ code, pre, .mono { font-family: var(--mono); }
 .policy-side, .policy-editor, .issues-sidebar, .source-view, .accepted-item {
   background: var(--panel);
   border: var(--e-border-width) solid var(--line);
-  border-radius: var(--e-radius-lg);
+  /* 4px, not 8px. A dense table reads as a grid, and a rounded card fights the
+     grid it sits in; the design system's own roundness scale is 4 for exactly
+     this reason. */
+  border-radius: var(--e-radius-md);
 }
 
 .panel { padding: 1rem 1.125rem; margin-bottom: 1rem; }
@@ -561,11 +564,11 @@ code, pre, .mono { font-family: var(--mono); }
 .button.ghost { border-color: transparent; background: transparent; color: var(--e-color-text-accent); }
 .button.ghost:hover { background: var(--e-color-accent-weak); }
 .button.primary {
-  border-color: var(--e-color-accent);
-  background: var(--e-color-accent);
+  border-color: var(--e-color-primary);
+  background: var(--e-color-primary);
   color: var(--e-color-text-on-color);
 }
-.button.primary:hover { background: var(--e-color-accent-hover); border-color: var(--e-color-accent-hover); }
+.button.primary:hover { background: var(--e-color-primary-hover); border-color: var(--e-color-primary-hover); }
 .button.active { border-color: var(--e-color-accent); background: var(--e-color-accent-weak); color: var(--e-color-text-accent); font-weight: 600; }
 
 .text-button {
@@ -690,17 +693,33 @@ code, pre, .mono { font-family: var(--mono); }
 }
 .load-pending-glyph { color: var(--e-color-accent); font-weight: 700; }
 
-/* Tables. */
-.table-wrap { overflow-x: auto; }
+/*
+ * Tables. This is the densest surface in the app and the one the redesign is
+ * really about: a 421-row finding list is scanned by column, not read card by
+ * card, so every row is one line of text in a fixed band and the header says
+ * what each column is in small caps.
+ *
+ * --e-row-height (36px) is applied to the cell rather than the row because a
+ * row's height is the max of its cells: putting it on `tr` alone lets a cell
+ * with a taller control (a select, a badge with padding) grow the row and break
+ * the rhythm for every row below it.
+ */
+.table-wrap {
+  overflow-x: auto;
+  border: var(--e-border-width) solid var(--line);
+  border-radius: var(--e-radius-md);
+}
 table { width: 100%; border-collapse: collapse; text-align: left; }
 th {
-  padding: 0.5rem 0.625rem;
-  border-bottom: var(--e-border-width) solid var(--line);
-  background: var(--e-color-background-neutral-subtle);
+  height: var(--e-row-height);
+  padding: 0 0.625rem;
+  border-bottom: var(--e-border-width) solid var(--line-strong);
+  background: var(--panel2);
   color: var(--muted);
-  font-size: var(--e-font-size-xs);
+  font-size: 0.6875rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 /* A sortable column header. The button is inside the th rather than replacing
@@ -726,11 +745,18 @@ th {
 th[aria-sort="ascending"] .th-sort, th[aria-sort="descending"] .th-sort { color: var(--text-strong); }
 th[aria-sort="ascending"] .sort-arrow, th[aria-sort="descending"] .sort-arrow { opacity: 1; }
 td {
-  padding: 0.625rem;
+  height: var(--e-row-height);
+  padding: 0 0.625rem;
   border-bottom: var(--e-border-width) solid var(--line);
   color: var(--text);
-  font-size: var(--e-font-size-md);
+  font-size: var(--e-font-size-sm);
+  vertical-align: middle;
 }
+/*
+ * Hover changes the fill and nothing else. A row that lifts (transform, shadow,
+ * a border appearing) shifts every row under it as the pointer moves, which is
+ * unusable at 36px rows.
+ */
 tbody tr:hover { background: var(--e-color-surface-hover); }
 tbody tr:last-child td { border-bottom: 0; }
 .time-cell { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
@@ -918,7 +944,7 @@ dialog {
   width: min(48rem, calc(100vw - 2rem));
   max-height: 85vh;
   padding: 1.25rem 1.5rem;
-  border: var(--e-border-width) solid var(--line);
+  border: var(--e-border-width) solid var(--line-strong);
   border-radius: var(--e-radius-lg);
   background: var(--panel);
   color: var(--text);
