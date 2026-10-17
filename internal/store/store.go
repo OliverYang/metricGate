@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	project_root TEXT,
 	archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
 	policy_digest TEXT,
-	trace_id TEXT
+	trace_id TEXT,
+	invocation TEXT
 );
 CREATE TABLE IF NOT EXISTS findings (
 	run_id INTEGER NOT NULL REFERENCES runs(id),
@@ -126,6 +127,7 @@ func migrate(db *sql.DB) error {
 		migrateRunsArchived,
 		migrateRunsPolicyDigest,
 		migrateRunsTraceID,
+		migrateRunsInvocation,
 		// snippet_hash must be migrated before fingerprint:
 		// migrateFindingsFingerprint backfills each row by re-reading it
 		// (findingForBackfill selects snippet_hash), so a legacy database that
@@ -257,6 +259,23 @@ func migrateRunsTraceID(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// migrateRunsInvocation adds the nullable column that records the command line
+// a run came from. Older databases keep working: a row written before this
+// column exists reports an empty invocation, and the UI says "not recorded"
+// rather than inventing a command for it.
+//
+// It is a separate step from migrateRunsTraceID because the two answer
+// different questions — trace_id says "which unit of work", invocation says
+// "which flags produced this verdict" — and a run can have either, both or
+// neither.
+func migrateRunsInvocation(db *sql.DB) error {
+	if hasColumn(db, "runs", "invocation") {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE runs ADD COLUMN invocation TEXT`)
+	return err
 }
 
 func migrateRunsArchived(db *sql.DB) error {
@@ -404,12 +423,20 @@ func boolToInt(value bool) int {
 }
 
 // RunMeta carries the optional provenance attached to one stored run: the
-// policy fingerprint (which version of the rules produced this verdict) and
-// the trace id (which session/PR/task produced the run). Both are optional and
-// both are plain strings, so an absent one is simply empty.
+// policy fingerprint (which version of the rules produced this verdict), the
+// trace id (which session/PR/task produced the run) and the command line that
+// invoked it. All are optional plain strings, so an absent one is simply empty.
 type RunMeta struct {
 	PolicyDigest string
 	TraceID      string
+	// Invocation is the command line that produced this run, with secret-looking
+	// flag values replaced. It lets an operator reading the run history back tell
+	// *how* a verdict was reached: the same tree reports differently under
+	// -diff, with a different -arch-base, or pointing at a different -config,
+	// and nothing else on the row says so. Empty means the caller did not supply
+	// one, which is a legal state with the same meaning as an absent trace id:
+	// we do not know.
+	Invocation string
 	// Attrs are the whitelisted trace attributes (model, prompt digest, …)
 	// attached to TraceID. They are stored in their own table keyed by trace
 	// id, not on the run row: the attributes describe the unit of work, not
@@ -433,12 +460,13 @@ func (s *Store) saveRun(summary *model.RunSummary, toolVersion, commit, projectR
 	defer tx.Rollback()
 
 	res, err := tx.Exec(`INSERT INTO runs
-		(started_at, duration_ms, tool_version, git_commit, files, error_count, warning_count, info_count, project_root, policy_digest, trace_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(started_at, duration_ms, tool_version, git_commit, files, error_count, warning_count, info_count, project_root, policy_digest, trace_id, invocation)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Now().UTC().Format(time.RFC3339), summary.Duration.Milliseconds(),
 		toolVersion, commit, summary.Files,
 		summary.Count(model.SevError), summary.Count(model.SevWarning), summary.Count(model.SevInfo),
-		nullableProjectRoot(projectRoot), nullableText(meta.PolicyDigest), nullableText(meta.TraceID))
+		nullableProjectRoot(projectRoot), nullableText(meta.PolicyDigest), nullableText(meta.TraceID),
+		nullableText(meta.Invocation))
 	if err != nil {
 		return 0, err
 	}

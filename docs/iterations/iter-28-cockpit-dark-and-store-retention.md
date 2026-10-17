@@ -152,9 +152,11 @@ warning 从 415 升到 422 是新代码带来的（`retain.go` / `store_cmd.go` 
 
 ## §6 遗留
 
-1. **`internal/cockpit/rules_zh.go` 还在分支上**（59 行 + 覆盖率测试）。它给规则提供
-   中文名与说明，是 `T4.3`「度量实验结论摘要」的前置。取它需要同时确认
-   `rules_catalogue_test.go` 的断言，本轮没做。
+1. ~~**`internal/cockpit/rules_zh.go` 还在分支上**~~ → **已捞回并进 `main`**（`f0b0a6e`，
+   iter-29 R4）：`rules_zh.go` + `rules_catalogue_test.go` + `rules_api.go` 的
+   语言分组，加上前端「说明」列改读中文标题 + 新增「默认」列。`T4.3` 的前置已清。
+   一个未消化的观察：`/api/rules` 返回的 `languageGroups` 至今**没有任何消费者**
+   （前端与 MCP 都不读），要么按语言分组渲染，要么删字段。
 2. ~~**`iter-26-post-edit-hook.md` 还在分支上**~~ → **已解**（`iter-29` §6）：
    `iter-26-post-edit-hook.md` 与 `docs/workflow.md:108` 承诺的
    `.claude/settings.json.example` 都已进 `main`。文档与代码重新同树。

@@ -1,9 +1,11 @@
 package cockpit
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -433,6 +435,120 @@ func controlTags(src string) []string {
 		}
 	}
 	return out
+}
+
+// colWidthPattern matches one column's declared width inside a scoped table
+// rule, e.g. `.runs-table .col-when { width: 10rem; }`. %s is the table class.
+const colWidthPattern = `\.%s\s+\.col-([a-z]+)\s*\{[^}]*?width:\s*([0-9.]+)rem`
+
+// tableMinWidthPattern matches the scroll floor declared on the table itself.
+const tableMinWidthPattern = `\.%s\s*\{[^}]*?min-width:\s*([0-9.]+)rem`
+
+// panelContentRem is how much width a panel actually has on the narrowest
+// desktop layout: 1100px is the first breakpoint style.css declares, the nav rail
+// is 15rem, and a panel loses 1.125rem on each side to padding plus 1px borders.
+// A table whose columns fit inside that needs no scroll floor; one that does not
+// must declare it, or its columns get squeezed instead of the wrapper scrolling.
+const panelContentRem = (1100.0 - 15.0*16 - 2*1.125*16) / 16.0
+
+// TestRunTableWidthsAddUp guards the arithmetic of a fixed-layout table.
+//
+// With table-layout: fixed, a declared width is a promise the browser keeps only
+// while the table is at least as wide as the sum of its columns. The min-width is
+// what makes that true: below it, the browser shrinks every column proportionally
+// and the ellipses appear in places the author believed had room. That failure is
+// invisible in a screenshot of a wide window and invisible in the source, which is
+// how the run table first shipped with a 90rem floor for 96rem of columns: the
+// command line — the reason the column exists — rendered as a few clipped pixels
+// on every laptop, and nothing anywhere reported it.
+//
+// The check reads the stylesheet rather than the browser because the numbers are
+// all in one file and the relationship between them is arithmetic, not layout.
+// columnWidths reads every declared width for one table's columns, keyed by
+// column class. A class named by two rules keeps the first, which is the
+// unscoped declaration; the second is always a state override (hover, selected)
+// and does not resize the column.
+func columnWidths(css, table string) map[string]float64 {
+	out := map[string]float64{}
+	for _, m := range regexp.MustCompile(fmt.Sprintf(colWidthPattern, table)).FindAllStringSubmatch(css, -1) {
+		if _, seen := out[m[1]]; seen {
+			continue
+		}
+		out[m[1]], _ = strconv.ParseFloat(m[2], 64)
+	}
+	return out
+}
+
+// sumWidths adds the declared column widths.
+func sumWidths(widths map[string]float64) float64 {
+	var sum float64
+	for _, w := range widths {
+		sum += w
+	}
+	return sum
+}
+
+// tableMinWidth reads the scroll floor, or 0 when the table declares none.
+func tableMinWidth(css, table string) float64 {
+	m := regexp.MustCompile(fmt.Sprintf(tableMinWidthPattern, table)).FindStringSubmatch(css)
+	if m == nil {
+		return 0
+	}
+	min, _ := strconv.ParseFloat(m[1], 64)
+	return min
+}
+
+func TestRunTableWidthsAddUp(t *testing.T) {
+	css, err := os.ReadFile("web/style.css")
+	if err != nil {
+		t.Fatalf("read web/style.css: %v", err)
+	}
+	for _, table := range []string{"runs-table", "issues-table"} {
+		source := string(css)
+		widths := columnWidths(source, table)
+		if len(widths) == 0 {
+			t.Errorf("%s: no column widths found; the regexp no longer matches the stylesheet", table)
+			continue
+		}
+		sum := sumWidths(widths)
+		if sum <= panelContentRem {
+			// The columns fit the narrowest panel, so there is nothing to scroll to
+			// and a min-width would only force a scrollbar where none is needed.
+			continue
+		}
+		min := tableMinWidth(source, table)
+		switch {
+		case min == 0:
+			t.Errorf("%s: %d columns declare %.0frem of widths, more than the %.0frem a panel has at the 1100px breakpoint, and the table sets no min-width — so they are squeezed below their content instead of scrolling",
+				table, len(widths), sum, panelContentRem)
+		case min < sum:
+			t.Errorf("%s: min-width is %.0frem but its %d columns need %.0frem, so every column is clipped proportionally below %.0frem — raise min-width to the sum (or narrow a column) rather than letting the widest one absorb the lie",
+				table, min, len(widths), sum, sum)
+		}
+	}
+}
+
+// TestRunTableColumnsAreAllDeclared catches the other half: a column the markup
+// emits and the stylesheet never sizes. Under table-layout: fixed an undeclared
+// column absorbs the leftover space, which is a deliberate choice for exactly one
+// column per table (the free-form message) and an accident everywhere else.
+func TestRunTableColumnsAreAllDeclared(t *testing.T) {
+	css, err := os.ReadFile("web/style.css")
+	if err != nil {
+		t.Fatalf("read web/style.css: %v", err)
+	}
+	src := readAppJS(t)
+	// runTable's header is the list of columns the table actually has.
+	head := regexp.MustCompile(`(?s)export const runTable = .*?</thead>`).FindString(src)
+	if head == "" {
+		t.Fatal("app.js no longer has a runTable header to read")
+	}
+	declared := columnWidths(string(css), "runs-table")
+	for _, m := range regexp.MustCompile(`col-([a-z]+)`).FindAllStringSubmatch(head, -1) {
+		if _, ok := declared[m[1]]; !ok {
+			t.Errorf("the run table emits col-%s but style.css never declares a width for it, so it silently absorbs the leftover space", m[1])
+		}
+	}
 }
 
 func containsString(values []string, want string) bool {

@@ -437,6 +437,20 @@ func writeSARIF(flags reportFlags, summary *model.RunSummary, cfg *config.Config
 // where the human line goes, because the id's two homes have two different
 // orderings: inside the machine-readable output it is written before anything
 // else, and on the console it is the last line of the run.
+// runMeta gathers the provenance the store keeps alongside the counts: which
+// policy version produced the numbers, which unit of work this belongs to, and
+// which command line was typed. It is a function of its own because it is four
+// unrelated reads of the process and configuration assembled into one struct,
+// while storeRun's job is writing a row.
+func runMeta(cfg *config.Config) store.RunMeta {
+	return store.RunMeta{
+		PolicyDigest: bundle.PolicyDigest(cfg),
+		TraceID:      traceID(),
+		Invocation:   invocationLine(),
+		Attrs:        traceAttrs(),
+	}
+}
+
 func storeRun(cfg *config.Config, root string, summary *model.RunSummary, human io.Writer) (int64, bool) {
 	if !cfg.Store.Enabled {
 		return 0, false
@@ -445,11 +459,7 @@ func storeRun(cfg *config.Config, root string, summary *model.RunSummary, human 
 	if err != nil {
 		fail(err)
 	}
-	meta := store.RunMeta{
-		PolicyDigest: bundle.PolicyDigest(cfg),
-		TraceID:      traceID(),
-		Attrs:        traceAttrs(),
-	}
+	meta := runMeta(cfg)
 	id, err := st.SaveRunFull(summary, toolVersion, gitCommit(), git.Root(root), meta)
 	if err != nil {
 		st.Close()

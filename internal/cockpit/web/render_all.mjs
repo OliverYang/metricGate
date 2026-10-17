@@ -578,6 +578,41 @@ const RULES_CATALOGUE = {
 }
 
 /*
+ * The run table's two provenance columns: 触发命令 and 路径.
+ *
+ * These exist because a stored run otherwise says its counts and nothing about
+ * the flags that produced them, so the two rows that differ only by `-diff` are
+ * indistinguishable. Two properties are worth pinning:
+ *
+ *  1. A run WITH an invocation shows it, with the full line in the tooltip so
+ *     the clipped tail is still recoverable.
+ *  2. A run WITHOUT one — every row written before the column existed — says
+ *     未记录. Rendering it blank would read as "run with no flags", which is a
+ *     claim about a fact the store does not have.
+ */
+{
+  const withCmd = { ID: 42, Invocation: "/usr/local/bin/metricgate check . -arch-base arch.json -diff", ProjectRoot: "/Users/dev/work/metricGate" };
+  const withoutCmd = { ID: 43, Invocation: "", ProjectRoot: "" };
+  const out = (app.runTable([withCmd, withoutCmd], []) || {}).value || "";
+  if (!out.includes("触发命令")) problems.push("runs: the 触发命令 column header is missing");
+  if (!out.includes("路径")) problems.push("runs: the 路径 column header is missing");
+  if (!out.includes("-arch-base arch.json -diff")) problems.push("runs: the invocation did not reach the table");
+  // The cell body, not the tooltip: the title attribute legitimately carries
+  // the whole line, so a substring search over the page would match it there.
+  const cell = out.match(/<code class="run-invocation"[^>]*>([^<]*)<\/code>/);
+  if (!cell) problems.push("runs: no .run-invocation cell was rendered");
+  else if (cell[1].includes("/usr/local/bin/metricgate")) problems.push(`runs: the cell shows the binary path instead of the flags that changed between rows: ${cell[1]}`);
+  else if (cell[1] !== "check . -arch-base arch.json -diff") problems.push(`runs: the cell should open with the verb and its flags, got ${JSON.stringify(cell[1])}`);
+  if (!out.includes('title="/usr/local/bin/metricgate check . -arch-base arch.json -diff"')) problems.push("runs: the full command line is not in the tooltip, so the clipped part is unrecoverable");
+  const missing = [...out.matchAll(/未记录/g)].length;
+  if (missing !== 2) problems.push(`runs: a run with no invocation and no root must each say 未记录, saw ${missing}`);
+  // A row is one line at 36px, so a long path must be shortened, not wrapped.
+  if (!out.includes("…/work/metricGate")) problems.push(`runs: the project root was not shortened to its last two components: ${out.match(/run-path[^<]*/)?.[0] || "(no .run-path)"}`);
+  const headerCells = [...out.matchAll(/<th class="(col-[a-z]+)"/g)].map((m) => m[1]);
+  if (headerCells.length !== 11) problems.push(`runs: thead has ${headerCells.length} columns (${headerCells.join(",")}), want 11 — the empty-state colspan and the header must be the same number`);
+}
+
+/*
  * The Rules table's sortable headers.
  *
  * The page lists every effective key — 138 of them in this repository, all in

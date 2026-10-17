@@ -12,7 +12,7 @@ package store
 // rather than silently reading the wrong field into the wrong struct member.
 const runColumns = `id, started_at, duration_ms, tool_version, COALESCE(git_commit, ''),
 	             files, error_count, warning_count, info_count, COALESCE(project_root, ''),
-	             COALESCE(policy_digest, ''), COALESCE(trace_id, ''), archived`
+	             COALESCE(policy_digest, ''), COALESCE(trace_id, ''), COALESCE(invocation, ''), archived`
 
 // RunByID returns one run by primary key, and whether it exists. Callers that
 // need the context a finding was recorded in — the project root its relative

@@ -180,8 +180,8 @@ Node 的代码几乎全部用这种写法，所以**这个适配器对现代 TS 
 | 项 | 实测 | 判定 |
 |---|---|---|
 | **T4.1** 统一时间格式 | 三处口径不一致：`app.js:144` `formatTime` 用 `toLocaleString("zh-CN", { hour12: false })`；`:1201` gateMeta 用裸 `toLocaleString()`（无 locale、无 hour12）；`:3171` 用 `toISOString()` | **未做** |
-| **T4.2** 运行卡补触发命令/路径 | `runRow`（`app.js:1020`）列是 结果/运行/结论/提交/开始时间/规模/计数/操作，**无触发命令** | **未做**（P4 刚改成表格，现在补成本最低） |
-| **T4.3** error 调用 tooltip；度量实验结论摘要 | `grep -c 'title=' app.js` = 13 处（tooltip 已有一定覆盖）；但 `internal/cockpit/rules_zh.go`（规则中文名/说明）**只在分支上，main 没有** | **部分** |
+| **T4.2** 运行卡补触发命令/路径 | ~~无触发命令~~ → **已做**（见 §7.2）：`runs` 表加可空 `invocation` 列，前端补「触发命令」「路径」两列 | ✅ **已做** |
+| **T4.3** error 调用 tooltip；度量实验结论摘要 | tooltip 已有一定覆盖；`rules_zh.go` 已捞回进 `main`（`f0b0a6e`，见 §7.1），规则表「说明」列改读中文标题并新增「默认」列；**度量实验结论摘要仍未做** | **部分** |
 | **T4.4** 度量面板三义语义区分 | `measureCard` 输出 `measure-label` + `measure-grade grade-X` + `measure-value` + `measure-bands`（`warn W · err E`）—— 评级/触发数/上限**三义混在同一视觉层** | **未做** |
 | **T4.5** 项目级 overview 两块面板不随 scope（后端遗留 L8） | **仍未修**。`internal/cockpit/dashboard.go:70-90` 的 `ProjectSummary` 无 `accepted` / `metricTrend` / `summary` 字段；`app.js:2074` 与 `:2388` 就是那两个顶层读。`web/smoke.mjs:499-517` 是 **L8 tripwire**：断言 project 里**不得**出现这三个字段，一旦出现就 fail 并提示「L8 is fixed, so the top-level reads in app.js must become scope-aware」 | **未做**，但**有守门人** |
 | **T4.6** 空态与在飞态统一 | 逐视图统计 `loading`/`loadError`/`loadPending`（行号为 VIEWS 定义行）：projects 1/0/1、issues 2/1/1、**calls 0/0/0**、runs 1/1/1、**overview 0/0/0**、**policy 0/0/0**、activity 0/1/0、**gate 0/0/0**、rules 3/0/0 | **未做**，9 个视图里 4 个完全没有 |
@@ -198,8 +198,8 @@ Node 的代码几乎全部用这种写法，所以**这个适配器对现代 TS 
 | **现在** | TS 箭头函数函数级度量（§2.4） | 否 | 唯一一条让度量数字直接错的缺陷。React/Node 代码几乎全用箭头函数，等于适配器对现代 TS 基本失效 |
 | **现在** | `test-no-assert` 8 条误报（§1.2） | 否 | 唯一一类确定性错误的 warning。规则撒谎会让整张列表失去可信度 |
 | 现在 | `.claude/settings.json.example`（§2.1） | 否 | 文档已承诺，缺一个文件。成本最低的一条 |
-| 现在 | `rules_zh.go` 从分支捞回来（`iter-28` §6.1） | 否 | T4.3 的前置，且是现成的 59 行 |
-| 现在 | T4.2 运行表补触发命令（§2.6） | 否 | P4 刚把 runs 改成表格，现在加列成本最低，越晚越贵 |
+| ~~现在~~ ✅ | `rules_zh.go` 从分支捞回来（`iter-28` §6.1） | 否 | 已做，见 §7.1 |
+| ~~现在~~ ✅ | T4.2 运行表补触发命令（§2.6） | 否 | 已做，见 §7.2 |
 | 稍后 | pre-commit scoped 根（§2.2） | 否 | 纯性能优化（省 1.6–2 秒），不是正确性 |
 | **等 CI** | P2 triage push 触发（§1.1） | **是** | CI 停着时加的是不会执行的代码 |
 | **等 CI** | P4 分支保护（§1.3） | **是** | 没有 required checks 时它守的是空集 |
@@ -312,3 +312,109 @@ payload 给 `hooks/post-edit.sh` → 输出 scope 行 + `exit 0`。这条链路�
 人肉发现的。加一个 `scripts/docs-links.sh`（遍历 `docs/**/*.md`，解析
 `]` 后的相对路径，`os.path.exists` 判据，非零退出）成本很低，应挂在 pre-commit
 而不是 CI（CI 现在是停的）。已记入排期文档。
+
+## §7 R4 / R5 的实际修法（做完之后补记）
+
+### §7.1 R4 · 规则目录中文化（`f0b0a6e`）
+
+从 `feat/issue-1-ci-smoke-test` 取回 `rules_zh.go`（59 行，7 个 rule id 的中文标题 +
+「什么算违规」一句话）、`rules_catalogue_test.go`（272 行）、`rules_api.go`（195→395
+行）与配套的 `rules_api_test.go`。**必须一起取回**：`rules_catalogue_test.go:176` 用到
+`getRaw`，而 `getRaw` 只存在于分支版的 `rules_api_test.go:227`。
+
+前端**没有整体搬分支版 `app.js`**（分支 3937 行 vs main 3522 行），因为分支版依赖 main
+上不存在的 `tablePager` / `pageRuleGroups` / `rulesLangMatches` / `RULES_LANG_ALL` /
+`state.rulesLang`。做法是在 main 版本上做最小嫁接：`ruleCopy(rule)`（无中文时回退英文
+title，**不编造** desc）、`ruleCopyCell`、「说明」列表头从 `title` 改 `titleZh`、新增
+「默认」列、`rulesOrderBy` 加两个派生 cell。
+
+实测：`/api/rules?scope=all` → 13 门语言 / 61 条规则行 / **61 行全部带 titleZh**，
+`ids WITHOUT Chinese: []`。7 个 distinct id 恰好等于中文表的条数 —— 度量类规则
+（function-length 等）**不是 rule pack 成员**，不在这 61 行里，所以不存在「漏翻译」。
+
+**两个必须记下来的坑**：
+
+1. `rulesHead` 的 `title` 属性**不能放在 `<th>` 上**。`render_all.mjs` 的表头正则锚定在
+   `<th aria-sort="…"` 后紧跟 `>`，任何插在 `<th` 与 `aria-sort` 之间的属性会让那一列
+   **从所有排序断言里静默消失**，而不是失败。修法：hint 放内层 `<button>`。
+   反向验证手法：临时给 `<th` 后插 `class="x"`（只对 `titleZh` 生效，避免全局 `<th class="x">`
+   把 `states.key` 弄成 undefined 而崩溃）→ `node render_all.mjs` 输出
+   `FAIL rules: titleZh not matched by the header regex — a <th> attribute moved ahead of
+   aria-sort, and every sort check below just went blind`。
+2. `languageGroups` 由 `/api/rules` 提供但**没有任何消费者** —— 前端与 MCP 都不读它
+   （`grep -rn languageGroups internal/mcp/` 为空）。本轮只加了断言保证它存在，没有删。
+   要么前端按语言分组渲染，要么删字段，不能长期挂着一个没人读的字段。
+
+### §7.2 R5 · 运行表补「触发命令」与「路径」（本轮）
+
+**为什么不能走 trace_attrs**：`internal/store/trace_store.go` 确实能按 trace 存任意
+kv，但实测 `SELECT COUNT(*) FROM runs WHERE trace_id IS NOT NULL AND trace_id <> ''` =
+**0** —— CLI 的 check 路径根本不写 trace_id，只有 MCP 与测试写。往一个从来不被填的表里
+加键，等于给一个空房间装锁。所以走「加列」。
+
+**后端**：`runs` 表加可空 `invocation TEXT`，迁移 `migrateRunsInvocation` 走既有
+`hasColumn` 判存模式（老库保持可用）。`RunMeta.Invocation` → `saveRun` 的 INSERT；
+`RunRecord.Invocation` → `runColumns` 的 `COALESCE(invocation, '')`。
+**列顺序是硬约束**：`runColumns` 的顺序必须与 `scanRuns`（`read.go:369`）的 Scan 参数
+顺序一致，`archived` 保持在最后。一个 scan 失败会带走整张运行历史，所以
+`TestRunWithoutInvocationReadsBackEmpty` 专门跑 `LatestRuns(10)` 这条同 scan 路径。
+
+**CLI 侧脱敏**（`cmd/metricgate/invocation.go`，~150 行）：这一列会把命令行原样存进
+一个**局域网可读**的 HTTP 面板，所以「记录它」的前提是「不会泄露」。
+
+- `secretFlags` 名单（`token`/`password`/`secret`/`api-key`/`authorization`/`private-key`…）
+  命中时值写成 `<redacted>` —— **固定串而非等长掩码**，等长掩码会泄露密钥长度。
+- `-name value` 与 `-name=value` 两种形态都处理；裸 `-name` 只在**下一个 token 是 flag
+  时**才不吃值（Go flag 包在第一个非 flag 参数后停止解析，所以位置参数 `src/token`
+  后面的东西不能被吞）。
+- 没有 flag 名可对的情况（bare positional、`FOO=bar` 环境变量赋值）用凭据前缀兜：
+  `ghp_` `github_pat_` `gho_` `ghu_` `ghs_` `ghr_` `xoxb-` `xoxp-` `xoxa-` `AKIA` `ASIA`
+  `AIza` `sk-`。
+- 超过 512 rune 截断并留标记，而不是塞进单元格把行撑爆。
+- `quoteArg` 只在含 shell 元字符时加单引号，让这一行**可以原样粘回终端**。
+- `TestSecretFlagNamesAreSpelledAsTheFlagsAre` 是反向断言：`secretFlags["config"]`、
+  `["base"]`、`["format"]` **必须为 false**。把路径 redact 掉会毁掉这列存在的意义。
+
+**前端**：`runRow` 增两列，合并成一个导出的 `provenanceCells(run)`（两列回答同一个问题
+——「这些数字怎么来的」——而行的职责是排版；分开写会让 `runRow` 的 fan-out 越到 11）。
+单元格显示**去掉 argv[0] 的部分**，因为行间真正变化的是 flag，二进制路径每行都一样；
+完整行进 tooltip。空值一律显示「未记录」而不是空白 —— 空白会被读成「这次运行没带
+任何 flag」，而 store 并没有这个事实。路径列显示末两段（一行 36px，长路径不能换行）。
+
+**这一轮真正的收获是列宽那个 bug，不是那两列**：
+
+首版给 `col-cmd` **不设宽度**，指望 `table-layout: fixed` 用它吸收剩余空间；同时没写
+`min-width`。1600px 截图上「触发命令」列只剩几个像素。根因：11 列声明宽度之和
+（95rem）超过面板可用宽度时，浏览器**按比例压缩每一列**而不是让 wrapper 出横向滚动条。
+`col-cmd` 本来就想要最大吸收空间，于是被压得最狠 —— 这列存在的理由就是它被压掉的那部分。
+
+补了 `min-width` 之后又踩第二个：`col-counts` 是 `white-space: nowrap` 的三段计数，
+没有 `overflow: hidden`，于是它**画穿自己的边框盖到下一列上**，看起来像「触发命令」列
+凭空消失。源码 grep 完全看不出问题，只有截图能看出来。
+
+最终：`min-width: 96rem`（≥ 95rem 之和）、`col-counts 21rem` + `overflow: hidden`、
+`col-cmd 16rem`、`col-path 11rem`。1920px 下 11 列全展开；1100px 下横向滚动而不是压扁。
+
+**新增两条守卫**（`internal/cockpit/web_contract_test.go`），因为这两类失败都是
+「浏览器里看不出来、源码里 grep 不出来」：
+
+- `TestRunTableWidthsAddUp` —— 声明宽度之和 > 面板可用宽度时，表必须有一个不小于该和的
+  `min-width`。`panelContentRem = (1100 − 15×16 − 2×1.125×16) / 16` 是 1100px 断点下
+  面板的真实可用宽度（减去导航栏与 panel padding）。
+- `TestRunTableColumnsAreAllDeclared` —— 表头发出的每个 `col-*` 必须在样式表里有一条
+  带 `width:` 的规则。只按类名选不够：`.runs-table .col-path { overflow: hidden; }`
+  这种规则什么都没定。
+
+两条都做了反向验证：把 `min-width` 改回 90rem → 第一条报
+`runs-table: min-width is 90rem but its 11 columns need 95rem`；删掉 `col-path` 的
+`width` → 第二条报 `the run table emits col-path but style.css never declares a width
+for it`。**「加了测试」不等于「测试会失败」，改回坏值跑一遍才算。**
+
+**验证**：`go test ./...` 48 个包全绿；`go vet ./...` 干净；`node --check` +
+`render_all` 9 views × 3 scopes × 2 modes ok；`gate: PASSED`、0 errors、431 warnings；
+`git stash` 前后对比 warning 集合 → **净新增 0**（R5 一度给 `runRow` 和 `storeRun` 各加
+一条 fan-out 11，用抽组件/抽 `runMeta(cfg)` 解决，而不是抬阈值）。
+真机：`/tmp/mg-inv check . -arch-base arch.json` → `run #1593`，
+`SELECT id, COALESCE(invocation,'<NULL>') FROM runs ORDER BY id DESC LIMIT 3` →
+`1593|/tmp/mg-inv check . -arch-base arch.json` / `1592|<NULL>` / `1577|<NULL>`
+（旧行为 NULL，走「未记录」分支）。

@@ -337,7 +337,7 @@ scope = global（全局） | project（某仓库，带 root） | unassigned（�
 | ID | 项 | 角色 |
 |---|---|---|
 | T4.1 | 统一时间格式 + UTC→本地一致 | 前端1d |
-| T4.2 | 运行卡补触发命令/路径 | 后端0.5d |
+| T4.2 | 运行卡补触发命令/路径 ✅ **已做**（iter-29 R5）：`runs` 表新增可空 `invocation` 列（`store.RunMeta.Invocation` → `saveRun`，迁移 `migrateRunsInvocation`），CLI 侧 `cmd/metricgate/invocation.go` 从 `os.Args` 组装并**脱敏**（`secretFlags` 名单 + `ghp_`/`AKIA`/`sk-` 等凭据前缀 → `<redacted>`，512 rune 截断）；前端 `runRow` 增 `col-cmd`（去掉 argv[0]，完整行进 tooltip）与 `col-path`（`project_root` 末两段，全路径进 tooltip），空值一律显示「未记录」而不是空白 | 后端0.5d |
 | T4.3 | error 调用 tooltip；度量实验结论摘要 | 前端0.5d |
 | T4.4 | 度量面板三义语义区分（评级/触发数/上限） | 前端0.5d |
 | T4.5 | **项目级 overview 两块面板不随 scope（后端遗留 L8 的后果）**：让步账本读 `s.dashboard.accepted`、度量实验读 `s.dashboard.metricTrend`，均为顶层字段 ⇒ 项目 scope 下仍显示全局内容（实测：非法 scope 页照旧列全局运行 #1298–#1317）。需后端补 `ProjectSummary.accepted/metricTrend`，前端同步改读（`smoke.mjs:498-523` 的 L8 tripwire 会强制这件事） | 后端0.5d+前端0.5d |

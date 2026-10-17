@@ -1010,6 +1010,49 @@ export const callRow = (call) => {
 };
 
 /**
+ * invocationCell is the command line that produced one run.
+ *
+ * The cell shows the tail (the verb and its flags, not the absolute path of the
+ * binary that happens to be on this machine), because that tail is the part that
+ * changed between two rows of an otherwise identical history. A run stored
+ * before the column existed says 未记录 rather than rendering blank: blank reads
+ * as "no flags" and would be a lie about a fact we do not have.
+ */
+export const invocationCell = (run) => {
+  const line = field(run, "invocation") || "";
+  if (!line) return html`<span class="invocation-missing">未记录</span>`;
+  const args = line.split(" ").slice(1).join(" ");
+  return html`<code class="run-invocation" title="${line}">${args || line}</code>`;
+};
+
+/**
+ * runPathCell is where the run looked at code.
+ *
+ * Shortened to the last two path components with the full path in the tooltip:
+ * the reader comparing rows wants to tell /repo/api from /repo/web, while the
+ * home directory prefix is identical on every row of a single machine.
+ */
+export const runPathCell = (run) => {
+  const root = field(run, "projectRoot") || "";
+  if (!root) return html`<span class="invocation-missing">未记录</span>`;
+  const parts = root.split("/").filter(Boolean);
+  const short = parts.length > 2 ? "…/" + parts.slice(-2).join("/") : root;
+  return html`<span class="run-path" title="${root}">${short}</span>`;
+};
+
+/**
+ * provenanceCells are the two columns that say how a run came to be.
+ *
+ * They are one unit because they answer one question — what produced these
+ * numbers — and the reader either uses both to reproduce a run or uses neither.
+ * Keeping them in a single function also keeps the row template's fan-out at the
+ * threshold: the row's job is laying out columns, not formatting three of them.
+ */
+export const provenanceCells = (run) => html`
+  <td class="col-cmd">${invocationCell(run)}</td>
+  <td class="col-path">${runPathCell(run)}</td>`;
+
+/**
  * runRow is one stored run, selectable for archive/restore.
  *
  * A table row rather than a card, for the same reason the findings became a
@@ -1031,7 +1074,8 @@ export const runRow = (run, findings, archived) => {
       <td class="col-commit"><code class="run-commit">${field(run, "gitCommit") || "本地工作区"}</code></td>
       <td class="col-when">${formatTime(field(run, "startedAt"))}</td>
       <td class="col-size">${field(run, "files") || 0} 个文件<span class="muted"> · </span>${field(run, "durationMs") || 0} ms</td>
-      <td class="col-counts"><span class="error-text">${errorCount}</span><span class="muted"> errors · </span><span class="warning-text">${warningCount}</span><span class="muted"> warnings · ${count} 条发现</span></td>
+      <td class="col-counts" title="${errorCount} errors · ${warningCount} warnings · ${count} 条发现"><span class="error-text">${errorCount}</span><span class="muted"> errors · </span><span class="warning-text">${warningCount}</span><span class="muted"> warnings · ${count} 条发现</span></td>
+      ${provenanceCells(run)}
       <td class="col-act"><button class="text-button" data-action="run.findings" data-run="${id}">查看发现 ↗</button></td>
     </tr>`;
 };
@@ -1043,10 +1087,11 @@ export const runTable = (rows, findings) => html`
       <thead><tr>
         <th class="col-pick"></th><th class="col-status">结果</th><th class="col-run">运行</th>
         <th class="col-verdict">结论</th><th class="col-commit">提交</th><th class="col-when">开始时间</th>
-        <th class="col-size">规模</th><th class="col-counts">计数</th><th class="col-act"></th>
+        <th class="col-size">规模</th><th class="col-counts">计数</th>
+        <th class="col-cmd">触发命令</th><th class="col-path">路径</th><th class="col-act"></th>
       </tr></thead>
       <tbody>${rows.length ? list(rows, (run) => runRow(run, findings, Boolean(field(run, "archived"))))
-        : html`<tr><td class="table-empty" colspan="9">没有运行记录</td></tr>`}</tbody>
+        : html`<tr><td class="table-empty" colspan="11">没有运行记录</td></tr>`}</tbody>
     </table>
   </div>`;
 

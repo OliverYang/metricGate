@@ -1301,21 +1301,45 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 .runs-list { margin-top: 1rem; }
 /*
  * The run table. Same density contract as the findings table: 36px rows, fixed
- * column widths declared once on the header, and only the free-form column
- * (the commit id) allowed to be clipped.
+ * column widths declared once on the header, and only the free-form columns
+ * allowed to be clipped.
+ *
+ * The min-width is not decoration. Eleven columns of real content need about
+ * 89rem, which is wider than the panel on a 1440px laptop; without a floor the
+ * browser squeezes the two provenance columns to nothing instead of scrolling,
+ * and a command line crushed to zero width is the same as not shipping it. The
+ * wrapper already scrolls sideways, so the honest choice is to let it.
  */
-.runs-table { table-layout: fixed; }
+.runs-table { table-layout: fixed; min-width: 96rem; }
 .runs-table .col-pick { width: 2rem; padding-right: 0; }
-.runs-table .col-status { width: 3rem; }
-.runs-table .col-run { width: 6rem; }
-.runs-table .col-verdict { width: 7rem; }
-.runs-table .col-commit { width: 9rem; }
-.runs-table .col-when { width: 11rem; }
-.runs-table .col-size { width: 9rem; }
-.runs-table .col-counts { width: 13rem; }
+.runs-table .col-status { width: 2.5rem; }
+.runs-table .col-run { width: 5rem; }
+.runs-table .col-verdict { width: 6rem; }
+.runs-table .col-commit { width: 7rem; }
+.runs-table .col-when { width: 10rem; }
+.runs-table .col-size { width: 8rem; }
+.runs-table .col-counts { width: 21rem; }
+/*
+ * The two provenance columns: the command line that produced the run, and the
+ * root it looked at. col-cmd is the widest thing here because it is the only
+ * value whose length is not known in advance; clipping it with an ellipsis is
+ * honest as long as the full line is in the tooltip.
+ */
+.runs-table .col-cmd { width: 16rem; overflow: hidden; }
+.runs-table .col-path { width: 11rem; overflow: hidden; }
+.runs-table .run-invocation, .runs-table .run-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runs-table .run-invocation { font-family: var(--mono); font-size: var(--e-font-size-xs); color: var(--text); }
+.runs-table .run-path { color: var(--muted); font-size: var(--e-font-size-xs); }
+.runs-table .invocation-missing { color: var(--muted); font-size: var(--e-font-size-xs); font-style: italic; }
 .runs-table .col-act { width: 6.5rem; text-align: right; }
 .runs-table .run-commit, .runs-table .col-commit code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.runs-table .col-counts { font-family: var(--mono); font-size: var(--e-font-size-xs); white-space: nowrap; }
+/*
+ * col-counts carries three numbers in one nowrap string and needs overflow:
+ * hidden for the same reason the message column does. Without it the text
+ * paints over its own border and into the next cell, and the column to its
+ * right — the command line — disappears behind it.
+ */
+.runs-table .col-counts { font-family: var(--mono); font-size: var(--e-font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .runs-table .col-size { color: var(--muted); font-size: var(--e-font-size-xs); white-space: nowrap; }
 .runs-table .col-when { color: var(--muted); font-size: var(--e-font-size-xs); white-space: nowrap; }
 .runs-table tbody tr:hover { background: var(--panel2); }

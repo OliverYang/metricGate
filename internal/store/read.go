@@ -27,6 +27,9 @@ type RunRecord struct {
 	ProjectRoot  string
 	PolicyDigest string
 	TraceID      string
+	// Invocation is the command line that produced this run, or empty when the
+	// run predates the column or the caller did not supply one.
+	Invocation   string
 	ErrorCount   int
 	WarningCount int
 	InfoCount    int
@@ -368,7 +371,7 @@ func (s *Store) scanRuns(q string, args []any) ([]RunRecord, error) {
 		var archivedValue int
 		if err := rows.Scan(&r.ID, &r.StartedAt, &r.DurationMs, &r.ToolVersion, &r.GitCommit,
 			&r.Files, &r.ErrorCount, &r.WarningCount, &r.InfoCount, &r.ProjectRoot,
-			&r.PolicyDigest, &r.TraceID, &archivedValue); err != nil {
+			&r.PolicyDigest, &r.TraceID, &r.Invocation, &archivedValue); err != nil {
 			return nil, err
 		}
 		r.Archived = archivedValue != 0
