@@ -90,6 +90,29 @@ gh auth login      # GitHub.com → HTTPS → Login with a web browser
 它会做两件事：`git config core.hooksPath hooks`、从 `.claude/settings.json.example`
 生成 `.claude/settings.json`（替换绝对路径）。
 
+### 1.5 仓库设置（必做，否则 autopr/triage 静默失效）
+
+**Settings → Actions → General → Workflow permissions** 必须是
+**Read and write permissions**。
+
+这是最容易漏的一步，因为失败是静默的：
+
+- 仓库默认是 **Read repository contents**；
+- workflow 里的 `permissions: pull-requests: write` **只能收窄、不能放大**；
+- 于是 `GITHUB_TOKEN` 开 PR 时收到 403，`autopr` 报红或什么也没做，
+  而 `gate`（只需要 `contents: read`）照样绿——看起来像 autopr 的 bug。
+
+同一个页面顺手勾上 **Allow GitHub Actions to create and approve pull requests**
+（有些账号策略把它单独关着）。
+
+| 设置 | 位置 | 谁依赖它 |
+| --- | --- | --- |
+| Workflow permissions = Read and write | Actions → General | `autopr`（开 PR）、`triage`（建 issue）、`seal`（打 tag + Release） |
+| Allow GitHub Actions to create and approve pull requests | 同上 | `autopr` |
+
+**验证**：推一个分支，等 1 分钟，`git ls-remote origin 'refs/pull/*'` 应出现一条。
+这是不需要 API token 的检查方式。
+
 ---
 
 ## 2. 日常循环
@@ -180,8 +203,9 @@ Release 正文含：errors / warnings / metric snapshots / commit sha / 二进�
 
 | 症状 | 原因 | 处理 |
 | --- | --- | --- |
-| `ssh -T git@github.com` → `Permission denied (publickey)` | 公钥没加到 GitHub，或 ssh 选错了 key | 见 §1.1；`ssh -i ~/.ssh/id_ed25519 -T` 单独试 |
-| push 成功但没 PR | `autopr.yml` 需要 `pull-requests: write`；或分支与 main 无差异 | Actions 页面看 `autopr` run 日志；`git log origin/main..HEAD` 应有内容 |
+| `ssh -T git@github.com` → `Permission denied (publickey)` | 公钥没加到 GitHub，或 ssh 选错了 key | 见 §1.1。**先确认账号上到底是哪把 key**：`curl -s https://api.github.com/users/<user>/keys`，再 `ssh-keygen -lf ~/.ssh/id_rsa.pub` 对比指纹。本仓踩过：账号上注册的是 RSA，而 `~/.ssh/config` 里写了 ed25519 |
+| push 成功但没 PR（`git ls-remote origin 'refs/pull/*'` 为空） | **Workflow permissions 是只读**（默认值） | 见 §1.5。`permissions:` 块只能收窄不能放大，所以这个失败在 workflow 文件里看不出来 |
+| push 成功但没 PR（有 pull refs 但内容不对） | 分支与 main 无差异，或已有 open PR | `git log origin/main..HEAD` 应有内容；`autopr` 对同一 head 是幂等的 |
 | PR 上没有 `gate` check | `paths:` 过滤掉了改动（只列了代码后缀与 `.metricgate.yaml`） | 改 `gate.yml` 的 `paths`，或改 `.metricgate.yaml` 触发 |
 | gate 报 `"origin/main" is not a commit ... fetch-depth 0` | checkout 太浅，没有 merge-base | `gate.yml` 已固定 `fetch-depth: 0`；本地则 `git fetch origin` |
 | triage 建了 0 条 issue | 整树 0 error（正常），或 label 已存在 | 看 run 的 summary 表 |
