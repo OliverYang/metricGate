@@ -2636,6 +2636,48 @@ const ruleReason = (reason) => RULE_REASONS[String(reason || "")] || String(reas
 const ruleToggle = (rule) => (rule.enabled ? "启用" : "关闭");
 
 /**
+ * ruleDefaultToggle is the pack's own default, shown beside the effective switch.
+ *
+ * The two together are the only way to read "the policy turned this off" against
+ * "this was never on": a page with one boolean cannot distinguish a deliberate
+ * override from an untouched default, and that difference decides whether anyone
+ * should go look at the policy file at all.
+ */
+const ruleDefaultToggle = (rule) => (rule.defaultEnabled ? "默认启用" : "默认关闭");
+
+/**
+ * ruleCopy is the Chinese title and description for one rule.
+ *
+ * The backend merges them (internal/cockpit/rules_zh.go) rather than the rule
+ * pack carrying UI prose, because the same pack feeds the CLI, SARIF and the MCP
+ * tools. An id with no Chinese entry falls back to the English title and no
+ * description — inventing a sentence nobody wrote would be a claim about the
+ * engine that cannot be checked.
+ */
+const ruleCopy = (rule) => {
+  const title = rule.titleZh || rule.title || rule.id;
+  const desc = rule.descriptionZh || "";
+  return { title, desc, english: rule.title && rule.title !== title ? rule.title : "" };
+};
+
+/**
+ * ruleCopyCell renders 说明 as name + what-counts-as-a-violation in one column.
+ *
+ * The title alone is not enough: "空的控制流块" does not say whether an
+ * else-branch holding only a comment counts, and that is precisely the judgement
+ * the reader in front of a finding has to make. The English original stays
+ * reachable on hover rather than in a second column, because it repeats for all
+ * 13 languages and a table that spends its width on duplication teaches nothing.
+ */
+const ruleCopyCell = (rule) => {
+  const copy = ruleCopy(rule);
+  return html`<td title="${copy.english || rule.title || ""}"><div class="rule-copy">
+    <span class="rule-title">${copy.title}</span>
+    ${copy.desc ? html`<p class="rule-desc">${copy.desc}</p>` : ""}
+  </div></td>`;
+};
+
+/**
  * rulesCatalogue is the primary table: what the engine will do, and why.
  *
  * It answers the question the effective-key table could not — "why does this
@@ -2653,12 +2695,13 @@ const rulesCatalogue = (s) => {
     ${rules.length
     ? html`<div class="table-wrap">
         <table class="rules-table">
-          <thead><tr>${rulesHead(s.rulesSort, "language", "语言")}${rulesHead(s.rulesSort, "id", "规则")}${rulesHead(s.rulesSort, "title", "说明")}${rulesHead(s.rulesSort, "severity", "严重度")}${rulesHead(s.rulesSort, "warn", "warn")}${rulesHead(s.rulesSort, "error", "error")}${rulesHead(s.rulesSort, "policySource", "生效来源")}${rulesHead(s.rulesSort, "enabled", "开关")}${rulesHead(s.rulesSort, "reason", "存在理由")}</tr></thead>
+          <thead><tr>${rulesHead(s.rulesSort, "language", "语言")}${rulesHead(s.rulesSort, "id", "规则")}${rulesHead(s.rulesSort, "titleZh", "说明", "中文标题与一句话「什么算违规」。没有中文条目的规则回退英文原文，不编造翻译；鼠标悬停看英文原名。")}${rulesHead(s.rulesSort, "severity", "严重度")}${rulesHead(s.rulesSort, "warn", "warn")}${rulesHead(s.rulesSort, "error", "error")}${rulesHead(s.rulesSort, "defaultEnabled", "默认", "规则包出厂时的开关。策略没提到这条规则时，引擎就按这个值跑。")}${rulesHead(s.rulesSort, "policySource", "生效来源", "生效来源与上一列的默认开关合起来才是「这条规则现在为什么是这个状态」。")}${rulesHead(s.rulesSort, "enabled", "开关")}${rulesHead(s.rulesSort, "reason", "存在理由")}</tr></thead>
           <tbody>
             ${list(ordered, (r) => html`<tr>
-              <td>${r.language}</td><td>${r.id}</td><td>${r.title || "—"}</td>
+              <td>${r.language}</td><td>${r.id}</td>${ruleCopyCell(r)}
               <td>${severityOf(r.severity).label}</td>
               <td>${thresholdCell(r, "warn")}</td><td>${thresholdCell(r, "error")}</td>
+              <td class="cell-nowrap">${ruleDefaultToggle(r)}</td>
               <td>${ruleSourceLabel(r)}</td><td>${ruleToggle(r)}</td>
               <td title="${r.reason || ""}">${ruleReason(r.reason)}${r.note ? ` · ${r.note}` : ""}</td>
             </tr>`)}
@@ -2699,6 +2742,8 @@ const ruleSourceLabel = (rule) => policySourceLabel({ source: rule.policySource 
  */
 const rulesOrderBy = (rules, sort) => {
   const cell = (r) => (sort.key === "warn" || sort.key === "error" ? thresholdCell(r, sort.key)
+    : sort.key === "titleZh" ? ruleCopy(r).title
+    : sort.key === "defaultEnabled" ? ruleDefaultToggle(r)
     : sort.key === "severity" ? severityOf(r.severity).label
     : sort.key === "policySource" ? ruleSourceLabel(r)
     : sort.key === "reason" ? ruleReason(r.reason)
@@ -2761,11 +2806,16 @@ const rulesOrder = (keys, sort) => {
  * is the same lie either way. The arrow is for the reader who does not trust
  * an attribute.
  */
-const rulesHead = (sort, key, label) => {
+const rulesHead = (sort, key, label, hint) => {
   const active = sort.key === key;
   const arrow = active ? (sort.dir === "asc" ? "↑" : "↓") : "";
+  // aria-sort must stay the first attribute on <th>, and the optional hint must
+  // not go on <th> at all: render_all.mjs reads the header state with a regex
+  // anchored on `<th aria-sort="…"\s*>`, so any attribute inserted there makes
+  // the column vanish from that check instead of failing it. The hint therefore
+  // rides on the button, which the same regex already tolerates.
   return html`<th aria-sort="${active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}"
-    ><button type="button" class="th-sort" data-action="rules.sort" data-key="${key}"
+    ><button type="button" class="th-sort" data-action="rules.sort" data-key="${key}"${hint ? html` title="${hint}"` : ""}
       ><span>${label}</span><i class="sort-arrow">${arrow || "↕"}</i></button></th>`;
 };
 

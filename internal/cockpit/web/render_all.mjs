@@ -550,6 +550,33 @@ for (const scope of [null, "/repo/alpha", ""]) {
   }
 }
 
+/**
+ * The Chinese copy the catalogue merges in rules_zh.go, asserted offline.
+ *
+ * render_all runs without a server, so this is the only place the page's
+ * fallback branch is checked: an id the tables do not cover must render the
+ * English title rather than an empty cell, and must not gain an invented
+ * description. The Go test proves every id HAS copy; only this proves the page
+ * draws it, and draws the missing case honestly.
+ */
+const RULES_CATALOGUE = {
+  policyPath: ".metricgate.yaml",
+  languages: ["go", "java"],
+  rules: [
+    { language: "go", id: "empty-block", title: "Empty control-flow block", titleZh: "空的控制流块", descriptionZh: "if / for / while / switch 的块里没有任何语句。", enabled: true, defaultEnabled: true, severity: "warning", warn: 0, error: 0, reason: "configured", policySource: "this policy" },
+    { language: "go", id: "function-length", title: "Function exceeds 80 lines", titleZh: "", descriptionZh: "", enabled: true, defaultEnabled: false, severity: "warning", warn: 80, error: 120, reason: "builtin", policySource: "builtin" },
+  ],
+};
+{
+  const out = (app.VIEWS.rules.render({ policy: { keys: [] }, rules: RULES_CATALOGUE, rulesSort: { key: "titleZh", dir: "asc" } }) || {}).value || "";
+  if (!out.includes("空的控制流块")) problems.push("rules: the Chinese title did not reach the table");
+  if (!out.includes("if / for / while / switch 的块里没有任何语句。")) problems.push("rules: the Chinese description did not reach the table");
+  if (!out.includes("Function exceeds 80 lines")) problems.push("rules: a rule with no Chinese entry lost its English title (the fallback must be the original, not a blank)");
+  if (out.includes("函数超过 80 行")) problems.push("rules: the page invented Chinese copy nobody wrote");
+  const defaults = [...out.matchAll(/默认启用|默认关闭/g)].map((m) => m[0]);
+  if (defaults.join(",") !== "默认启用,默认关闭") problems.push(`rules: defaultEnabled cells = ${defaults.join(",")}, want one 默认启用 and one 默认关闭`);
+}
+
 /*
  * The Rules table's sortable headers.
  *
@@ -568,7 +595,7 @@ for (const scope of [null, "/repo/alpha", ""]) {
     { key: "aaa.first", source: "builtin", explicit: false, value: "" },
     { key: "mmm.middle", source: "preset:strict", explicit: true, value: "1" },
   ];
-  const render = (sort) => (app.VIEWS.rules.render({ policy: { keys: RULES_KEYS }, rulesSort: sort }) || {}).value || "";
+  const render = (sort) => (app.VIEWS.rules.render({ policy: { keys: RULES_KEYS }, rules: RULES_CATALOGUE, rulesSort: sort }) || {}).value || "";
   const thStates = (sort) => {
     const out = render(sort);
     const states = {};
@@ -577,6 +604,20 @@ for (const scope of [null, "/repo/alpha", ""]) {
     }
     return states;
   };
+
+  // Every sortable column must be visible to the checks below. They all read
+  // thStates, whose regex is anchored on `<th aria-sort="…">` — so a template
+  // that inserts an attribute between <th and aria-sort makes that column
+  // disappear from every header assertion WITHOUT failing one. That is how a
+  // tooltip on 说明 nearly passed: the check for a column nobody can match
+  // cannot report the column it stopped seeing.
+  {
+    const seen = Object.keys(thStates({ key: "language", dir: "asc" }));
+    const wanted = ["language", "id", "titleZh", "severity", "warn", "error", "defaultEnabled", "policySource", "enabled", "reason", "key", "value", "source"];
+    const missing = wanted.filter((k) => !seen.includes(k));
+    if (missing.length) problems.push(`rules: ${missing.join(", ")} not matched by the header regex — a <th> attribute moved ahead of aria-sort, and every sort check below just went blind`);
+  }
+
   const rows = (sort) => {
     const out = render(sort);
     return [...out.matchAll(/<tr><td>([^<]*)<\/td><td>([^<]*)<\/td><td>([^<]*)<\/td>/g)]

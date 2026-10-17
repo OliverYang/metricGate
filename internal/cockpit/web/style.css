@@ -1326,6 +1326,20 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 .run-commit { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); }
 .run-select { display: grid; place-items: center; flex: none; }
 .run-select input { accent-color: var(--e-color-accent); }
+/* The Chinese title over its description, with the English original kept as the
+   cell's title attribute. A two-line cell is what makes the column readable at
+   the table's density; description-in-a-tooltip-only hides the one sentence that
+   explains why the rule exists, which is the thing the reader in front of a
+   finding actually needs. */
+.rule-copy { display: grid; gap: 0.125rem; max-width: 30rem; }
+.rule-title { color: var(--text-strong); }
+.rule-desc { color: var(--muted); font-size: var(--e-font-size-xs); line-height: 1.45; }
+
+/* Two-character Chinese words must not break across lines. The 默认 column is
+   the narrowest in this table and its values ("默认启用") were splitting as
+   "默认启 / 用", which reads as a different word on the second line. */
+.cell-nowrap { white-space: nowrap; }
+
 .error-text { color: var(--e-color-danger-text); }
 .warning-text { color: var(--e-color-warning-text); }
 
