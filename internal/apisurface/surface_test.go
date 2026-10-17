@@ -131,3 +131,39 @@ func TestCurrentIncludesExportedJavaMembers(t *testing.T) {
 		t.Errorf("Java API entries = %+v", entries)
 	}
 }
+
+// The "(root)" bucket collects every file that declares no package. Two
+// unrelated scripts defining the same function name are two symbols, not one
+// symbol that changed: keying the bucket by name alone made Compare report a
+// signature change for a tree diffed against itself.
+func TestRootBucketKeysByNameAndFile(t *testing.T) {
+	snap := &Snapshot{Version: 1, Packages: map[string][]Entry{
+		rootPackage: {
+			{Name: "main", Signature: "def main() -> None:", File: "scripts/a.py", Line: 1},
+			{Name: "main", Signature: "def main(args) -> int:", File: "scripts/b.py", Line: 1},
+		},
+	}}
+	d := Compare(snap, snap)
+	if d.Changed() {
+		t.Errorf("a tree diffed against itself changed: breaking=%+v added=%+v moved=%+v", d.Breaking, d.Added, d.Moved)
+	}
+}
+
+// A real package keeps pairing by name across files, so moving a symbol
+// between files in the same package is still reported as moved rather than as
+// one removal plus one addition.
+func TestNamedPackageStillPairsAcrossFiles(t *testing.T) {
+	old := &Snapshot{Version: 1, Packages: map[string][]Entry{
+		"api": {{Name: "Run", Signature: "func Run()", File: "api/a.go", Line: 1}},
+	}}
+	moved := &Snapshot{Version: 1, Packages: map[string][]Entry{
+		"api": {{Name: "Run", Signature: "func Run()", File: "api/b.go", Line: 1}},
+	}}
+	d := Compare(old, moved)
+	if len(d.Breaking) != 0 {
+		t.Errorf("moving a symbol inside its package is not breaking: %+v", d.Breaking)
+	}
+	if len(d.Moved) != 1 || d.Moved[0].New != "api/b.go" {
+		t.Errorf("moved = %+v, want one move to api/b.go", d.Moved)
+	}
+}

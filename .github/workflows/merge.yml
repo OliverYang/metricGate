@@ -1,0 +1,160 @@
+# Squash-merge a PR once every check on its head commit is green.
+#
+# WHY NOT NATIVE AUTO-MERGE
+#   GitHub's own auto-merge waits on the *required* checks, which live in
+#   branch protection — invisible to a workflow's token and easy to leave
+#   unset. With no required checks configured, arming auto-merge merges the PR
+#   immediately, before `gate` has even started: the check that was supposed to
+#   protect the merge is what gets skipped. Deciding here instead means the
+#   rule is in the repository, reviewable in a diff, and does not depend on a
+#   setting nobody can see from the code.
+#
+# WHY workflow_run AND NOT check_suite
+#   `gate` and `review` are separate workflows, so they finish at different
+#   times and neither knows about the other. Triggering on their completion and
+#   then reading *all* check runs for the head SHA makes the decision a
+#   function of the tree, not of which workflow happened to finish last: the
+#   first one to finish sees the other still running and does nothing, the
+#   second sees both green and merges.
+#
+# WHY THE FORK GUARD
+#   `workflow_run` runs with a write token even when the triggering workflow
+#   ran on a fork's commit. Merging is a write, so the run refuses anything
+#   whose head repository is not this one.
+name: merge
+
+on:
+  workflow_run:
+    workflows: [gate, review]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+concurrency:
+  # One decision per head commit; a burst of completions coalesces.
+  group: merge-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    steps:
+      - name: Squash-merge when everything is green
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.payload.workflow_run.head_sha;
+            const branch = context.payload.workflow_run.head_branch;
+            const { owner, repo } = context.repo;
+
+            const log = (m) => core.info(m);
+            const stop = (m) => { core.info(`no merge: ${m}`); return; };
+
+            // --- find the PR ---------------------------------------------------
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, head: `${owner}:${branch}`, state: 'open',
+            });
+            if (prs.length === 0) return stop(`no open PR for ${branch}`);
+            const pr = prs[0];
+            if (pr.base.ref !== 'main') return stop(`PR #${pr.number} targets ${pr.base.ref}`);
+            if (pr.draft) return stop(`PR #${pr.number} is a draft`);
+            // A merged or closed PR can still be listed by a racing event.
+            if (pr.merged || pr.state !== 'open') return stop(`PR #${pr.number} is ${pr.state}`);
+
+            // --- read every check on the head commit ----------------------------
+            // Which SHA carries the check runs is not something to assume: a
+            // `pull_request` workflow runs on the merge commit, so its checks
+            // hang off `refs/pull/N/merge`, while `workflow_run.head_sha` is the
+            // PR's own head. Reading only one of the two leaves the required
+            // check permanently "not reported" and the PR never merges. So read
+            // all the plausible refs and union them by name.
+            const refs = [...new Set([
+              pr.head.sha,
+              context.payload.workflow_run.head_sha,
+              `refs/pull/${pr.number}/head`,
+              `refs/pull/${pr.number}/merge`,
+            ].filter(Boolean))];
+
+            const runs = [];
+            for (const ref of refs) {
+              try {
+                // `filter: latest` gives one run per name, which is what "is
+                // this commit green?" means; without it a re-run shows up twice
+                // and an old failure shadows the green retry.
+                const { data } = await github.rest.checks.listForRef({
+                  owner, repo, ref, filter: 'latest', per_page: 100,
+                });
+                runs.push(...(data.check_runs || []));
+              } catch (err) {
+                // A ref that does not exist (no merge commit yet on a
+                // conflicted PR) is expected; anything else is worth a warning.
+                if (err.status !== 404) {
+                  core.warning(`could not list checks for ${ref}: ${err.status || '?'} ${err.message}`);
+                }
+              }
+            }
+
+            // Fail closed: a name is green only when every run carrying it is
+            // completed and successful. A name with a pending run anywhere is
+            // still pending.
+            const byName = new Map();
+            for (const r of runs) {
+              if (!byName.has(r.name)) byName.set(r.name, []);
+              byName.get(r.name).push(r);
+            }
+            const verdictOf = (name) => {
+              const list = byName.get(name);
+              if (!list || list.length === 0) return { state: 'missing' };
+              if (list.some((r) => r.status !== 'completed')) return { state: 'pending' };
+              const bad = list.find((r) => r.conclusion !== 'success');
+              if (bad) return { state: 'failed', conclusion: bad.conclusion };
+              return { state: 'passed' };
+            };
+
+            const blocking = ['gate', 'review'];
+            for (const name of blocking) {
+              const v = verdictOf(name);
+              if (v.state === 'missing') return stop(`\`${name}\` has not reported yet`);
+              if (v.state === 'pending') return stop(`\`${name}\` is still running`);
+              if (v.state === 'failed') return stop(`\`${name}\` concluded ${v.conclusion}`);
+            }
+
+            // "Everything green" is stronger than "the two we named are green":
+            // any other failing check blocks the merge too, so a future workflow
+            // cannot be silently ignored.
+            const ok = new Set(['success', 'skipped', 'neutral']);
+            const red = [...byName.entries()]
+              .filter(([, list]) => list.some((r) => r.status === 'completed' && !ok.has(r.conclusion)))
+              .map(([name, list]) => `${name}=${list.find((r) => r.status === 'completed' && !ok.has(r.conclusion)).conclusion}`);
+            if (red.length > 0) return stop(`other checks are red: ${red.join(', ')}`);
+
+            const pending = [...byName.entries()]
+              .filter(([, list]) => list.some((r) => r.status !== 'completed'))
+              .map(([name]) => name);
+            if (pending.length > 0) return stop(`still running: ${pending.join(', ')}`);
+
+            // --- merge ---------------------------------------------------------
+            try {
+              const { data: merged } = await github.rest.pulls.merge({
+                owner, repo,
+                pull_number: pr.number,
+                merge_method: 'squash',
+                // Pin the head commit: if a push landed between reading the
+                // checks and merging, the merge is refused rather than merging
+                // a commit nobody reviewed.
+                sha: pr.head.sha,
+              });
+              core.info(`merged PR #${pr.number} (${merged.sha}); seal.yml takes it from here.`);
+            } catch (err) {
+              // 405 = not mergeable (conflict, or a push landed between the
+              // check read and the merge). 409 = head moved. Both are states a
+              // human has to resolve, not reasons to retry blindly.
+              core.warning(`could not merge PR #${pr.number}: ${err.status || '?'} ${err.message}`);
+              core.setFailed(`merge of PR #${pr.number} failed: ${err.message}`);
+            }

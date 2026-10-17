@@ -10,36 +10,23 @@
 # with the target branch, and metricgate refuses to guess: it names the ref it
 # could not resolve rather than reporting a clean tree.
 #
-# paths: keep in sync with internal/parser/parser.go LanguageForFile. Only
-# listed paths trigger the gate; .metricgate.yaml changes re-gate everything.
+# paths: keep in sync with internal/parser/parser.go LanguageForFile.
+#
+# WHY THE PULL_REQUEST TRIGGER HAS NO paths FILTER
+#   A required check that never runs is not "skipped", it stays pending — and
+#   a branch protected on it can never merge a change the filter excludes. The
+#   first draft filtered paths on pull_request too, which meant a docs-only PR
+#   waited forever for a gate that was never going to start. The diff-scoped
+#   gate costs ~2s on this tree, so it runs on every PR and reports "no new
+#   violations" when the diff touches no source file.
+#
+#   The push-to-main trigger keeps its filter: seal.yml already gates the whole
+#   tree there, and a docs merge does not need a second full run.
 name: gate
 
 on:
   pull_request:
     branches: [main]
-    paths:
-      - '**.go'
-      - '**.java'
-      - '**.ts'
-      - '**.mts'
-      - '**.cts'
-      - '**.js'
-      - '**.mjs'
-      - '**.cjs'
-      - '**.jsx'
-      - '**.py'
-      - '**.c'
-      - '**.h'
-      - '**.cpp'
-      - '**.cc'
-      - '**.cxx'
-      - '**.hpp'
-      - '**.hh'
-      - '**.hxx'
-      - '**.cs'
-      - '**.rs'
-      - '.metricgate.yaml'
-      - '.github/workflows/gate.yml'
   push:
     branches: [main]
     paths:

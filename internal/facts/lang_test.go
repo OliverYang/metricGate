@@ -335,3 +335,40 @@ func TestExtractMemberNamesUseOwnerReceiver(t *testing.T) {
 	}
 	_ = memberNames(a)
 }
+
+// A module-level declaration that is not exported cannot be reached from
+// another module, so it is module-local, not public surface. The exported-API
+// gate used to see every `const helper = () => …` as API and reported a
+// breaking change when one was renamed.
+func TestExtractJSModuleLocalDeclarationsAreNotExported(t *testing.T) {
+	src := `import x from "y";
+const localHelper = (s) => s + 1;
+export const publicHelper = (s) => s + 1;
+function localFn() { return 1 }
+export function publicFn() { return 1 }
+class LocalClass { method() { return 1 } }
+export class PublicClass { method() { return 1 } }
+`
+	f := extractOne(t, "m.js", src)
+	wantVis(t, wantDef(t, f, "localHelper", "function"), "package")
+	wantVis(t, wantDef(t, f, "publicHelper", "function"), "exported")
+	wantVis(t, wantDef(t, f, "localFn", "function"), "package")
+	wantVis(t, wantDef(t, f, "publicFn", "function"), "exported")
+	wantVis(t, wantDef(t, f, "LocalClass", "class"), "package")
+	wantVis(t, wantDef(t, f, "PublicClass", "class"), "exported")
+}
+
+// Members of a class are not module-level declarations: the class decides
+// their reachability, so an unexported class's public methods stay exported.
+func TestExtractJSClassMembersKeepClassReachability(t *testing.T) {
+	src := `class Hidden {
+  area(): number { return 1; }
+  private secret(): number { return 2; }
+}
+`
+	f := extractOne(t, "m.ts", src)
+	hidden := wantDef(t, f, "Hidden", "class")
+	wantVis(t, hidden, "package")
+	wantVis(t, wantMember(t, hidden, "area"), "exported")
+	wantVis(t, wantMember(t, hidden, "secret"), "private")
+}
