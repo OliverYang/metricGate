@@ -72,6 +72,7 @@ var commands = map[string]func([]string){
 	"accept":       cmdAccept,
 	"suppressions": cmdSuppressions,
 	"cockpit":      cmdCockpit,
+	"store":        cmdStore,
 	"init":         cmdInit,
 	"version":      cmdVersion,
 }

@@ -337,6 +337,51 @@ type GateConfig struct {
 type StoreConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Path    string `yaml:"path"`
+	// Retain bounds how much history the store keeps. The zero value keeps
+	// everything, so a policy written before this key existed keeps its
+	// behaviour byte for byte.
+	Retain RetainConfig `yaml:"retain,omitempty"`
+	// PruneOnWrite applies the retention policy after every successful run is
+	// saved. It is off by default: deleting history is an operator's decision,
+	// not a side effect of running a check.
+	PruneOnWrite bool `yaml:"prune_on_write,omitempty"`
+}
+
+// RetainConfig is the retention policy for the trend store. Zero means
+// unlimited for each field independently, so "keep 500 runs, no time limit"
+// and "keep 90 days, no run limit" are both expressible.
+type RetainConfig struct {
+	// Runs keeps the newest N runs. 0 = unlimited.
+	Runs int `yaml:"runs,omitempty"`
+	// Days keeps runs started within the last D days. 0 = unlimited.
+	Days int `yaml:"days,omitempty"`
+}
+
+// Unlimited reports whether the policy keeps everything, in which case the
+// store has no work to do and must not touch the database at all.
+func (r RetainConfig) Unlimited() bool { return r.Runs <= 0 && r.Days <= 0 }
+
+// validate rejects a bound that cannot mean anything. A negative value read as
+// "unlimited" would delete nothing while the policy looks like it bounds
+// history — the failure this iteration exists to remove — so it is refused at
+// load time, where the operator still sees the file name.
+func (r RetainConfig) validate() error {
+	if r.Runs >= 0 && r.Days >= 0 {
+		return nil
+	}
+	return fmt.Errorf("store.retain: runs and days must be >= 0 (0 = unlimited), got runs=%d days=%d", r.Runs, r.Days)
+}
+
+// normalizeStore fills in the store defaults and rejects a retention policy
+// that cannot be honoured. It is one call rather than two inline checks so the
+// load path keeps its branch count: LoadWithSource is already at the
+// cyclomatic warning threshold, and a default plus a validation are one
+// concern ("what does an unwritten store block mean?").
+func normalizeStore(s *StoreConfig) error {
+	if s.Path == "" {
+		s.Path = ".metricgate/history.db"
+	}
+	return s.Retain.validate()
 }
 
 // Config is the parsed policy file.
@@ -410,8 +455,8 @@ func LoadWithSource(data []byte, source, sourcePath string) (*Config, error) {
 	if c.Gate.FailOn == "" {
 		c.Gate.FailOn = "error"
 	}
-	if c.Store.Path == "" {
-		c.Store.Path = ".metricgate/history.db"
+	if err := normalizeStore(&c.Store); err != nil {
+		return nil, err
 	}
 	if c.Languages == nil {
 		c.Languages = map[string]LanguageConfig{}

@@ -79,6 +79,9 @@ usage:
                                       manifests/policy already declare)
   metricgate cockpit serve [flags]    serve the local audit dashboard on loopback
   metricgate cockpit update [flags]   check the release feed manually
+  metricgate store prune [-dry-run]   apply store.retain to the history database:
+                                      retire old runs with their findings and
+                                      metric snapshots (-runs/-days override)
   metricgate version                  print the version
 `
 

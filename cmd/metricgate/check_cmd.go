@@ -451,11 +451,42 @@ func storeRun(cfg *config.Config, root string, summary *model.RunSummary, human 
 		Attrs:        traceAttrs(),
 	}
 	id, err := st.SaveRunFull(summary, toolVersion, gitCommit(), git.Root(root), meta)
-	st.Close()
 	if err != nil {
+		st.Close()
 		fail(err)
 	}
+	pruneAfterWrite(cfg, st, human)
+	st.Close()
 	return id, true
+}
+
+// pruneAfterWrite applies the retention policy at the end of a run when the
+// operator opted in with store.prune_on_write. Off is the default and the
+// common case, so the whole branch stays silent unless a bound is set.
+//
+// The prune cannot fail the run: the check already produced its verdict and the
+// run is committed, so a database that refused to shrink must not turn a
+// passing gate into an error. The one line it prints says what went wrong
+// instead, because "retention did not run" is information the operator needs
+// before believing the file size tomorrow.
+func pruneAfterWrite(cfg *config.Config, st *store.Store, human io.Writer) {
+	if !cfg.Store.PruneOnWrite {
+		return
+	}
+	policy := storeRetentionPolicy(cfg)
+	if policy.Unlimited() {
+		return
+	}
+	report, err := st.Prune(policy)
+	if err != nil {
+		fmt.Fprintf(human, "store prune after write failed: %v\n", err)
+		return
+	}
+	if report.Runs == 0 {
+		return
+	}
+	fmt.Fprintf(human, "store prune after write: retired %s, kept %d\n",
+		countUnit(report.Runs, "run", "runs"), report.Kept)
 }
 
 // traceID returns the ambient trace id, or "" when the operator set none. An
