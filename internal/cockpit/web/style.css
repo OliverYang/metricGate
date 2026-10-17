@@ -28,113 +28,138 @@
  * dist/tokens/sonar/themed.json without a translation table in between.
  */
 :root {
-  /* Surfaces. SonarQube is a light, high-density UI: a near-white canvas, white
-     cards, and hairlines rather than shadows doing the separating. */
-  --e-color-surface-canvas: #fcfcfd;
-  --e-color-surface-default: #ffffff;
-  --e-color-surface-hover: #f6f7fb;
-  --e-color-surface-active: #e1e6f3;
-  --e-color-surface-disabled: #eff2f9;
-  --e-color-surface-inverse: #2a2f40;
-  --e-color-background-neutral-subtle: #eff2f9;
-  --e-color-background-neutral-subtle-hover: #e1e6f3;
-  --e-color-background-neutral-bolder: #e1e6f3;
+  /*
+   * A dark, high-density workspace, not a light one. The previous palette was
+   * SonarQube's Echoes light theme: near-white canvas, white cards, hairlines
+   * doing the separating. This one keeps every token NAME (so the mapping stays
+   * auditable and no component had to be rewritten) and changes the values to a
+   * dark ramp where elevation is expressed by a lighter surface, not a shadow.
+   *
+   * The four surface levels are the whole hierarchy:
+   *   L0 #0d1117 canvas · L1 #161b22 card · L2 #21262d hover · L3 #30363d active
+   * A card is one step lighter than the canvas and separated by a 1px border,
+   * because a dark shadow is nearly invisible against a dark canvas — the
+   * border is what carries the edge.
+   */
+  --e-color-surface-canvas: #0d1117;
+  --e-color-surface-default: #161b22;
+  --e-color-surface-hover: #21262d;
+  --e-color-surface-active: #30363d;
+  --e-color-surface-disabled: #161b22;
+  --e-color-surface-inverse: #010409;
+  --e-color-background-neutral-subtle: #21262d;
+  --e-color-background-neutral-subtle-hover: #30363d;
+  --e-color-background-neutral-bolder: #30363d;
 
-  /* Text. */
-  --e-color-text-strong: #1d212f;
-  --e-color-text-default: #3e4357;
-  --e-color-text-subtle: #637192;
-  --e-color-text-disabled: #a6adc2;
-  --e-color-text-placeholder: #637192;
+  /* Text. Four steps, and the fourth is for text that is disabled rather than
+     merely quiet: a dark UI loses contrast fast, so "subtle" stays at 4.6:1 on
+     the card surface instead of being a decorative grey. */
+  --e-color-text-strong: #f0f6fc;
+  --e-color-text-default: #c9d1d9;
+  --e-color-text-subtle: #7d8590;
+  --e-color-text-disabled: #484f58;
+  --e-color-text-placeholder: #7d8590;
   --e-color-text-on-color: #ffffff;
 
-  /* Borders. */
-  --e-color-border-weak: #e1e6f3;
-  --e-color-border-weaker: #eff2f9;
-  --e-color-border-bold: #c5cddf;
-  --e-color-border-bolder: #637192;
-  --e-color-border-disabled: #c5cddf;
+  /* Borders. Three weights: a hairline for card edges, a brighter one for
+     hover and for controls, and the brightest for a selected edge. */
+  --e-color-border-weak: #30363d;
+  --e-color-border-weaker: #21262d;
+  --e-color-border-bold: #484f58;
+  --e-color-border-bolder: #7d8590;
+  --e-color-border-disabled: #30363d;
 
-  /* Accent — links, primary buttons, the active rail item. */
-  --e-color-accent: #5d6cd0;
-  --e-color-accent-hover: #4b56bb;
-  --e-color-accent-active: #47518f;
-  --e-color-accent-weak: #f4f6ff;
-  --e-color-accent-weak-hover: #e8ebff;
-  --e-color-accent-weak-active: #d1d7fe;
-  --e-color-text-accent: #5d6cd0;
-  --e-color-text-link-hover: #4b56bb;
-  --e-color-focus: #4b56bb;
+  /* Accent — links, the active rail item, the selected row's left edge. */
+  --e-color-accent: #58a6ff;
+  --e-color-accent-hover: #79c0ff;
+  --e-color-accent-active: #1f6feb;
+  --e-color-accent-weak: #121d2f;
+  --e-color-accent-weak-hover: #16233a;
+  --e-color-accent-weak-active: #1f6feb;
+  --e-color-text-accent: #58a6ff;
+  --e-color-text-link-hover: #79c0ff;
+  --e-color-focus: #58a6ff;
+
+  /* The primary action's fill. It is its own token rather than an alias of
+     --e-color-success: a green "run scan" button and a green "gate passed"
+     badge mean different things, and one of them will eventually need to
+     change without the other. */
+  --e-color-primary: #238636;
+  --e-color-primary-hover: #2ea043;
 
   /* Semantic tones. Each has a fill, a weak fill for badges, and a readable
-     foreground — a badge is always fill + text from the same tone, never a fill
-     from one tone and a text colour borrowed from another. */
-  --e-color-danger: #d92d20;
-  --e-color-danger-strong: #b42318;
-  --e-color-danger-text: #b42318;
-  --e-color-danger-deep: #801b14;
-  --e-color-danger-weak: #fef3f2;
-  --e-color-danger-weak-border: #fee4e2;
-  --e-color-danger-weak-active: #fecdca;
+     foreground. On a dark canvas the weak fill is a translucent wash of the
+     tone rather than a tinted solid: a solid tint would have to be re-picked
+     per surface level, and the badge sits on two of them. */
+  --e-color-danger: #f85149;
+  --e-color-danger-strong: #ff7b72;
+  --e-color-danger-text: #ff7b72;
+  --e-color-danger-deep: #ffa198;
+  --e-color-danger-weak: rgba(248, 81, 73, 0.15);
+  --e-color-danger-weak-border: rgba(248, 81, 73, 0.4);
+  --e-color-danger-weak-active: rgba(248, 81, 73, 0.28);
 
-  --e-color-warning: #f5b840;
-  --e-color-warning-text: #8c5e1e;
-  --e-color-warning-strong: #93370d;
-  --e-color-warning-weak: #fcf5e4;
-  --e-color-warning-weak-border: #fef5d0;
-  --e-color-warning-weak-active: #fce9a3;
+  --e-color-warning: #d29922;
+  --e-color-warning-text: #e3b341;
+  --e-color-warning-strong: #e3b341;
+  --e-color-warning-weak: rgba(210, 153, 34, 0.15);
+  --e-color-warning-weak-border: rgba(210, 153, 34, 0.4);
+  --e-color-warning-weak-active: rgba(210, 153, 34, 0.28);
 
-  --e-color-success: #75a92c;
-  --e-color-success-text: #537c17;
-  --e-color-success-deep: #054f16;
-  --e-color-success-weak: #f3f8ef;
-  --e-color-success-weak-border: #e4f7d1;
-  --e-color-success-weak-active: #d4f2b7;
+  --e-color-success: #3fb950;
+  --e-color-success-text: #56d364;
+  --e-color-success-deep: #7ee787;
+  --e-color-success-weak: rgba(63, 185, 80, 0.15);
+  --e-color-success-weak-border: rgba(63, 185, 80, 0.4);
+  --e-color-success-weak-active: rgba(63, 185, 80, 0.28);
 
-  --e-color-info: #316c92;
-  --e-color-info-text: #316c92;
-  --e-color-info-weak: #f5fbff;
-  --e-color-info-weak-border: #e9f4fb;
-  --e-color-info-weak-active: #b8def1;
+  --e-color-info: #58a6ff;
+  --e-color-info-text: #79c0ff;
+  --e-color-info-weak: rgba(88, 166, 255, 0.15);
+  --e-color-info-weak-border: rgba(88, 166, 255, 0.4);
+  --e-color-info-weak-active: rgba(88, 166, 255, 0.28);
 
   /* Ratings A–E. The grade chip is the one place a page-level verdict is read
      at a glance, so these five are their own tokens rather than mapped onto the
-     tone scale — an "E" must not read as a mere warning. */
-  --e-rating-a-bg: #d1fadf;
-  --e-rating-a-text: #054f31;
-  --e-rating-a-border: #12b76a;
-  --e-rating-b-bg: #d4f2b7;
-  --e-rating-b-text: #054f16;
-  --e-rating-b-border: #9dcb6b;
-  --e-rating-c-bg: #fce9a3;
-  --e-rating-c-text: #66400f;
-  --e-rating-c-border: #f5b840;
-  --e-rating-d-bg: #ffd6af;
-  --e-rating-d-text: #7a2e0e;
-  --e-rating-d-border: #fd7122;
-  --e-rating-e-bg: #fecdca;
-  --e-rating-e-text: #5d1d13;
-  --e-rating-e-border: #f04438;
+     tone scale — an "E" must not read as a mere warning. The ramp is the same
+     five-hue walk as before (green → lime → amber → orange → red), restated as
+     translucent washes so the letter stays legible on any surface level. */
+  --e-rating-a-bg: rgba(63, 185, 80, 0.18);
+  --e-rating-a-text: #7ee787;
+  --e-rating-a-border: rgba(63, 185, 80, 0.55);
+  --e-rating-b-bg: rgba(126, 231, 135, 0.14);
+  --e-rating-b-text: #a5e8ab;
+  --e-rating-b-border: rgba(126, 231, 135, 0.45);
+  --e-rating-c-bg: rgba(210, 153, 34, 0.18);
+  --e-rating-c-text: #e3b341;
+  --e-rating-c-border: rgba(210, 153, 34, 0.55);
+  --e-rating-d-bg: rgba(219, 109, 40, 0.18);
+  --e-rating-d-text: #f0883e;
+  --e-rating-d-border: rgba(219, 109, 40, 0.55);
+  --e-rating-e-bg: rgba(248, 81, 73, 0.18);
+  --e-rating-e-text: #ff7b72;
+  --e-rating-e-border: rgba(248, 81, 73, 0.55);
 
-  /* Quality gate banner. */
-  --e-gate-passed-bg: #d4f2b7;
-  --e-gate-passed-text: #054f16;
-  --e-gate-failed-bg: #fecdca;
-  --e-gate-failed-text: #801b14;
+  /* Quality gate banner. The banner is the first thing on the page, so its two
+     states are the two loudest colours in the sheet. */
+  --e-gate-passed-bg: rgba(63, 185, 80, 0.12);
+  --e-gate-passed-text: #56d364;
+  --e-gate-failed-bg: rgba(248, 81, 73, 0.12);
+  --e-gate-failed-text: #ff7b72;
 
-  /* Severity badges, mirroring Echoes' severity-badge tokens: error reads as
-     SonarQube's blocker, warning as high, info as info. */
-  --e-sev-error-bg: #fee4e2;
-  --e-sev-error-text: #801b14;
-  --e-sev-error-border: #fecdca;
-  --e-sev-warning-bg: #fff0eb;
-  --e-sev-warning-text: #93370d;
-  --e-sev-warning-border: #ffe8da;
-  --e-sev-info-bg: #f5fbff;
-  --e-sev-info-text: #316c92;
-  --e-sev-info-border: #e9f4fb;
+  /* Severity badges: error reads as blocker, warning as high, info as info. */
+  --e-sev-error-bg: rgba(248, 81, 73, 0.15);
+  --e-sev-error-text: #ff7b72;
+  --e-sev-error-border: rgba(248, 81, 73, 0.4);
+  --e-sev-warning-bg: rgba(210, 153, 34, 0.15);
+  --e-sev-warning-text: #e3b341;
+  --e-sev-warning-border: rgba(210, 153, 34, 0.4);
+  --e-sev-info-bg: rgba(88, 166, 255, 0.15);
+  --e-sev-info-text: #79c0ff;
+  --e-sev-info-border: rgba(88, 166, 255, 0.4);
 
-  /* Geometry and type. */
+  /* Geometry and type. Roundness stays at 4px: a dense table reads as a grid,
+     and rounded cells fight the grid. */
   --e-radius-sm: 2px;
   --e-radius-md: 4px;
   --e-radius-lg: 8px;
@@ -142,7 +167,7 @@
   --e-border-width: 1px;
   --e-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  --e-font-mono: "Ubuntu Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+  --e-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, "Liberation Mono", "Courier New", monospace;
   --e-font-size-xs: 0.75rem;
   --e-font-size-sm: 0.8125rem;
@@ -152,14 +177,22 @@
   --e-font-size-2xl: 1.5rem;
   --e-line-tight: 1.25rem;
   --e-line-normal: 1.5rem;
-  --e-shadow-sm: 0 1px 3px 0 #1d212f0d;
-  --e-shadow-md: 0 2px 15px -2px #1d212f0f, 0 4px 8px -2px #1d212f1a;
-  --e-shadow-lg: 0 4px 6px -2px #1d212f0d, 0 12px 16px -4px #1d212f1a;
-  --e-overlay-backdrop: #08090c73;
 
-  /* Shell metrics. */
+  /* Elevation on a dark canvas is mostly the surface step above; the shadows
+     are for the two things that genuinely float over the page (the dialog and
+     the detail drawer) and they are near-black so they read as depth rather
+     than as a glow. */
+  --e-shadow-sm: 0 1px 0 rgba(1, 4, 9, 0.4);
+  --e-shadow-md: 0 8px 24px rgba(1, 4, 9, 0.75);
+  --e-shadow-lg: 0 16px 32px rgba(1, 4, 9, 0.85);
+  --e-overlay-backdrop: rgba(1, 4, 9, 0.8);
+
+  /* Shell metrics. --e-row-height is the density decision: every table row is
+     one line of 13px text in a 36px band, which is what makes a 421-row page
+     scannable without a zoom-out. */
   --e-topbar-height: 3.5rem;
   --e-rail-width: 15rem;
+  --e-row-height: 36px;
 }
 
 /*
