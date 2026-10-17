@@ -138,7 +138,8 @@ Node kinds come from the tree-sitter-java grammar:
 - the ternary is a cyclomatic path but no cognitive decision: it is an
   expression, not another layer of structure
 - function units are methods and constructors; lambdas are not counted as
-  separate functions
+  separate functions; `static` and instance initializer blocks are counted
+  nowhere (see "the file-scope function census")
 - `a, b` style multi-name parameters count per name; varargs count as 1
 
 ## wmc (Weighted Methods per Class) — class-bearing languages
@@ -248,6 +249,40 @@ statement about the grammar, not a missing feature to be filed.
   class from a platform one, and coupling to the platform is still coupling.
 - DIT outside the file under-counts (1 instead of the true depth), never
   over-counts.
+
+### Language notes: the file-scope function census (iter-30)
+
+JS/TS needed a structural fix (iter-29) because a module's function is usually a
+*binding* (`export const handler = (x) => {…}`), and no kind set can see a
+binding. The obvious follow-up question was whether the other languages have the
+same hole. They do not, and `internal/metrics/func_unit_census_test.go` pins the
+answer per language.
+
+- **No language shares the JS hole**, because in every other supported language a
+  file-scope `name = <closure>` is a *closure*, and closures fold into the
+  enclosing unit site-wide — the rule Go's `func_literal` follows. Java's
+  `static final Function<…> HELPER = x -> {…}`, C#'s `static Func<int,int> Helper =
+  (x) => {…}`, C++'s `auto helper = [](int x) {…}`, Python's `helper = lambda x: …`
+  and Rust's `const H: fn(i32) -> i32 = |x| {…}` all report zero units, which is
+  correct under that rule, not blindness. Go reports zero for
+  `var helper = func(x int) int {…}` for the same reason, and Go is in the test on
+  purpose: if someone promotes Java's lambda fields without touching Go, the site
+  says one thing about closures and another about fields.
+- **The gap that is real is a different shape.** A C# `accessor_declaration` (a
+  property `get`/`set` body) and a Java `static_initializer` / instance `block` in
+  class body are code that runs, they hold decision points, and they live inside
+  no unit — so their branches contribute to no cyclomatic, cognitive, npath or
+  nesting snapshot anywhere. A C# file written only as properties reports zero
+  functions, and zero functions suppresses even the maintainability index
+  (`AnalyzeFile` sets MI to 0 with no units; `engine.go` emits a maintainability
+  snapshot only when MI > 0).
+- **Why this is not fixed by copying the JS rule.** Promoting `accessor_declaration`
+  into `csFuncKinds` was tried and measures: it yields units named `get` and `set`,
+  i.e. the same fake-identifier problem iter-29 refused for `export default`, plus
+  a threshold change for every Java and C# file in every existing snapshot. A real
+  fix has to name them `P.get` first and be reviewed as a policy change.
+- **Only four `.java` files and no `.cs` file exist in this repository**, so the
+  gap cannot be measured against real local code — the census test is the evidence.
 
 ### Language notes: JavaScript / TypeScript / TSX
 
