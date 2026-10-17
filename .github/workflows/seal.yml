@@ -114,12 +114,18 @@ jobs:
         run: |
           set -eu
           version="${{ steps.version.outputs.tag }}"
-          # Stamp the version the same way a release build would, so the
-          # published binary and the published tag cannot disagree.
-          CGO_ENABLED=0 go build -trimpath \
+          # CGO stays ON: tree-sitter grammars are cgo bindings, and
+          # CGO_ENABLED=0 fails with "build constraints exclude all Go files"
+          # on github.com/tree-sitter/.../bindings/go. The cost is a glibc-linked
+          # binary, which is the same thing the gate job already builds.
+          #
+          # sha256sum, not shasum: shasum is a Perl script shipped on macOS and
+          # absent from ubuntu-latest, so the first run of this workflow died
+          # on a command that never existed.
+          go build -trimpath \
             -ldflags "-X main.toolVersion=${version#v}" \
             -o metricgate-release ./cmd/metricgate
-          shasum -a 256 metricgate-release | tee metricgate-release.sha256
+          sha256sum metricgate-release | tee metricgate-release.sha256
 
       - name: Tag and publish
         uses: actions/github-script@v7
