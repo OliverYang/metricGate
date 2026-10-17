@@ -621,6 +621,28 @@ total runs on that sha: 0        # 该 sha 上零个 workflow run，任何 workf
 dispatch 失败不把 job 判红（合并已经落地了，把它报成失败是错的），只 `core.warning`
 并给出人工恢复命令。
 
+**已验证修法生效**（PR #6 合并后）：
+
+```
+main HEAD = 104a1100
+total runs on that sha: 1
+  seal  event=workflow_dispatch  completed/success
+```
+
+`event=workflow_dispatch` 而不是 `push` —— 这正是修法在起作用的样子：没有 push 事件，
+是 `merge.yml` 自己把 `seal` 拉起来的。`seal` 跑完的判定是第三态（跳过而非失败）：
+
+```
+v0.2.0 already seals f836511314ae; this tree (104a1100589b) is NOT sealed
+```
+
+即 tag 已被别的 commit 占用 → 跳过并说明。这正是 §7.4 里设计的三种状态之一，
+版本号没 bump 时不重复封板、也不把 main 弄红。
+
+> 注意这里有一个容易搞错的地方：`seal` **跑起来了**（这是 §8.2 修的）与 `seal` **封了板**
+> （需要 bump `toolVersion`）是两件事。修 §8.2 让前者不再静默丢失；后者仍然要求
+> 每次发版都改 `cmd/metricgate/main.go:42` 的 `var toolVersion`。
+
 ### §8.3 三个断点的共同形状
 
 §7 的 label 缺口、§8.1 的竞态、§8.2 的 `GITHUB_TOKEN` 静默，看起来是三件不同的事，
