@@ -195,9 +195,9 @@ Node 的代码几乎全部用这种写法，所以**这个适配器对现代 TS 
 
 | 优先级 | 做什么 | 依赖 CI？ | 理由 |
 |---|---|---|---|
-| **现在** | TS 箭头函数函数级度量（§2.4） | 否 | 唯一一条让度量数字直接错的缺陷。React/Node 代码几乎全用箭头函数，等于适配器对现代 TS 基本失效 |
-| **现在** | `test-no-assert` 8 条误报（§1.2） | 否 | 唯一一类确定性错误的 warning。规则撒谎会让整张列表失去可信度 |
-| 现在 | `.claude/settings.json.example`（§2.1） | 否 | 文档已承诺，缺一个文件。成本最低的一条 |
+| ~~**现在**~~ ✅ | TS 箭头函数函数级度量（§2.4）—— 已做（`760f498`） | 否 | 唯一一条让度量数字直接错的缺陷。React/Node 代码几乎全用箭头函数，等于适配器对现代 TS 基本失效 |
+| ~~**现在**~~ ✅ | `test-no-assert` 8 条误报（§1.2）—— 已做（`ecd57b5`） | 否 | 唯一一类确定性错误的 warning。规则撒谎会让整张列表失去可信度 |
+| ~~现在~~ ✅ | `.claude/settings.json.example`（§2.1）—— 已做（`ec1455c`） | 否 | 文档已承诺，缺一个文件。成本最低的一条 |
 | ~~现在~~ ✅ | `rules_zh.go` 从分支捞回来（`iter-28` §6.1） | 否 | 已做，见 §7.1 |
 | ~~现在~~ ✅ | T4.2 运行表补触发命令（§2.6） | 否 | 已做，见 §7.2 |
 | 稍后 | pre-commit scoped 根（§2.2） | 否 | 纯性能优化（省 1.6–2 秒），不是正确性 |
@@ -418,3 +418,26 @@ for it`。**「加了测试」不等于「测试会失败」，改回坏值跑�
 `SELECT id, COALESCE(invocation,'<NULL>') FROM runs ORDER BY id DESC LIMIT 3` →
 `1593|/tmp/mg-inv check . -arch-base arch.json` / `1592|<NULL>` / `1577|<NULL>`
 （旧行为 NULL，走「未记录」分支）。
+
+---
+
+## §8 本轮收口：五项全部合入 main，实测对比另开一份文档
+
+`275ee38..c386b4a`，31 文件 +2686 −211，五个 commit：
+
+| commit | 项 |
+|---|---|
+| `760f498` | R1 TS/JS 模块级箭头函数算函数单元 |
+| `ecd57b5` | R2 `test-no-assert` 能力判据 |
+| `ec1455c` | R3 `.claude/settings.json.example` |
+| `f0b0a6e` | R4 规则目录中文到前端 |
+| `c386b4a` | R5 运行历史记录触发命令 + 路径 |
+
+本仓 gate：`422 → 431 warnings`（+16 来自 R1 新暴露的 TS 函数，−8 来自 R2 误报清零），
+**0 errors 不变、PASSED 不变**，`go test ./...` 48 包全绿，`_test.go` 函数 808 → 853。
+
+逐规则 delta、两个 TS fixture 的具体数字（同一文件可维护性 19 → 51）、110 个真实
+`_test.go` 语料上的 55 → 19、以及**本轮改判据让旧评估数字失效这笔债**，全部写在
+[evaluation-iter29-remediation.md](../evaluations/evaluation-iter29-remediation.md)。
+下一轮 TODO 在那份文档 §9，以及
+[产品演进方向调研 §7](../research/product-evolution-directions-2026-10.md) 的修订版排期表。

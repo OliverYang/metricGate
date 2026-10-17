@@ -313,7 +313,7 @@ CI 流程控制（3 个 workflow + composite action）、
 | ~~—~~ | ~~配置发现链：`.metricgate.yaml` 隐藏文件 + 就近退化 + 停在 Git 根~~ | ✅ 已完成（迭代 16）→ [docs/iterations/iter-16-config-discovery.md](iterations/iter-16-config-discovery.md) |
 | ~~—~~ | ~~Cockpit 策略可查可解析可改（发现链 / 分节 / 生效键出处 / yaml 校验原子写）~~ | ✅ 已完成（迭代 16）→ 同上 |
 | — | 发现链 CLI 查询动词（`metricgate policy show`）；MCP 侧策略工具 | ⬜ 遗留，见迭代 16 日志「遗留」节 |
-| — | 保存 `.bak` 无轮转上限（当前每次保存追加一份） | ⬜ 遗留，见迭代 16 日志「遗留」节 |
+| — | 保存 `.bak` 只有一份且**每次覆盖**（实测：连续 3 次保存后目录里只有 `.metricgate.yaml` + `.metricgate.yaml.bak`，bak 内容是**上一版** v2，不是 v1 的累积） | ⬜ 遗留，见迭代 16 日志「遗留」节。**原描述「每次保存追加一份」有误**：`writePolicyAtomic`（`internal/cockpit/policy_write.go:194`）写的是固定名 `target+".bak"`，`os.WriteFile` 是覆盖语义 ⇒ 无轮转上限的前提（会累积）不成立，真实缺口是**只能回退一步** |
 | ~~—~~ | ~~CODEOWNERS 归属：解析 + `reachability`/`impact` 归属列 + `rules gaps` 按 owner 分组~~ | ✅ 已完成（迭代 17）→ [docs/iterations/iter-17-ownership-and-trend-window.md](iterations/iter-17-ownership-and-trend-window.md) |
 | ~~—~~ | ~~`trends` 可用性：`-out / -since / -project`~~ | ✅ 已完成（迭代 17）→ 同上 |
 | — | Cockpit 侧 owner 视图（复用 `internal/owners`，需要前端交互验证） | ⬜ 遗留，见迭代 17 日志「遗留」节 |

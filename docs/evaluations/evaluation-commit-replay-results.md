@@ -22,6 +22,7 @@
 - **0/289 零检出 commit**——最干净的首个 commit 也有 75 条（7 error）；findings 随仓库增长 75→2174 持续累积，无自然消亡趋势。
 - 全历史规则族触发总量：fan-out 85,771 / cyclomatic 38,150 / npath 37,093 / cognitive 22,926 / function-length 22,361 / params-count 9,847 / file-length 5,296 / function-clone 4,912 / test-no-assert 3,492 / boolean-params 334 / call-chain-depth 279 / todo-comment 87 / silent-catch 55 / nesting-depth 44 / banned-os-exec 43 / empty-block 21 / banned-panic 3 / banned-fmt-Print* 3。
 - **test-no-assert 在 215/289 commit 触发**——M2-B 里未 materialize 的「无断言测试」形态，在真实 LLM 仓库大规模存在。
+  - ⚠️ **该数字待重新标定（2026-10-18）**：本报告跑的是 iter-29 之前的判据。`ecd57b5` 把规则改为「拿到 `*testing.T` 的 helper 即算断言」后，110 个真实 `_test.go` 语料上命中 55→19（其中 `Test*` 38→5，见 [iter-29 整改实测](evaluation-iter29-remediation.md) §4）。dev-cockpit 仓库不在本地，本轮无法重算 ⇒ **215 应读作上界**，方向不变（伪绿测试仍密集存在），量级待重跑。
 - npath 极值：218,160 / 92,160（人类基线 max 4,752，超 40×）；fan-out error 30 vs 人类 max 20。
 - **layer-violation 全 0**：dev-cockpit 未声明 layers，无约束可违——是「未配置」不是「干净」，如实记录。
 - LLM 仓库自身无门禁约束下的形态：每 commit 约 10% findings 为 error 级（75/7 → 2174/200+ 线性），错误密度不随规模下降。

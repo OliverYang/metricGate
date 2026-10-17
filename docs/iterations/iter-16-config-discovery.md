@@ -130,7 +130,7 @@ MCP `check_code` 终态：`policy_api.go` / `policy_write.go` / `policy_api_test
 ## 遗留
 
 1. **UI 只读路径尚未在真实浏览器里点过。** 本迭代用 HTTP 级验证了 GET/PUT 与随后的 `check`，JS 侧只做了语法校验与元素 id 对齐；交互（分节跳转、脏标记、保存后刷新）按代码走查确认，未做浏览器回归。
-2. **`.bak` 会累积。** 每次保存追加一个同内容备份，没有轮转或上限。当前判断：配置改动频率低、文件小，备份的价值高于清理成本；若将来出现抱怨再考虑保留 N 份。
+2. **`.bak` 只有一份，且每次保存覆盖。** ~~每次保存追加一个同内容备份，没有轮转或上限~~（2026-10-17 实测更正：`writePolicyAtomic` 写的是固定名 `target+".bak"`，`os.WriteFile` 是覆盖语义。连续保存 v1/v2/v3 后目录里只有 `.metricgate.yaml` + `.metricgate.yaml.bak`，bak 内容是 **v2**（上一版），不是 v1 的累积。）所以真实缺口不是「没有轮转上限」，而是**只能回退一步**：连续两次改坏配置，第一次的原文就找不回来了。当前判断不变——配置改动频率低、文件小；但要修的话修的是「留 N 份」而不是「清理累积」。见 [iter-29 评估](../evaluations/evaluation-iter29-remediation.md) §5。
 3. **MCP 侧没有策略读写工具。** MCP 仍是只读的（符合「MCP 不写仓库」的既有约束），策略编辑走 Cockpit 或编辑器。
 4. **发现链没有暴露成 CLI 查询动词。** 「现在用的是哪个配置」目前只能从 `check` 的 stderr note 或 Cockpit 看出来；`policyFor()` 已留好接口，是否要做成 `metricgate policy show` 待定。
 5. **`-config` 显式路径仍不查存在性。** 这是刻意保留（显式指定一个不存在的文件应当报错而不是静默退化），但意味着 `-config typo.yaml` 的错误信息来自 `config.LoadFile`，而不是来自发现链的友好提示。

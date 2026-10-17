@@ -415,17 +415,57 @@ Lost-in-the-Middle）。真正的问题是：**默认预算选错会让 required
 
 ## 7. 排期建议
 
-| 迭代 | 内容 | 收口观测 |
-|---|---|---|
-| **iter-19（短）** | ~~S1 `-diff` 批量化~~ **已落地**（282→8 进程，见 S1）；本迭代剩：D4 history.db 保留策略（与 S1 无依赖，可并行）+ ~~S3 文档漂移~~（已改完，见 S3 表）+ **pre-commit 改 scoped check 根**（S1 实测长出的新候选）+ `toolVersion` 的 ldflags 注入接到发布管道 + 可选：共一次 merge-base 结果 / 缓存 `gitCommit()`（第四轮已消那 2 次 `merge-base`） | `cockpit-observe.sh quick`（4.5 s）+ S1 修订版三条 E1 验收 |
-| **iter-20（短）** | ~~S2 `hooks/post-edit.sh` + `settings.json` 样例发货~~ **仍挂未做**；`iter-20` 这个日志序号已被 D2 棘轮对齐占用（目标合同指定了文件名；编号说明见 §4 D2 与该日志开头） | `cockpit-observe.sh fast`（15.4 s）——D2 收口时已跑 |
-| **iter-21（中）** | D1 标识符规则族（先 Java 一族，跑 NAMING-01~06） | `metricgate constraints rule` 6/6 PASS + pilot FP 口径审计 |
-| **iter-22（中）** | ~~D2 MCP `-diff_only` 棘轮对齐~~ **已完成**（见 §4 D2 与 [iter-20 日志](../iterations/iter-20-mcp-cli-ratchet-parity.md)）⇒ 本迭代只剩 `policy show` verbs，加下面那条新长出的遗留 | ~~同一脏树 CLI/MCP 两入口 finding 集合一致~~ ✅ 已钉成测试（`cmd/metricgate-mcp/parity_diff_test.go`） |
-| **iter-22 顺带（新）** | 子目录 root 跑 `-diff` 时 value-delta 静默全保留（iter-20 §五）：基线键需归一到 run 根，但会改变 CLI 已发货的子目录输出，**需先定口径**（该退化还是该报错） | 同一脏树 `check basepkg -diff` 与 `check . -diff` 的 `unchanged` 不再一个为 0 |
-| **iter-23+（中）** | D3 blast-radius 进闸门；D5 bundle 降级交付；~~D6 strategy 文档重写~~ 只剩提交 + 复核 v1.0 遗留数字（五家竞品表见 S3、六项不做见 §5） | 按各自验收口径 |
+> **2026-10-18 修订说明（必读）**：本节原表把未来编号预占到 `iter-23+`，但实际日志序号被
+> `iter-24`（子目录 value-ratchet）、`iter-25`（存储保留）、`iter-26`（post-edit hook）、
+> `iter-27`（人工交接阻塞项）、`iter-28`（cockpit 深色 + 保留落地）、`iter-29`（中期 backlog 清点）
+> 消费掉了。**原表的 iter-21 / iter-22 / iter-23 三行从未作为迭代跑过**——它们的内容要么已在
+> 别的迭代里顺带做完，要么仍未开始。所以下表不再用「迭代号」组织，而用「状态 + 下一轮」组织；
+> 下一轮记作 `iter-30`。
 
-> 排期逻辑一句话：**先把闸门修得快且口径一致（iter-19/20），再让它表达更多团队规范（iter-21+）**。
-> 顺序反了会得到一个"能表达 200 条规则但慢且两个入口答案不同"的产品。
+### 7.1 原表逐行现状
+
+| 原计划 | 内容 | 现状（实测） |
+|---|---|---|
+| iter-19 | ~~S1 `-diff` 批量化~~ | ✅ 已落地（282→8 进程） |
+| iter-19 | D4 history.db 保留策略 | ✅ 已做（`iter-25` + `iter-28`：`retain` / `prune` / `-vacuum`，真实库 497.5 MiB → 121.5 MiB） |
+| iter-19 | ~~S3 文档漂移~~ | ✅ 已改完 |
+| iter-19 | `toolVersion` 的 ldflags 注入接发布管道 | ✅ 已完成（`.github/workflows/seal.yml:157` 的 `-ldflags "-X main.toolVersion=${version#v}"`） |
+| iter-19 | **pre-commit 改 scoped check 根** | ❌ **仍未做**（`hooks/pre-commit:50` 是全树 `exec "$bin" check . -diff $archflags`），实测省 1.65–2.05 秒 |
+| iter-20 | ~~S2 `settings.json` 样例发货~~ | ✅ **已发货**（`ec1455c`，`.claude/settings.json.example` + `hooks/post-edit_test.sh` 12 passed） |
+| iter-21 | D1 标识符规则族（Java NAMING-01~06） | ❌ 未开始，仍是最大的一块 |
+| iter-22 | ~~D2 MCP `-diff_only` 棘轮对齐~~ | ✅ 已完成（`iter-20` 日志 + `parity_diff_test.go`） |
+| iter-22 | `policy show` verbs | ❌ 未开始（`cmd/metricgate/usage.go` 里**没有 `policy` 这个动词**，`main.go` 的 case 也没有） |
+| iter-22 顺带 | 子目录 root 跑 `-diff` 时 value-delta 静默全保留 | ✅ 已定口径并实现（`iter-24` §2.1 选 C、§4 断言结清）。~~验收判据「`unchanged` 不再一个为 0」~~ 这说的是**修复前**的病灶形状，不是还欠的债 |
+| iter-23+ | D3 blast-radius 进闸门 / D5 bundle 降级 / ~~D6 strategy 重写~~ | ⚠️ D6 已提交；D3/D5 未开始 |
+
+### 7.2 本轮（iter-29）实际做完的五项
+
+不依赖 CI 的待办已全部清掉，详见 [evaluation-iter29-remediation.md](../evaluations/evaluation-iter29-remediation.md)：
+
+| 项 | commit | 类型 |
+|---|---|---|
+| TS/JS 模块级箭头函数算函数单元 | `760f498` | 度量正确性（同文件可维护性 19→51） |
+| `test-no-assert` 认「拿到 `*testing.T` 的 helper」 | `ecd57b5` | 规则正确性（语料误报 55→19，本仓 8→0） |
+| `.claude/settings.json.example` 发货 | `ec1455c` | 文档承诺兑现 |
+| 规则目录中文到前端 | `f0b0a6e` | 可解释性（61 行全覆盖，7 个 id） |
+| 运行历史记录触发命令 + 路径 | `c386b4a` | 可追溯性（含脱敏） |
+
+### 7.3 iter-30 建议（下一轮）
+
+| 优先级 | 内容 | 依赖 CI？ | 收口观测 |
+|---|---|---|---|
+| **P0** | **重跑 commit replay 标定 `test-no-assert`** —— 本轮改了判据，`evaluation-commit-replay-results.md` 的 215/289 与 `claims.md` #19 都成了旧判据数字 | 否 | 215 换成新判据数，或明标「旧判据上界」（已在两处就地标注） |
+| **P0** | **C/C++/C# 等价失明排查** —— R1 修的是 JS 系，同类「kind-set 漏掉某种声明形态」在别的适配器里大概率还有 | 否 | 每语言一个「全 lambda / 全属性 / 全表达式体」fixture，FUNCS > 0 |
+| P1 | `Benchmark*` 是否单开一档（R2 剩的 14/19 条都是 benchmark） | 否 | 定口径后本仓 + 语料各跑一次，写进 `docs/metrics.md` |
+| P1 | 别名追踪（`tt := t`）—— R2 的已知精度下界 | 否 | 要么做，要么在规则文档明写不追 |
+| P1 | D1 标识符规则族（原 iter-21，最大的一块未动） | 否 | `metricgate constraints rule` 6/6 PASS |
+| P1 | `languageGroups` 有数据无消费者（R4 记下的观察） | 否 | 前端按语言分组，或删字段 |
+| P2 | pre-commit scoped 根（原 iter-19 唯一遗留） | 否 | 同一脏树前后耗时中位数 |
+| **等 CI** | P2 triage push 触发、P4 分支保护、T4.5 L8 | **是** | CI 停着时加的是不会执行的代码 |
+
+> 排期逻辑改一句话：**先保证度量量到的东西是真的（P0 两项），再让闸门表达更多团队规范（D1）**。
+> 原表那句「先快又一致」仍然对，但本轮发现了一个更前面的坑：**快而一致地量错，比慢更糟**。
+
 
 ---
 
