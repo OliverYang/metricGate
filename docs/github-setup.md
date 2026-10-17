@@ -311,3 +311,39 @@ pi mcp list              # 应显示 connected
 **为什么不用 PAT**：PAT 要手选 scope、会过期、要放进环境变量或 keychain；OAuth 由服务端签发与刷新，scope 由服务端按客户端登记决定。§7 的「不把 API key 放进 GitHub secrets」仍然成立——这是**本地** agent 的凭证，不进仓库、不进 CI。
 
 注意 `pi mcp login` 需要浏览器交互，无法在无人值守的脚本里跑完。
+
+### 9.1 一个会静默失效的坑：`pi mcp add` 自动塞进来的 Bearer header
+
+`pi mcp add` 会写入：
+
+```json
+"headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" }
+```
+
+这条 header 的后果不是报错，而是**悄悄改变认证方式**。pi 的规则是
+（`pi` 文档 `docs/mcp.md:133` 原文）：
+
+> OAuth applies to HTTP servers **without** an `Authorization` header.
+
+带了 header，pi 就认为这是 token 认证，**不会**走 OAuth。于是：
+
+| 场景 | 表现 |
+|---|---|
+| 环境里有 `GITHUB_TOKEN` | `connected` —— 但用的是 PAT，不是 OAuth |
+| 环境里没有 `GITHUB_TOKEN` | `failed`：`Failed to resolve MCP server "github" header "Authorization" from environment variable: GITHUB_TOKEN` |
+| 以为已经 OAuth 授权过 | `mcp-auth.json` 里**只有 discovery 元数据**，没有 token；删掉 header 立刻 `needs sign-in` |
+
+**正确顺序（不能反）**：
+
+```sh
+pi mcp login github      # 1. 先真正完成 OAuth
+pi mcp list              # 2. 确认 connected
+# 3. 再从 ~/.pi/agent/mcp.json 的 github 条目删掉整个 "headers" 键
+pi mcp list              # 4. 仍然 connected → 才算切到 OAuth
+env -u GITHUB_TOKEN pi mcp list   # 5. 这一步才是真验证
+```
+
+先删 header 会直接掉线 —— 这就是 `docs/iterations/iter-27-manual-handoff-blockers.md` §2.4 的实测记录。
+
+**若暂时不想走 OAuth**：保留 header 也可以，但要接受它不可跨机器复现，且不要把
+`GITHUB_TOKEN` 同时留在 `secrets.env` 里 —— 两个凭证并存时，"能用"不能证明哪一条在工作。

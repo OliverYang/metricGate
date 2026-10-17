@@ -41,6 +41,25 @@ have_gh_auth() {
     command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1
 }
 
+# The labels are part of the protocol, so they are created here rather than
+# assumed. `gh label create --force` updates an existing label instead of
+# failing, which makes this idempotent without parsing a 404: the ordinary case
+# (label already there) costs one API call and prints nothing.
+#
+# Why this matters: `gh issue edit --add-label in-progress` on a repository that
+# has never had that label fails, and it fails on the claim -- after the agent
+# already decided what to work on.
+ensure_label() {
+    local name=$1 color=$2 desc=$3
+    gh label create "$name" --repo "$REPO" --color "$color" \
+        --description "$desc" --force >/dev/null
+}
+
+ensure_labels() {
+    ensure_label "$LABEL_WORK"    1d76db 'Claimable by a local agent'
+    ensure_label "$LABEL_CLAIMED" fbca04 'Claimed; do not start a second agent on it'
+}
+
 print_manual_path() {
     cat <<'EOF'
 agent-claim: `gh` is not authenticated, so the issue list cannot be read here.
@@ -117,6 +136,7 @@ cmd_claim() {
         print_manual_path
         exit 0
     fi
+    ensure_labels
     gh issue edit "$n" --repo "$REPO" --add-label "$LABEL_CLAIMED"
     echo "claimed #$n"
     echo

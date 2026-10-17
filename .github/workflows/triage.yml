@@ -94,6 +94,33 @@ jobs:
             }
             core.info(`${byFingerprint.size} open metricgate issue(s) already carry a fingerprint`);
 
+            // Labels are part of the protocol (agent = claimable, in-progress =
+            // taken; see scripts/agent-claim.sh), so they belong in code rather
+            // than in a human's memory of having created them. Without this the
+            // first real run dies on 422 Validation Failed, because GitHub
+            // rejects an issue create that names a label that does not exist.
+            //
+            // getLabel-then-createLabel rather than createLabel-then-ignore-422:
+            // the 404 is the ordinary case and reads as "this label is new",
+            // while swallowing 422 would also swallow a genuine validation bug.
+            const REQUIRED_LABELS = [
+              { name: 'metricgate', color: '0e8a16', description: 'Filed by metricgate triage' },
+              { name: 'agent', color: '1d76db', description: 'Claimable by a local agent' },
+            ];
+            for (const want of REQUIRED_LABELS) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner, repo: context.repo.repo, name: want.name,
+                });
+              } catch (err) {
+                if (err.status !== 404) throw err;
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner, repo: context.repo.repo, ...want,
+                });
+                core.info(`created label ${want.name}`);
+              }
+            }
+
             let created = 0;
             let seen = 0;
 
