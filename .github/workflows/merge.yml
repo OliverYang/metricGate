@@ -17,6 +17,17 @@
 #   first one to finish sees the other still running and does nothing, the
 #   second sees both green and merges.
 #
+# WHY THE CONDITION ACCEPTS A push RUN
+#   `gate` and `review` are push-triggered (a pull_request event from a PR this
+#   repository opened for itself waits unapproved forever). The workflow_run
+#   payload therefore carries event `push`, and requiring `pull_request` here
+#   would mean this job never runs. The branch the push carried is still
+#   `head_branch`, so the PR is found the same way.
+#
+# THIS FILE MUST BE ON main TO DO ANYTHING
+#   `workflow_run` only fires for a workflow whose file exists on the default
+#   branch, so the merge job starts working one merge after this file lands.
+#
 # WHY THE FORK GUARD
 #   `workflow_run` runs with a write token even when the triggering workflow
 #   ran on a fork's commit. Merging is a write, so the run refuses anything
@@ -42,8 +53,8 @@ jobs:
   merge:
     runs-on: ubuntu-latest
     if: >-
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch != 'main'
     steps:
       - name: Squash-merge when everything is green
         uses: actions/github-script@v7

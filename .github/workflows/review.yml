@@ -22,12 +22,24 @@
 #   wholesale (someone disables the required check), which is worse than a
 #   label that leaves a record on the PR. `allow-api-breaking` and
 #   `allow-arch-drift` downgrade those two signals to warnings; the findings
-#   still appear in the report.
+#   still appear in the report. They are read from the open PR for this branch,
+#   because a push event carries no labels.
+#
+# WHY THE TRIGGER IS push AND NOT pull_request
+#   GitHub does not start a workflow for a pull_request event created by its
+#   own GITHUB_TOKEN: the run lands in `action_required` and waits for a human
+#   to approve it. autopr.yml opens the PR with that token, so a
+#   pull_request-triggered review would never run on a PR this repository opens
+#   for itself, and a required check that never reports blocks the merge
+#   forever. Verified 2026-10-17 on PR #1: run 39026847835 was `action_required`
+#   with zero jobs, while the same commit pushed by a person ran to `success`.
+#   A push carries its actor, and checks attach to commits rather than to PRs,
+#   so gating the push still puts the verdict on the PR's head SHA.
 name: review
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: ['**']
 
 permissions:
   contents: read
@@ -54,7 +66,15 @@ jobs:
         id: base
         run: |
           set -eu
-          base="origin/${{ github.base_ref }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            base="${{ github.event.before }}"
+            case "$base" in
+              *[!0]*) ;;
+              *) base="HEAD~1" ;;
+            esac
+          else
+            base="origin/main"
+          fi
           if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
             echo "cannot resolve $base; review needs fetch-depth: 0" >&2
             exit 1
@@ -73,12 +93,32 @@ jobs:
           echo "ref=$base" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse "$base")" >> "$GITHUB_OUTPUT"
 
+      - name: Find the pull request for this branch
+        id: pr
+        # A push to main has no PR, and no labels to read. The push usually
+        # lands before autopr.yml has opened the PR, so an empty answer is the
+        # normal first-push case rather than a failure: the escape hatches then
+        # simply do not apply, which is the safe default.
+        if: github.ref != 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const branch = context.ref.replace('refs/heads/', '');
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, head: `${owner}:${branch}`, state: 'open',
+            });
+            const pr = prs[0];
+            const labels = pr ? pr.labels.map((l) => l.name) : [];
+            core.info(pr ? `PR #${pr.number}, labels: ${labels.join(',') || '(none)'}` : 'no open PR for this branch yet');
+            core.setOutput('number', pr ? String(pr.number) : '');
+            core.setOutput('labels', labels.join(','));
+
       - name: Review the change
         id: review
         env:
-          # Read from the event payload rather than a step output: the label
-          # list is small and this keeps the step self-contained.
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # Labels come from the open PR for this branch (a push carries none).
+          LABELS: ${{ steps.pr.outputs.labels }}
           BASE_DIR: ${{ steps.base.outputs.dir }}
         run: |
           set -uo pipefail
@@ -233,7 +273,7 @@ jobs:
           exit "$fatal"
 
       - name: Comment on the PR
-        if: always()
+        if: always() && steps.pr.outputs.number != ''
         uses: actions/github-script@v7
         with:
           script: |
@@ -244,10 +284,11 @@ jobs:
             }
             const body = fs.readFileSync('review-summary.md', 'utf8');
             const marker = '<!-- metricgate-review-report -->';
+            const issue_number = Number('${{ steps.pr.outputs.number }}');
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
+              issue_number,
             });
             const existing = comments.find(c => c.body.includes(marker));
             if (existing) {
@@ -261,7 +302,7 @@ jobs:
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
+                issue_number,
                 body: marker + '\n' + body,
               });
             }
