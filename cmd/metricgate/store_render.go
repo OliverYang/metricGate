@@ -19,12 +19,13 @@ import (
 // — and a test of the second one should not have to wade through the first.
 
 type pruneOutput struct {
-	plan   prunePlan
-	dryRun bool
-	report store.PruneReport
-	before store.Stats
-	after  store.Stats
-	path   string
+	plan     prunePlan
+	dryRun   bool
+	report   store.PruneReport
+	before   store.Stats
+	after    store.Stats
+	path     string
+	vacuumed bool
 }
 
 // freedBytes estimates what the retired runs occupy, charged at this database's
@@ -74,7 +75,12 @@ func printPruneText(w io.Writer, o pruneOutput) {
 	}
 	// Saying the file did not shrink in the same breath as the delete is the
 	// honest version: the pages are free, the bytes are not back.
-	fmt.Fprintf(w, "file: %s -> %s; %s is now free pages. VACUUM would return it (not run automatically).\n",
+	if o.vacuumed {
+		fmt.Fprintf(w, "file: %s -> %s; vacuumed, so the freed pages are back on disk.\n",
+			humanBytes(o.before.Bytes()), humanBytes(o.after.Bytes()))
+		return
+	}
+	fmt.Fprintf(w, "file: %s -> %s; %s is now free pages. Re-run with -vacuum to return them (not run automatically).\n",
 		humanBytes(o.before.Bytes()), humanBytes(o.after.Bytes()), humanBytes(o.after.FreeBytes()))
 }
 
@@ -89,6 +95,7 @@ type pruneJSON struct {
 		Source string `json:"source"`
 	} `json:"retention"`
 	DryRun          bool   `json:"dry_run"`
+	Vacuumed        bool   `json:"vacuumed"`
 	RunsRemoved     int    `json:"runs_removed"`
 	FindingsRemoved int    `json:"findings_removed"`
 	Snapshots       int    `json:"snapshots_removed"`
@@ -118,6 +125,7 @@ func printPruneJSON(w io.Writer, o pruneOutput) {
 	j.Retention.Days = o.plan.policy.Days
 	j.Retention.Source = o.plan.source
 	j.DryRun = o.dryRun
+	j.Vacuumed = o.vacuumed
 	j.RunsRemoved = o.report.Runs
 	j.FindingsRemoved = o.report.Findings
 	j.Snapshots = o.report.Snapshots
@@ -149,8 +157,9 @@ func pruneUsage(set *flag.FlagSet) string {
 	b.WriteString(`Remove the runs store.retain excludes, with their findings and metric
 snapshots, in one transaction. Archived runs are never removed, and the
 newest live run of each project_root is always kept so a project card does
-not go empty. DELETE frees pages without shortening the file; VACUUM is not
-run automatically (see docs/iterations/iter-25-store-retention.md).
+not go empty. DELETE frees pages without shortening the file, so -vacuum is
+available as a separate, explicitly requested step (see
+docs/iterations/iter-25-store-retention.md).
 
 flags:
 `)

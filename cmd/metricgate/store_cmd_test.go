@@ -137,6 +137,61 @@ func TestDryRunLeavesTheStoreUntouched(t *testing.T) {
 	}
 }
 
+// TestVacuumReturnsTheFreedPages covers the half of the story a delete cannot
+// tell: DELETE marks pages free and leaves the file the same size, so the verb
+// that reports "371 MiB is now free pages" needs a way to actually get them
+// back. Store.Vacuum existed with no caller and no test before this.
+func TestVacuumReturnsTheFreedPages(t *testing.T) {
+	cfg, st := newPruneTestStore(t, 2)
+	seedRuns(t, st, 12)
+
+	out := mustPrune(t, cfg, pruneFlags{runs: 2, format: "text", vacuum: true})
+	if !out.vacuumed {
+		t.Fatal("vacuum flag did not reach the store")
+	}
+	if out.report.Runs == 0 {
+		t.Fatal("prune removed nothing, so the vacuum assertion would be vacuous")
+	}
+	if out.after.FreePages != 0 {
+		t.Errorf("after vacuum freelist_count = %d, want 0 (that is what VACUUM means)", out.after.FreePages)
+	}
+	// The file size is deliberately not asserted: VACUUM compacts pages, it does
+	// not promise a shorter file, and on a store this small the rewrite lands on
+	// the same page count. freelist_count is the fact VACUUM is defined by.
+	text := captureStdout(t, func() { printPruneText(os.Stdout, out) })
+	if !strings.Contains(text, "vacuumed, so the freed pages are back on disk") {
+		t.Errorf("vacuumed output still claims the pages are free:\n%s", text)
+	}
+}
+
+// TestVacuumIsRefusedWithDryRun pins the contradiction rather than resolving it
+// silently in either direction: -dry-run promises to change nothing, and a
+// VACUUM rewrites the whole file.
+func TestVacuumIsRefusedWithDryRun(t *testing.T) {
+	err := rejectedParse(t, []string{"-dry-run", "-vacuum", "-runs", "5"})
+	if err == nil {
+		t.Fatal("accepted -dry-run with -vacuum")
+	}
+	if !strings.Contains(err.Error(), "contradict") {
+		t.Errorf("error does not name the contradiction: %v", err)
+	}
+}
+
+// TestVacuumSkipsAnEmptyPrune keeps the expensive path off a no-op: rewriting a
+// 500 MB file to reclaim zero pages is pure cost.
+func TestVacuumSkipsAnEmptyPrune(t *testing.T) {
+	cfg, st := newPruneTestStore(t, 100)
+	seedRuns(t, st, 3)
+
+	out := mustPrune(t, cfg, pruneFlags{runs: 100, format: "text", vacuum: true})
+	if out.report.Runs != 0 {
+		t.Fatalf("prune removed %d runs under a bound that keeps all 3", out.report.Runs)
+	}
+	if out.vacuumed {
+		t.Error("vacuumed a prune that removed nothing")
+	}
+}
+
 // TestUnlimitedPolicyWritesNothing covers D22-5: the shipped default has no
 // bound, and running the verb anyway must delete nothing and say so.
 func TestUnlimitedPolicyWritesNothing(t *testing.T) {

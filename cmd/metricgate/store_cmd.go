@@ -57,6 +57,7 @@ type pruneFlags struct {
 	runs       int
 	days       int
 	format     string
+	vacuum     bool
 }
 
 // unsetBound is the sentinel "this flag was not given", so 0 keeps its meaning
@@ -76,6 +77,7 @@ func newPruneFlagSet() *flag.FlagSet {
 	set.Int("runs", unsetBound, "override store.retain.runs for this invocation (-1 = use the policy, 0 = unlimited)")
 	set.Int("days", unsetBound, "override store.retain.days for this invocation (-1 = use the policy, 0 = unlimited)")
 	set.String("format", "text", "text or json")
+	set.Bool("vacuum", false, "after a real prune, VACUUM the file to return the freed pages (needs free disk equal to the database)")
 	return set
 }
 
@@ -95,6 +97,14 @@ func parsePruneFlags(args []string) (pruneFlags, error) {
 		configPath: flagText(set, "config"),
 		dryRun:     flagText(set, "dry-run") == "true",
 		format:     flagText(set, "format"),
+		vacuum:     flagText(set, "vacuum") == "true",
+	}
+	// -dry-run means "change nothing", and a VACUUM rewrites the file. Refusing
+	// the pair is the same discipline as parsing the destructive flag set
+	// strictly: the operator asked for a preview, and a preview must not touch
+	// the bytes it is previewing.
+	if f.vacuum && f.dryRun {
+		return pruneFlags{}, errors.New("-vacuum and -dry-run contradict: a dry run changes nothing, a vacuum rewrites the file")
 	}
 	for _, name := range []string{"runs", "days"} {
 		n, err := boundFlag(set, name)
@@ -246,7 +256,21 @@ func runPrune(cfg *config.Config, f pruneFlags) (pruneOutput, error) {
 	if err != nil {
 		return pruneOutput{}, err
 	}
-	return pruneOutput{plan: plan, dryRun: f.dryRun, report: report, before: before, after: after, path: cfg.Store.Path}, nil
+	out := pruneOutput{plan: plan, dryRun: f.dryRun, report: report, before: before, after: after, path: cfg.Store.Path}
+	// The vacuum runs after `after` is read, so the reported free pages are the
+	// ones the prune actually produced. It only ever runs on a real prune that
+	// removed something: rewriting a 500 MB file to reclaim zero pages is pure
+	// cost, and -dry-run is refused with -vacuum at parse time.
+	if f.vacuum && report.Runs > 0 {
+		if err := st.Vacuum(); err != nil {
+			return pruneOutput{}, fmt.Errorf("vacuum: %w", err)
+		}
+		out.vacuumed = true
+		if out.after, err = st.Stats(); err != nil {
+			return pruneOutput{}, err
+		}
+	}
+	return out, nil
 }
 
 // openStoreForPrune opens the configured database, naming the path in the
