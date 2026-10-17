@@ -9,8 +9,10 @@
 
 上游：`docs/github-setup.md`（§1.3 gh 认证、§1.5 仓库设置、§9 GitHub MCP）
 关联：PR [#1](https://github.com/OliverYang/metricGate/pull/1)、`.github/workflows/merge.yml`、`.github/workflows/seal.yml`
-状态：**B（MCP 授权）已解除；A（合并 PR #1）仍待人工**（不是缺陷，是能力边界）
-修订：2026-10-17 晚，§2 全部按实测重写，§4 清单按实测勾选，新增 §6 实测矩阵
+状态：**两个阻塞项均已解除**（2026-10-17 晚）：B（MCP 授权）走 Bearer header 路线已通；
+A（合并 PR #1）已用 MCP 完成 squash 合并，`v0.2.0` 已封板。两处断链（merge 段、triage 段）已接上。
+修订：2026-10-17 晚第一轮，§2 全部按实测重写，§4 清单按实测勾选，新增 §6 实测矩阵
+修订：2026-10-17 晚第二轮，§1 合并完成、§5.2 label 自举已修，新增 §7 闭环实录
 
 ## §0 一句话
 
@@ -19,7 +21,9 @@ CI 链路已经全绿并推到远端。原本有两个阻塞项都落在人手�
 
 **§2 的凭证阻塞已解除** —— `github` MCP 现已 `connected, 46 tools`，本节保留是因为
 "为什么它曾经挡住整条链"仍是有效知识，但结论要按 §2.2 的实测重读。
-**§1 的合并阻塞仍然成立**，且本轮用 MCP 独立复核了一遍前置条件（见 §6.1）。
+**§1 的合并阻塞也已解除** —— 第二轮用 MCP `merge_pull_request` 完成 squash 合并，
+`main` 前移到 `f8365113`，`seal` 自动打出 `v0.2.0`。§1 保留是因为"第一次合并必须人点"
+这个边界每一轮都会再撞上（见 §7.1）。
 
 本文把这两件事写成可执行的交接单，而不是留在对话里 —— 因为对话会滚动掉，
 而"为什么这件事自动化不了"是本项目后续每一轮都会再撞上的同一个边界。
@@ -303,14 +307,18 @@ internal/metrics/grammar_probe_test.go:83
 
 ## §4 交接清单（按 2026-10-17 晚实测勾选）
 
-- [ ] **B1** 合并 PR #1（§1.3），确认 squash —— **仍未做**，`main` 还在 `d191d6b`
-- [ ] **B2** 验证三件事（§1.4）—— **仍未做**：`merge` workflow 不在仓库列表、无 `v0.2.0` tag、无对应 Release
+- [x] **B1** 合并 PR #1（§1.3），确认 squash —— **已完成**：MCP `merge_pull_request`，
+      `merge_method: squash`，`expectedHeadSha` 钉在 `71a3b26`，产出 `f8365113`
+- [x] **B2** 验证三件事（§1.4）—— **全部成立**：`merge` 已在 workflow 列表、
+      `v0.2.0` → `f8365113`、Release body 含 `errors: **0**` 与 sha256
+      `80d47dc7c59e1d5ffae355a988dc6c58b1a32fde66afd150de99352ddca55a54`
 - [x] **B3** `pi mcp login github`（§2.3）—— **已可用**（46 tools），但走的是 Bearer header 路线，不是 OAuth。
       要换成 OAuth 需先跑 login 再删 header，顺序见 §2.5
-- [ ] **B4** 用 MCP 读 `GET /branches/main/protection` —— **已实测：404，确认未配置**（不是 401）
+- [x] **B4** 用 MCP 读 `GET /branches/main/protection` —— **已实测：404，确认未配置**（不是 401）
 - [ ] **B5** 决定 `test-no-assert` 的口径（§3.1），单开迭代 —— 未做
-- [ ] **B6** （本轮新增）`triage` 的 label 自举缺失，见 §5.2 —— 未修
-- [ ] **B7** （本轮新增）MCP 凭证路线二选一（§2.5）—— 当前停在 A 路线，可用但不可跨机复现
+- [x] **B6** `triage` 的 label 自举缺失，见 §5.2 —— **已修**：`triage.yml` 用
+      getLabel→createLabel，`agent-claim.sh` 用 `gh label create --force`，三个 label 已建好
+- [ ] **B7** MCP 凭证路线二选一（§2.5）—— 当前停在 A 路线，可用但不可跨机复现
 
 ## §5 开放问题
 
@@ -325,9 +333,9 @@ internal/metrics/grammar_probe_test.go:83
    建议：**配**，required checks 填 `gate` 与 `review`（这两个名字就是 job id，已在
    `.github/workflows/gate.yml` 与 `review.yml` 里）。
 
-2. **`triage.yml` 从未成功跑过，且它缺 label 自举**（本轮新增发现）
+2. **`triage.yml` 缺 label 自举** —— **已修（2026-10-17 晚第二轮）**
 
-   实测：
+   原实测（修复前）：
 
    ```
    $ curl .../actions/workflows/triage.yml/runs
@@ -338,27 +346,35 @@ internal/metrics/grammar_probe_test.go:83
    label 'metricgate' not found in OliverYang/metricGate
    ```
 
-   而 `triage.yml:159` 在建 issue 时写死：
+   而 `triage.yml` 在建 issue 时写死 `labels: ['metricgate', 'agent']`。
+   GitHub REST 对**不存在的 label** 返回 **422 Validation Failed**（不是静默忽略），
+   所以 triage 第一次真正跑起来时会在第一个 error 上就失败。
+   同样的问题也在 `scripts/agent-claim.sh`：它 `--claim N` 要打 `in-progress`，那个也不存在。
 
-   ```js
-   labels: ['metricgate', 'agent'],
+   **修法（已实施）**：
+   - `.github/workflows/triage.yml` 的 filing 步骤在 `issues.create` **之前**，对
+     `metricgate` / `agent` 逐个 `getLabel`，404 才 `createLabel`。
+     用 getLabel-then-create 而不是 createLabel-then-ignore-422：404 是常规路径
+     （"这个 label 是新的"），而吞掉 422 会把真正的参数错误一起吞掉。
+   - `scripts/agent-claim.sh` 新增 `ensure_label` / `ensure_labels`，用
+     `gh label create --force`（已存在则更新而非报错，无需解析 404），在
+     `cmd_claim` 里先于 `gh issue edit --add-label` 调用。
+   - 三个 label 已用 REST 建好：`metricgate #0e8a16` / `agent #1d76db` / `in-progress #fbca04`。
+
+   **证明自举真的会创建（而不只是"没报错"）**：triage 的扫描结果是 0 errors，
+   所以第一次 dispatch 根本没走到建 issue 的循环，创建分支没被执行。于是删掉 `agent` label
+   再 dispatch 一次，日志里出现：
+
+   ```
+   scan produced 0 error-severity finding(s)
+   created label agent
    ```
 
-   GitHub REST 对**不存在的 label** 返回 **422 Validation Failed**（不是静默忽略）。
-   所以 triage 第一次真正跑起来时会在第一个 error 上就失败，而不是"建了 issue 但没打标签"。
-   同样的问题也在 `scripts/agent-claim.sh`：它 `--claim N` 要打 `in-progress` label，那个也不存在。
+   label 列表回到 13 个。这才算证明，否则只是"跑了没崩"。
 
-   两条修法，**本轮都不做**（超出收口范围，且会动 workflow）：
-   - 在 `triage.yml` / `agent-claim.sh` 里先 `gh label create … --force` 再使用（自举，幂等）
-   - 或把 `labels` 参数去掉，改成建完 issue 后单独调用 `issues.addLabels` 并容忍 404
-
-   建议：**前者**。label 是协议的一部分（`agent` = 可领，`in-progress` = 已领，
-   见 `scripts/agent-claim.sh` 头注释），应当随仓库一起存在，而不是靠人记得手工建。
-
-3. **`v0.2.0` 是否是你想要的版本号？** 本轮把 `toolVersion` 从 `0.1.0` 提到 `0.2.0`（见
-   `cmd/metricgate/main.go:42` 的注释），理由是 v0.1.0 封的 commit 早于 cockpit workspace、
-   语言对齐、review+merge 链路。若你想要 `v1.0.0` 或别的值，**在合并 PR #1 之前改**
-   —— 合并之后 tag 就打出来了，而 tag 永不移动。
+3. **`v0.2.0` 是否是你想要的版本号？** —— **已封板**。`seal` 读
+   `var toolVersion = "0.2.0"`（`cmd/metricgate/main.go:42`）打出 tag `v0.2.0`，
+   现在改版本号需要 bump `toolVersion` 再合并一次（tag 永不移动）。
 
 ## §6 本轮 GitHub MCP 实测矩阵（2026-10-17 晚）
 
@@ -369,13 +385,15 @@ internal/metrics/grammar_probe_test.go:83
 | 分支推送 → 自动开 PR | `autopr` | 17 | ✅ success | **通** |
 | PR diff 约束闸门 | `gate` | 9 | ✅ success | **通** |
 | PR 审查（breaking API / 依赖漂移 / 单边 clone） | `review` | 8 | ✅ success | **通** |
-| 合并 | `merge` | — | — | **断**：文件不在 main，`workflow_run` 不触发（§1.1） |
-| 封板（tag + Release） | `seal` | 2 | ✅ success @ `d191d6b` | **通**，但已封过 `v0.1.0`，新代码未封 |
+| 合并 | `merge` | 1（本次引入，未自触发） | — | **已接上**：`f8365113` 之后已在 main，`workflow_run` 可触发（§7.2） |
+| 封板（tag + Release） | `seal` | 3 | ✅ success @ `f8365113` | **通**：已封 `v0.2.0` |
 | 定时全树扫描（趋势） | `schedule` | 0 | — | 未触发（周扫，正常） |
-| error → issue | `triage` | 0 | — | **断**：从未跑过 + label 不存在（§5.2） |
+| error → issue | `triage` | 2 | ✅ success | **已接上**：label 自举已验证（§5.2 / §7.3） |
 
-一句话：**"推送 → PR → 两道闸门全绿"这一段是活的；"合并 → 封板下一版"与"发现问题 → 建 issue"两段是断的，
+一句话（第一轮结论，现已完成）：**"推送 → PR → 两道闸门全绿"这一段是活的；"合并 → 封板下一版"与"发现问题 → 建 issue"两段是断的，
 而两处断因都已定位到具体文件的具体行，不是模糊的"链路不通"。**
+
+**第二轮已把这两段接上**，实测记录见 §7。
 
 ### §6.2 用 MCP 做的实测（不依赖 `gh` CLI、不依赖匿名 API）
 
@@ -423,5 +441,115 @@ GET /repos/OliverYang/metricGate/labels
   本地 agent 去执行同一件事，等于用一个不确定的门禁替换一个确定的门禁。
 - MCP 真正的增量价值在**领任务**：`list_issues` + `issue_read` 让 `scripts/agent-claim.sh` 从
   「人工给 issue 编号」升级成「自动列出 `label=agent` 未分配 issue」。
-  但这条路径现在被 §5.2 的 label 缺口堵着 —— **先修 label 自举，agent 领任务的闭环才真的成立**。
+  §5.2 的 label 缺口已修，这条路现在通了。
+
+## §7 第二轮：两段断链的实际接法（2026-10-17 晚）
+
+任务：`.trellis/tasks/10-17-merge-triage-loop`（prd + implement，已 start）。
+
+### §7.1 顺序约束（这条比代码重要）
+
+```
+R1 label 自举（本地改代码）
+  ↓ 必须先进 main，否则 triage 跑起来仍然 422
+R2 合并 PR #1（把 merge.yml + triage.yml 改动一起带进 main）
+  ↓ push to main 自动触发
+R3 seal 打 v0.2.0
+```
+
+把 label 自举**搭 PR #1 这趟车**，而不是合并完再开第二个 PR：后者需要“第一次合并”
+再发生一次，而那时 merge.yml 已在 main 上、第二个 PR 会被自动合并 —— 也能验证 §7.2，
+但多一次往返。先改再合更省。
+
+### §7.2 首次合并（MCP 执行）
+
+合并前的复验（任一项不成立就停）：
+
+| 项 | 值 |
+|---|---|
+| `state` | `open` |
+| `merged` | `false` |
+| `draft` | `false` |
+| `mergeable_state` | `clean` |
+| `head.sha` | `71a3b26402d15852468e1ba73f34d97df123ee2d` |
+| `base.ref` | `main` |
+| commits / files | 19 / 16 / +1448 −100 |
+| check-runs @`71a3b26` | `open` ✅ / `gate` ✅ / `review` ✅（3/3 completed success） |
+
+调用：
+
+```js
+mcp__github__merge_pull_request({
+  owner: "OliverYang", repo: "metricGate", pullNumber: 1,
+  merge_method: "squash",
+  expectedHeadSha: "71a3b26402d15852468e1ba73f34d97df123ee2d",
+})
+// → {"sha":"f836511314ae85642ce6f5bb7c1c5ec6dfc38a70","merged":true}
+```
+
+`expectedHeadSha` 与 `merge.yml` 里钉 `sha: pr.head.sha` 是同一个理由：
+如果中间有 push 落地，合并应被拒绝，而不是合一个没人审过的 commit。
+
+**关键细节：PR #1 自己的合并不会触发 `merge`。** 触发时 `merge.yml` 还不存在于 main 上
+（`workflow_run` 只对默认分支上已存在的 workflow 生效）。所以 workflow run 列表里
+`merge` 的 run 数是 0 —— 这是**预期行为，不是失败**。真正生效的判据是下一节。
+
+### §7.3 生效判据：`merge` 已注册为可触发 workflow
+
+```bash
+GET /repos/OliverYang/metricGate/actions/workflows
+# → ['autopr', 'gate', 'merge', 'review', 'schedule', 'seal', 'triage']
+```
+
+`merge` 出现在这个列表里，就是 `workflow_run` 能触发的**必要条件**。
+充分条件的判据：**下一次有非 `main` 分支的 PR、且 `gate` 与 `review` 都绿时，
+`merge` 应自动把它 squash 合并。** 本轮不制造空 PR 去验证（会污染历史），
+所以这条留待下一个真实 PR 兑现。
+
+### §7.4 封板实测
+
+`push` to `main`（`f8365113`）→ `seal` 自动跑 → 4 次轮询（约 60s）后 `completed success`。
+
+| 项 | 值 |
+|---|---|
+| `main` HEAD | `f836511314ae85642ce6f5bb7c1c5ec6dfc38a70` |
+| tags | `v0.2.0` → `f8365113`；`v0.1.0` → `d191d6b`（未动） |
+| Release `v0.2.0` | errors **0** / warnings 415 / 24598 snapshots / PASSED |
+| 二进制 sha256 | `80d47dc7c59e1d5ffae355a988dc6c58b1a32fde66afd150de99352ddca55a54` |
+| PR #1 | `state: closed` / `merged: true` / `merge_commit: f8365113` / `merged_at: 2026-10-17T12:00:43Z` |
+
+warnings 从 v0.1.0 的 413 升到 415：本轮新增的两个文件（`agent-claim.sh` 的
+`ensure_label` / `ensure_labels`）带来的函数长度与参数计数，不是回退。
+
+### §7.5 怎么证明 label 自举真的会创建（而不只是“没报错”）
+
+第一次 dispatch triage 时，扫描结果是 **0 errors**，所以建 issue 的循环一次都没进，
+`createLabel` 分支根本没被执行。**“跑绿了”不能当作“自举生效”的证据。**
+
+于是：
+
+```bash
+DELETE /repos/OliverYang/metricGate/labels/agent   # 204，label 列表回到 12 个
+POST   /repos/OliverYang/metricGate/actions/workflows/triage.yml/dispatches  # 204
+# 等待 ~25s → completed success
+```
+
+job 日志里出现（时间戳 `2026-10-17T12:04:32`）：
+
+```
+scan produced 0 error-severity finding(s)
+created label agent
+```
+
+label 列表回到 13 个。**删掉再跑**是这里唯一可信的验证方式：只要 label 还在，
+自举的创建分支就永远是死代码。
+
+### §7.6 仍开着的两件事
+
+1. **分支保护仍未配**（§5.1，404）。`merge.yml` 不依赖它，但人工点合并时 GitHub 不拦红 PR。
+2. **`triage` 只跑在 cron + dispatch 上**，从未在 push/PR 上跑过。这意味着新引入的 error
+   要等到次日 03:00 UTC 才会变成 issue。是否加 `push` 触发是下一个决策点
+   —— 加会让每次 push 都扫全树（贵），不加则发现延迟一天。
+3. **`test-no-assert` 8 条误报仍在**（§3.1，B5 未做）。
+
 
