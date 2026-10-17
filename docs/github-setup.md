@@ -156,8 +156,8 @@ gh auth login      # GitHub.com → HTTPS → Login with a web browser
 
 | 文件 | 触发 | 做什么 | 权限 |
 | --- | --- | --- | --- |
-| `gate.yml` | `pull_request` → main（**无 paths 过滤**）；`push` → main（有 paths 过滤） | `check . -diff -base <base>`；PR 上发 required check + 一条 sticky 注释（重复运行更新同一条，不堆叠）+ SARIF + artifact | `checks:write` `pull-requests:write` `contents:read` |
-| `review.yml` | `pull_request` → main | 结构评审：从 base ref **现场生成**三份基线再比（exported API / package 依赖图 / clone 漂移）。前两项阻塞，clone 漂移只警告；`allow-api-breaking` / `allow-arch-drift` 标签可降级为警告 | `contents:read` `pull-requests:write` |
+| `gate.yml` | `push` 到**任意分支**（无 paths 过滤） | `check . -diff -base <base>`；往 check-run 与一条 sticky 注释（重复运行更新同一条，不堆叠）+ SARIF + artifact | `checks:write` `pull-requests:write` `contents:read` |
+| `review.yml` | `push` 到**任意分支** | 结构评审：从 base ref **现场生成**三份基线再比（exported API / package 依赖图 / clone 漂移）。前两项阻塞，clone 漂移只警告；`allow-api-breaking` / `allow-arch-drift` 标签（从该分支的 open PR 读）可降级为警告 | `contents:read` `pull-requests:write` |
 | `merge.yml` | `workflow_run`（gate 或 review 完成） | 读该 PR 上**全部** check，`gate` 与 `review` 都绿且无其它红/待跑 → `pulls.merge` squash；否则只记日志不动作 | `contents:write` `pull-requests:write` `checks:read` |
 | `autopr.yml` | `push` 到非 main 分支 | 用 `GITHUB_TOKEN` 开 PR（已存在则跳过）；分支名 `fix/issue-N-*` 自动 `Closes #N`；403 时把「去 Settings 勾哪两个开关」写进 job summary | `contents:read` `pull-requests:write` `issues:write` |
 | `triage.yml` | 每日 03:00 UTC；手动 | 整树扫描 → **只把 error** 提成 issue（label `metricgate,agent`）；已存在则追加评论不重复建 | `contents:read` `issues:write` |
@@ -178,9 +178,28 @@ gh auth login      # GitHub.com → HTTPS → Login with a web browser
 
 合并时 `sha: pr.head.sha` 钉住被评审的那个提交：如果读 check 和合并之间有人 push 了新提交，合并被拒，而不是合进一个没人评审的版本。
 
-### 为什么 gate 的 PR 触发没有 paths 过滤
+### 为什么 gate 与 review 由 push 触发，而不是 pull_request
 
-**永不运行的 required check 不是「跳过」，是「pending」**，于是被它保护的分支永远合不掉一个被过滤掉的改动。第一版在 `pull_request` 上也加了 paths，结果一个只改文档的 PR 卡死等一个永远不会启动的 gate。diff 闸门在这棵树上约 2s，所以每个 PR 都跑，没碰源码时报告「no new violations」。
+**用 `GITHUB_TOKEN` 开出来的 PR，不会触发自己的 workflow。** GitHub 文档原文：
+
+> When a workflow using `GITHUB_TOKEN` creates or updates a pull request, the resulting `pull_request` event creates workflow runs in an **approval-required** state.
+
+`autopr.yml` 就是用这个 token 开 PR 的，于是 `pull_request` 触发的 gate 与 review 在每一个自建 PR 上都停在 `action_required`，等人点「Approve workflows to run」。2026-10-17 在 PR #1 上实测：run `39026847781`（gate）/ `39026847835`（review）的 job 数为 **0**，该 commit 的 check-run 里**只有 autopr 自己的 `open`**，gate 与 review 根本没上报——而一个永远不上报的 required check 会让 PR 永远合不了。
+
+**push 带 actor**，`git push` 启动的 run 不是 bot 创建的，不需要任何批准。**check 挂在 commit 上，不挂在 PR 上**，所以门禁 push 的结论照样落在 PR 的 head SHA 上。同一个 commit 用真人身份推一次，gate 与 review 立刻 `success`，没有任何批准步骤（run `39026945200` / `39026945207`）。
+
+代价与对应处理：
+
+- push 事件里没有 `github.event.pull_request`，所以两个 workflow 改成**按分支名查 open PR**（`pulls.list({head})`）来拿 PR 号与标签。
+- gate 在这棵树上几秒就跑完，而 `autopr` 开 PR 要更久。gate 会**最多等 60s** 轮询 PR 是否存在，否则每个分支的第一次 push 都会「找不到 PR」而不发注释。找不到也不算失败：check-run 本身已经带着结论。
+- `merge.yml` 的 `workflow_run` 条件里不能要求 `event == 'pull_request'`（现在它是 `push`），改成 `head_branch != 'main'` + 同仓守卫。
+- **`workflow_run` 只在 workflow 文件存在于 default branch 时触发**，所以 `merge.yml` 要等它自己合进 main 之后的**下一次**才真正开始工作。
+
+### 为什么 gate 没有 paths 过滤
+
+**永不运行的 required check 不是「跳过」，是「pending」**，于是被它保护的分支永远合不掉一个被过滤掉的改动。第一版在 `pull_request` 上也加了 paths，结果一个只改文档的 PR 卡死等一个永远不会启动的 gate。
+
+第二版在 `push` 上按 21 个后缀手写 paths，还有第二个失败模式：往 `internal/parser/parser.go` 加一门语言时，没有人记得回来补这个列表，于是新语言静默地不过闸门。diff 闸门在这棵树上约 2s，所以现在每个 push 都跑，没碰源码时报告「no new violations」。
 
 `push` → main 保留 paths 过滤：那里 seal 已经整树闸门了，文档合并不需要第二次全量。
 
@@ -239,9 +258,10 @@ Release 正文含：errors / warnings / metric snapshots / commit sha / 二进�
 | `ssh -T git@github.com` → `Permission denied (publickey)` | 公钥没加到 GitHub，或 ssh 选错了 key | 见 §1.1。**先确认账号上到底是哪把 key**：`curl -s https://api.github.com/users/<user>/keys`，再 `ssh-keygen -lf ~/.ssh/id_rsa.pub` 对比指纹。本仓踩过：账号上注册的是 RSA，而 `~/.ssh/config` 里写了 ed25519 |
 | push 成功但没 PR（`git ls-remote origin 'refs/pull/*'` 为空） | **Workflow permissions 是只读**（默认值） | 见 §1.5。`permissions:` 块只能收窄不能放大，所以这个失败在 workflow 文件里看不出来 |
 | push 成功但没 PR（有 pull refs 但内容不对） | 分支与 main 无差异，或已有 open PR | `git log origin/main..HEAD` 应有内容；`autopr` 对同一 head 是幂等的 |
-| PR 上没有 `gate` check | `push` → main 的 `paths:` 过滤掉了改动（只列了代码后缀与 `.metricgate.yaml`）；PR 触发已无 paths 过滤 | 改 `gate.yml` 的 `paths`，或改 `.metricgate.yaml` 触发 |
+| PR 上没有 `gate` check | gate 与 review 是 `push` 触发（见 §3），而该分支从没被 push 过，或 run 还没开始 | 看 `Actions` 里该 commit 的 gate run；本地 `git ls-remote origin 'refs/heads/<branch>'` 确认分支在远端 |
+| gate / review run 是 `action_required` 且 job 数为 0 | 这个 PR 的 `pull_request` 事件是 `GITHUB_TOKEN` 产生的（旧版 workflow 用 `pull_request` 触发） | 已改成 `push` 触发，见 §3。若还看到这种 run，它是改动落地前的旧 run |
 | PR 上 `review` 红但看不出为什么 | `review.yml` 的 Review 步骤 `exit $fatal` 会让 job 红，同时把表格写进 PR 注释 | 看 PR 注释的 `<!-- metricgate-review-report -->`，或下载 `metricgate-review` artifact（含 `api-diff.json` / `arch-diff.json`） |
-| PR 全绿但没自动合并 | `merge.yml` 只在前两项绿时合；`workflow_run` 要求 head 属于本仓库（fork PR 被拒） | 看 `merge` run 的日志，它会打印 `no merge: <原因>` |
+| PR 全绿但没自动合并 | `merge.yml` 只在前两项绿时合；`workflow_run` 要求 head 属于本仓库（fork PR 被拒）；**`workflow_run` 只在文件已存在于 default branch 时触发** | 看 `merge` run 的日志，它会打印 `no merge: <原因>`。若根本没有 merge run，先确认 `merge.yml` 已在 `main` 上 |
 | gate 报 `"origin/main" is not a commit ... fetch-depth 0` | checkout 太浅，没有 merge-base | `gate.yml` 已固定 `fetch-depth: 0`；本地则 `git fetch origin` |
 | triage 建了 0 条 issue | 整树 0 error（正常），或 label 已存在 | 看 run 的 summary 表 |
 | seal 失败 `tag v0.1.0 already exists` | 版本没 bump | 改 `cmd/metricgate/main.go` 的 `toolVersion` 再合并 |
