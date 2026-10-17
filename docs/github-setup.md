@@ -215,3 +215,4 @@ Release 正文含：errors / warnings / metric snapshots / commit sha / 二进�
 - `hooks/pre-commit`、`hooks/pre-push`、`hooks/post-edit.sh` — 三个 hook 的注释就是它们的规格
 - `docs/iterations/iter-26-post-edit-hook.md` — post-edit hook 的设计与实测代价
 - `.github/actions/metricgate-check/action.yml` — 给**别的仓库**用的 composite action
+verify the autopr loop
