@@ -13,6 +13,8 @@
 A（合并 PR #1）已用 MCP 完成 squash 合并，`v0.2.0` 已封板。两处断链（merge 段、triage 段）已接上。
 修订：2026-10-17 晚第一轮，§2 全部按实测重写，§4 清单按实测勾选，新增 §6 实测矩阵
 修订：2026-10-17 晚第二轮，§1 合并完成、§5.2 label 自举已修，新增 §7 闭环实录
+修订：2026-10-17 晚第三轮，**让 `merge.yml` 自己合一次之后**又发现两个断点（竞态自锁、
+`GITHUB_TOKEN` 合并不触发 `seal`），新增 §8。§7 的"已接上"只在手动合并路径上成立
 
 ## §0 一句话
 
@@ -544,12 +546,105 @@ created label agent
 label 列表回到 13 个。**删掉再跑**是这里唯一可信的验证方式：只要 label 还在，
 自举的创建分支就永远是死代码。
 
-### §7.6 仍开着的两件事
+### §7.6 仍开着的三件事
 
 1. **分支保护仍未配**（§5.1，404）。`merge.yml` 不依赖它，但人工点合并时 GitHub 不拦红 PR。
 2. **`triage` 只跑在 cron + dispatch 上**，从未在 push/PR 上跑过。这意味着新引入的 error
    要等到次日 03:00 UTC 才会变成 issue。是否加 `push` 触发是下一个决策点
    —— 加会让每次 push 都扫全树（贵），不加则发现延迟一天。
 3. **`test-no-assert` 8 条误报仍在**（§3.1，B5 未做）。
+
+## §8 第三轮：自动合并之后才发现的两个断点
+
+§7 的结论是"两段断链已接上"。这句话在**手动合并**的路径上成立，在**自动合并**的路径上
+还差两步。§7 之所以没暴露它们，是因为 §7 的合并是 MCP 用 PAT 做的，而 PAT 的行为
+和 `GITHUB_TOKEN` 不一样。**这两步只有在真的让 `merge.yml` 自己合一次才会出现。**
+
+### §8.1 断点一：合并竞态会把 `open` check 弄红，然后自我死锁
+
+`autopr.yml` 在 `pulls.create` 之前会先 `pulls.list` 查有没有已存在的 PR（`autopr.yml:63-72`），
+但**查和建是两次 API 调用**，中间任何东西都能插进来。
+
+实测（PR #3）：
+
+| 事件 | 时间 |
+|---|---|
+| PR #3 由 API 调用创建 | `12:10:47Z` |
+| `autopr` 在 `pulls.create` 上失败：`Validation Failed: A pull request already exists for OliverYang:docs/iter27-evidence` | `12:10:47.247Z` |
+| `merge` 拒绝合并：`no merge: other checks are red: open=failure` | `12:11:27Z` |
+
+同一个秒。而 `merge.yml` 是 **fail-closed**：任何一个 check 红就不合。于是这个竞态
+自己把自己锁死 —— 竞态创建了 PR，竞态把 `open` 弄红，`merge.yml` 于是拒绝合并这个
+刚刚出现的 PR。而 `gate` 与 `review` 都是绿的。
+
+**修法**（`fix(autopr): a lost create race is not a failure`）：`422` 且消息含
+`already exists` 时，重新读一次 PR 列表，报告哪个 PR 已经盯上这个分支，然后正常返回。
+理由不是"少一个红叉"：`open` 这个 check 的存在意义就是告诉 `merge.yml` 可以合，
+而"PR 已经存在"恰恰是它想要的状态。
+
+### §8.2 断点二：`GITHUB_TOKEN` 合并不产生 `push` 事件，所以 `seal` 从不运行
+
+这是本轮最重要的一条，也是最难自己发现的一条。
+
+`merge.yml` 最后一行日志写的是：
+
+```
+merged PR #3 (c89c538...); seal.yml takes it from here.
+```
+
+**它没有。** 实测：
+
+```
+main HEAD = f38a2599
+total runs on that sha: 0        # 该 sha 上零个 workflow run，任何 workflow 都没有
+```
+
+原因写在 GitHub 文档里（`docs.github.com` › Actions › security › `github_token`）：
+
+> When you use the repository's `GITHUB_TOKEN` to perform tasks, events triggered by
+> the `GITHUB_TOKEN` will not create a new workflow run, with the following exceptions:
+> `workflow_dispatch` and `repository_dispatch` events always create workflow runs.
+
+`merge.yml` 用 `GITHUB_TOKEN` 合并 → 它对 main 的那次 push **不产生 `push` 事件** →
+`seal.yml`（`on: push: branches: [main]`）**永远不会启动**。
+
+失败形态是最坏的一种：**PR 合了、所有 check 全绿、run 也是绿的、Release 从来没发生。**
+没有任何东西变红，所以没有任何东西会来问。
+
+**为什么 §7 没发现**：`v0.2.0` 那次合并是 **MCP 用 PAT** 做的。PAT 是真人身份，
+它的 push 是真实用户事件，`seal` 正常跑了。**"它跑过一次"这个事实，恰恰是这个 bug
+看起来不存在的原因。** 只有让 `merge.yml` 自己合一次（PR #3、PR #4），缺口才显形。
+
+**修法**：合并之后显式 `createWorkflowDispatch('seal.yml', ref: 'main')`，并给 job 加
+`actions: write`（原来只有 `contents` / `pull-requests` / `checks`）。
+必须用 dispatch 而不是"让 seal 也监听别的事件"，因为**根本没有 push 事件可监听**。
+dispatch 失败不把 job 判红（合并已经落地了，把它报成失败是错的），只 `core.warning`
+并给出人工恢复命令。
+
+### §8.3 三个断点的共同形状
+
+§7 的 label 缺口、§8.1 的竞态、§8.2 的 `GITHUB_TOKEN` 静默，看起来是三件不同的事，
+但判据是同一条：
+
+> **"跑绿了"不等于"这段链路通了"。**
+
+- label 自举：第一次 dispatch 扫描 0 errors，`createLabel` 分支是**死代码**，
+  跑绿说明不了任何事 —— 删掉 label 再跑才算（§7.5）。
+- 竞态：`gate` / `review` 绿、PR 存在、run 绿，但 `open` 红，链路死锁。
+- `GITHUB_TOKEN`：PR 合了、check 全绿、run 绿，**该发生的 Release 没发生**。
+
+三次都是"绿灯掩盖了断点"。所以这一轮的验收方式不是看 run 的颜色，而是**指定一个
+具体的产物并去找到它**：`v0.2.0` 这个 tag 指向哪个 commit、`f38a2599` 上有几个 run、
+删掉 label 之后日志里有没有 `created label`。找不到产物就是断的，run 再绿也一样。
+
+### §8.4 本轮的重复 PR 问题（未修）
+
+PR #4 与 PR #5 是同一个分支、同一个 head、同一秒（`12:21:45Z`）创建的两个 PR：
+autopr 建一个，MCP 建一个。§8.1 的修法让**丢竞态的那一方不再报错**，
+但它**阻止不了重复 PR 本身** —— 两次 `pulls.create` 都成功了。
+
+彻底修需要二选一：让 agent 永远不自己建 PR（只推分支，交给 autopr），
+或者给分支名加锁。本轮没做，因为触发条件是"人/agent 和 autopr 同时建 PR"，
+正常流程里只有一方会建。**但如果以后 agent 频繁自己开 PR，这个会再犯。**
 
 
