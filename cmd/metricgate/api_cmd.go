@@ -20,12 +20,13 @@ func cmdAPI(args []string) {
 func cmdAPISnapshot(args []string) {
 	set := flag.NewFlagSet("api snapshot", flag.ExitOnError)
 	out := set.String("out", "api.json", "snapshot file to write")
+	config := set.String("config", "", "policy file (applies excludes to the capture)")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {
 		root = set.Arg(0)
 	}
-	files, err := facts.Collect(root)
+	files, err := collectForAPI(root, *config)
 	if err != nil {
 		fail(err)
 	}
@@ -48,6 +49,7 @@ func cmdAPIDiff(args []string) {
 	set := flag.NewFlagSet("api diff", flag.ExitOnError)
 	base := set.String("base", "api.json", "snapshot to diff against")
 	format := set.String("format", "text", "output format: text|json")
+	config := set.String("config", "", "policy file (applies excludes to the capture)")
 	parseArgs(set, args)
 	root := "."
 	if set.NArg() > 0 {
@@ -61,7 +63,7 @@ func cmdAPIDiff(args []string) {
 	if err := json.Unmarshal(data, &oldSnap); err != nil {
 		fail(fmt.Errorf("parse snapshot: %w", err))
 	}
-	files, err := facts.Collect(root)
+	files, err := collectForAPI(root, *config)
 	if err != nil {
 		fail(err)
 	}
@@ -73,8 +75,7 @@ func cmdAPIDiff(args []string) {
 	}
 }
 
-func renderAPIDiff(d *apisurface.Diff, format string) {
-	if format == "json" {
+func renderAPIDiff(d *apisurface.Diff, format string) {	if format == "json" {
 		out, err := json.MarshalIndent(d, "", "  ")
 		if err != nil {
 			fail(err)
@@ -110,4 +111,17 @@ func changeDetail(c apisurface.Change) string {
 	default:
 		return ""
 	}
+}
+
+// collectForAPI loads the policy (when given, else discovered at root) and
+// collects facts with its excludes. Without this the snapshot captured every
+// supported source file in the tree — including checkouts under .data/ and the
+// vendored scripts under .trellis/ — so the same tree compared against itself
+// reported hundreds of phantom breaking changes.
+func collectForAPI(root, cfgFile string) ([]*facts.FileFacts, error) {
+	cfg, err := loadPolicyFor(cfgFile, root)
+	if err != nil {
+		return nil, err
+	}
+	return facts.CollectSelected(root, cfg)
 }

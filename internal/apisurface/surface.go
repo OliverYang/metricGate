@@ -73,12 +73,16 @@ func Current(files []*facts.FileFacts) *Snapshot {
 	return snap
 }
 
+// rootPackage is the bucket for symbols whose file declares no package. It is
+// a bucket, not a namespace — see key.
+const rootPackage = "(root)"
+
 // appendEntry adds a definition to its package bucket, normalising the
 // package name only when the fact sheet does not provide one.
 func appendEntry(snap *Snapshot, f *facts.FileFacts, e Entry) {
 	pkg := f.Package
 	if pkg == "" {
-		pkg = "(root)"
+		pkg = rootPackage
 	}
 	snap.Packages[pkg] = append(snap.Packages[pkg], e)
 }
@@ -99,7 +103,18 @@ func productionFile(path string) bool {
 
 // key identifies one exported symbol across snapshots: package, name and
 // receiver (methods on different types are different symbols).
+//
+// Symbols with no declared package land in the "(root)" bucket, and that
+// bucket is not a namespace: it collects every package-less file in the tree
+// (scripts, one-off programs), where the same name is routinely defined by
+// unrelated files. Keying those by name alone made Compare pair two different
+// functions and report a signature change for a tree compared against itself.
+// The file joins the key only for that bucket, so real packages keep the
+// move-detection behaviour they had.
 func key(pkg string, e Entry) string {
+	if pkg == rootPackage {
+		return pkg + "|" + e.File + "|" + e.Receiver + "|" + e.Name
+	}
 	return pkg + "|" + e.Receiver + "|" + e.Name
 }
 

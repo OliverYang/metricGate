@@ -468,8 +468,26 @@ func (w *langWalker) signature(n *sitter.Node, d declSpec) string {
 		if body := d.BodyFunc(n); body != nil {
 			end = body.StartByte()
 		}
+	} else if d.FuncValue {
+		// `const helper = (a) => { … }` keeps its parameters and its body in
+		// the `value` node, so the declarator has no `body` field to stop at.
+		// Without this the signature was the whole function, and editing a
+		// helper's internals read as a signature change.
+		if body := funcValueBody(n); body != nil {
+			end = body.StartByte()
+		}
 	}
 	return oneline(string(w.src[n.StartByte():end]), 160)
+}
+
+// funcValueBody locates the body of a function-valued declarator: the arrow or
+// function expression's own `body` field.
+func funcValueBody(n *sitter.Node) *sitter.Node {
+	v := n.ChildByFieldName("value")
+	if v == nil {
+		return nil
+	}
+	return v.ChildByFieldName("body")
 }
 
 // declaratorName walks a C/C++ declarator chain to the identifier that names
@@ -519,8 +537,10 @@ func modifiersText(src []byte, n *sitter.Node) string {
 }
 
 // tsVis: TypeScript/JavaScript visibility. A `#private` name is private, an
-// explicit private/protected modifier is private, everything else is public
-// surface.
+// explicit private/protected modifier is private, and a module-level
+// declaration that is not exported never reaches a consumer, so it is
+// module-local rather than public surface. Class members keep the old rule:
+// their reachability is the class's, and the class already carries it.
 func tsVis(src []byte, n *sitter.Node, name string) string {
 	if strings.HasPrefix(name, "#") {
 		return "private"
@@ -529,7 +549,31 @@ func tsVis(src []byte, n *sitter.Node, name string) string {
 	if strings.Contains(mods, "private") || strings.Contains(mods, "protected") {
 		return "private"
 	}
+	if tsModuleLocal(n) {
+		return "package"
+	}
 	return "exported"
+}
+
+// tsModuleLocal reports whether a declaration sits at module scope without an
+// `export` above it. Members of a class body are not module scope: the class
+// decides their reachability, so they keep being reported as exported.
+//
+// Without this, every `const helper = () => …` in a file was public API, and
+// the exported-API gate reported a breaking change whenever a purely internal
+// helper was renamed — the signal was noise exactly where it was needed.
+func tsModuleLocal(n *sitter.Node) bool {
+	for p := n.Parent(); p != nil; p = p.Parent() {
+		switch p.Kind() {
+		case "export_statement":
+			return false
+		case "class_body", "interface_declaration", "object_type", "enum_body":
+			return false
+		case "program", "module":
+			return true
+		}
+	}
+	return false
 }
 
 // pyVis: Python's only visibility convention is the leading underscore. Dunder

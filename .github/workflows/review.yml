@@ -1,0 +1,323 @@
+# The structural review. A second, independent required check next to `gate`.
+#
+# WHY A SECOND CHECK
+#   `gate` answers one question: do the lines this PR adds violate a rule or a
+#   metric threshold? That is a valuable question and it is not the only one.
+#   A change can add no violating line and still break callers (an exported
+#   signature moved), reshape the dependency graph (a new edge between two
+#   layers), or edit one copy of a clone and leave its twin behind. None of
+#   those is a threshold violation, so `gate` is structurally blind to them.
+#
+# WHY PR-DELTA AND NOT A BLESSED FILE
+#   Every baseline here is generated from the base ref at review time, not read
+#   from a committed snapshot. A committed baseline answers "does this tree
+#   differ from the tree we blessed?", which mixes this PR's change with every
+#   unreviewed change that landed before it — a PR then inherits legacy drift
+#   it did not cause and can never get green. Regenerating the base answers the
+#   question a reviewer actually has: what did *this* change do?
+#
+# WHY THE ESCAPE HATCH IS A LABEL
+#   Breaking an exported signature and reshaping the graph are sometimes the
+#   point. A check with no way to say "yes, deliberately" gets bypassed
+#   wholesale (someone disables the required check), which is worse than a
+#   label that leaves a record on the PR. `allow-api-breaking` and
+#   `allow-arch-drift` downgrade those two signals to warnings; the findings
+#   still appear in the report. They are read from the open PR for this branch,
+#   because a push event carries no labels.
+#
+# WHY THE TRIGGER IS push AND NOT pull_request
+#   GitHub does not start a workflow for a pull_request event created by its
+#   own GITHUB_TOKEN: the run lands in `action_required` and waits for a human
+#   to approve it. autopr.yml opens the PR with that token, so a
+#   pull_request-triggered review would never run on a PR this repository opens
+#   for itself, and a required check that never reports blocks the merge
+#   forever. Verified 2026-10-17 on PR #1: run 39026847835 was `action_required`
+#   with zero jobs, while the same commit pushed by a person ran to `success`.
+#   A push carries its actor, and checks attach to commits rather than to PRs,
+#   so gating the push still puts the verdict on the PR's head SHA.
+name: review
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The base tree is materialised as a worktree to snapshot it, and
+          # clonedrift needs the merge-base. Both need real history.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the analyser
+        run: go build -o metricgate ./cmd/metricgate
+
+      - name: Materialise the base tree
+        id: base
+        run: |
+          set -eu
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            base="${{ github.event.before }}"
+            case "$base" in
+              *[!0]*) ;;
+              *) base="HEAD~1" ;;
+            esac
+          else
+            base="origin/main"
+          fi
+          if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+            echo "cannot resolve $base; review needs fetch-depth: 0" >&2
+            exit 1
+          fi
+          # A detached worktree, so the PR checkout is untouched and the base
+          # files can be snapshotted by path like any other tree.
+          #
+          # OUTSIDE the checkout, deliberately. A worktree at .review-base is
+          # still inside the tree the analyser walks, so every snapshot of `.`
+          # would count the base copy as well: measured 772 exported symbols
+          # became 1516, and the arch snapshot gained a duplicate package per
+          # package. The review then compares the tree against itself.
+          base_dir="$RUNNER_TEMP/review-base"
+          git worktree add --detach "$base_dir" "$base"
+          echo "dir=$base_dir" >> "$GITHUB_OUTPUT"
+          echo "ref=$base" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse "$base")" >> "$GITHUB_OUTPUT"
+
+      - name: Find the pull request for this branch
+        id: pr
+        # A push to main has no PR, and no labels to read. The push usually
+        # lands before autopr.yml has opened the PR, so an empty answer is the
+        # normal first-push case rather than a failure: the escape hatches then
+        # simply do not apply, which is the safe default.
+        if: github.ref != 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const branch = context.ref.replace('refs/heads/', '');
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, head: `${owner}:${branch}`, state: 'open',
+            });
+            const pr = prs[0];
+            const labels = pr ? pr.labels.map((l) => l.name) : [];
+            core.info(pr ? `PR #${pr.number}, labels: ${labels.join(',') || '(none)'}` : 'no open PR for this branch yet');
+            core.setOutput('number', pr ? String(pr.number) : '');
+            core.setOutput('labels', labels.join(','));
+
+      - name: Review the change
+        id: review
+        env:
+          # Labels come from the open PR for this branch (a push carries none).
+          LABELS: ${{ steps.pr.outputs.labels }}
+          BASE_DIR: ${{ steps.base.outputs.dir }}
+        run: |
+          set -uo pipefail
+
+          allow_api=0
+          allow_arch=0
+          case ",$LABELS," in *,allow-api-breaking,*) allow_api=1 ;; esac
+          case ",$LABELS," in *,allow-arch-drift,*) allow_arch=1 ;; esac
+
+          report=review-summary.md
+          {
+            echo "## metricGate review"
+            echo ""
+            echo "Structural review of the change against \`${{ steps.base.outputs.ref }}\`."
+            echo "The rule and threshold verdict is the separate \`gate\` check."
+            echo ""
+            echo "| signal | question | verdict |"
+            echo "| --- | --- | --- |"
+          } > "$report"
+
+          fatal=0
+          row() { echo "| $1 | $2 | $3 |" >> "$report"; }
+
+          # --- exported API -------------------------------------------------
+          # A snapshot of the base tree, so the comparison is this PR's delta.
+          if ./metricgate api snapshot "$BASE_DIR" -out api-base.json >api-base.log 2>&1; then
+            if ./metricgate api diff -base api-base.json . -format json > api-diff.json 2>api-diff.log; then
+              api_verdict="no breaking change"
+            else
+              n=$(python3 -c "import json;print(len(json.load(open('api-diff.json')).get('breaking') or []))" 2>/dev/null || echo "?")
+              if [ "$allow_api" = 1 ]; then
+                api_verdict="⚠ $n breaking change(s), allowed by \`allow-api-breaking\`"
+              else
+                api_verdict="⛔ $n breaking change(s)"
+                fatal=1
+              fi
+            fi
+          else
+            api_verdict="⛔ could not snapshot the base tree (see artifact)"
+            fatal=1
+          fi
+          row "exported API" "does this remove or change a public signature?" "$api_verdict"
+
+          # --- architecture ------------------------------------------------
+          if ./metricgate arch snapshot "$BASE_DIR" -out arch-base.json >arch-base.log 2>&1; then
+            if ./metricgate arch diff -base arch-base.json . -format json > arch-diff.json 2>arch-diff.log; then
+              arch_verdict="no dependency drift"
+            else
+              if [ "$allow_arch" = 1 ]; then
+                arch_verdict="⚠ dependency shape changed, allowed by \`allow-arch-drift\`"
+              else
+                arch_verdict="⛔ dependency shape changed"
+                fatal=1
+              fi
+            fi
+          else
+            arch_verdict="⛔ could not snapshot the base tree (see artifact)"
+            fatal=1
+          fi
+          row "architecture" "did the package graph gain or lose an edge?" "$arch_verdict"
+
+          # --- clone drift -------------------------------------------------
+          # Not fatal. A one-sided clone edit is a hazard worth naming, but it
+          # is a judgement call (the twin may be about to be deleted), and a
+          # blocking check on a judgement call gets disabled.
+          if ./metricgate clonedrift . -base "${{ steps.base.outputs.sha }}" -format json > clone-drift.json 2>clone-drift.log; then
+            n=$(python3 -c "import json;d=json.load(open('clone-drift.json')) or [];print(len(d if isinstance(d,list) else d.get('findings') or []))" 2>/dev/null || echo 0)
+            if [ "$n" = 0 ]; then
+              clone_verdict="no one-sided clone edit"
+            else
+              clone_verdict="⚠ $n clone(s) edited on one side only"
+            fi
+          else
+            clone_verdict="⚠ clonedrift could not run (see artifact)"
+          fi
+          row "clone drift" "was one copy of a clone edited without its twin?" "$clone_verdict"
+
+          echo "" >> "$report"
+
+          # Detail, so the reviewer does not have to open the artifact to know
+          # what to look at. Bounded: the artifact has the whole list.
+          if [ -s api-diff.json ]; then
+            detail=$(python3 - <<'PY'
+          import json
+          try:
+              d = json.load(open("api-diff.json"))
+          except Exception:
+              raise SystemExit
+          rows = []
+          for c in (d.get("breaking") or [])[:10]:
+              rows.append(f"- ⛔ `{c.get('package','?')}.{c.get('name','?')}` — {c.get('kind','?')}")
+          for c in (d.get("added") or [])[:5]:
+              rows.append(f"- ➕ `{c.get('package','?')}.{c.get('name','?')}`")
+          print("\n".join(rows))
+          PY
+          )
+            if [ -n "$detail" ]; then
+              { echo "### Exported API"; echo ""; echo "$detail"; echo ""; } >> "$report"
+            fi
+          fi
+
+          if [ -s arch-diff.json ]; then
+            drift=$(python3 - <<'PY'
+          import json
+          try:
+              d = json.load(open("arch-diff.json")) or {}
+          except Exception:
+              raise SystemExit
+          for e in (d.get("added") or [])[:10]:
+              print(f"- ➕ `{e.get('from','?')}` -> `{e.get('to','?')}`")
+          for e in (d.get("removed") or [])[:10]:
+              print(f"- ➖ `{e.get('from','?')}` -> `{e.get('to','?')}`")
+          PY
+          )
+            if [ -n "$drift" ]; then
+              { echo "### Architecture"; echo ""; echo "$drift"; echo ""; } >> "$report"
+            fi
+          fi
+
+          if [ -s clone-drift.json ]; then
+            drift=$(python3 - <<'PY'
+          import json
+          try:
+              d = json.load(open("clone-drift.json"))
+          except Exception:
+              raise SystemExit
+          items = (d or []) if isinstance(d, list) else ((d or {}).get("findings") or [])
+          for f in items[:10]:
+              print(f"- `{f.get('file','?')}:{f.get('startLine','?')}` {f.get('name','?')} — twin at `{f.get('twinFile','?')}:{f.get('twinLine','?')}`")
+          PY
+          )
+            if [ -n "$drift" ]; then
+              { echo "### Clone drift"; echo ""; echo "$drift"; echo ""; } >> "$report"
+            fi
+          fi
+
+          {
+            echo "---"
+            echo ""
+            if [ "$fatal" = 1 ]; then
+              echo "**Review verdict: ⛔ changes requested.** Fix the blocking rows above, or apply"
+              echo "\`allow-api-breaking\` / \`allow-arch-drift\` to record that the change is deliberate."
+            else
+              echo "**Review verdict: ✅ approved.** No blocking structural change."
+            fi
+            echo ""
+            echo "<sub>Deterministic: every row is computed from the two trees, not from a model."
+            echo "Same diff, same verdict. No code leaves this runner.</sub>"
+          } >> "$report"
+
+          cat "$report"
+          exit "$fatal"
+
+      - name: Comment on the PR
+        if: always() && steps.pr.outputs.number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('review-summary.md')) {
+              core.warning('no review summary was produced');
+              return;
+            }
+            const body = fs.readFileSync('review-summary.md', 'utf8');
+            const marker = '<!-- metricgate-review-report -->';
+            const issue_number = Number('${{ steps.pr.outputs.number }}');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: marker + '\n' + body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body: marker + '\n' + body,
+              });
+            }
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metricgate-review
+          path: |
+            review-summary.md
+            api-diff.json
+            arch-diff.json
+            clone-drift.json
+            api-base.log
+            arch-base.log
+            clone-drift.log
+          if-no-files-found: warn

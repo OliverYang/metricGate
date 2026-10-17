@@ -106,12 +106,52 @@ jobs:
               'reviewable PR without a personal access token.</sub>',
             ].join('\n');
 
-            const { data: pr } = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              head: branch,
-              base,
-              title,
-              body,
-            });
+            let pr;
+            try {
+              const res = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head: branch,
+                base,
+                title,
+                body,
+              });
+              pr = res.data;
+            } catch (err) {
+              // The one failure everybody hits, and the one whose message says
+              // nothing about what to do. GitHub returns "GitHub Actions is not
+              // permitted to create or approve pull requests" with no hint that
+              // the fix is a checkbox in Settings, so the fix is spelled out
+              // here and written to the job summary where it is actually seen.
+              const msg = String(err.message || '');
+              const forbidden = err.status === 403 || /not permitted to create or approve/i.test(msg);
+              if (!forbidden) throw err;
+
+              const how = [
+                '### autopr could not open a pull request',
+                '',
+                'The workflow token is allowed to write pull requests by',
+                '`permissions: pull-requests: write`, but the **repository** is',
+                'not. Workflow permissions can only narrow what the repository',
+                'grants, never widen it, so no change to this file can fix it.',
+                '',
+                'Enable both, then re-run this job:',
+                '',
+                '1. Settings → Actions → General → **Workflow permissions** =',
+                '   *Read and write permissions*.',
+                '2. Same page, under *Workflow permissions*, tick',
+                '   **Allow GitHub Actions to create and approve pull requests**.',
+                '',
+                `Branch \`${branch}\` is pushed and intact; only the PR is missing.`,
+                'Re-running this workflow creates it. See `docs/github-setup.md` §1.5.',
+              ].join('\n');
+
+              await core.summary.addRaw(how).write();
+              // setFailed, not error: a job that reports success while no PR
+              // exists is worse than a red one. The first draft logged
+              // core.error and returned, and the run concluded "success" —
+              // the exact silent failure this block exists to end.
+              core.setFailed(how);
+              return;
+            }
             core.info(`Opened PR #${pr.number} for ${branch}.`);

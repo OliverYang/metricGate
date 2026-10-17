@@ -19,6 +19,7 @@ import (
 // a sequence of steps instead of a wall of dereferenced flag pointers.
 type impactFlags struct {
 	query, format, root string
+	config              string
 	max, depth          int
 	maxAffected         int
 	owners              bool
@@ -42,13 +43,19 @@ func parseImpactFlags(args []string) impactFlags {
 	if *query == "" {
 		fail(fmt.Errorf("impact needs -q NAME"))
 	}
-	_ = configPath // reserved: layer annotation of affected files lands with the arch wiring
-	return impactFlags{query: *query, format: *format, root: root, max: *max, depth: *depth, maxAffected: *maxAffected, owners: *owners}
+	return impactFlags{query: *query, format: *format, root: root, max: *max, depth: *depth, maxAffected: *maxAffected, owners: *owners, config: *configPath}
 }
 
 func cmdImpact(args []string) {
 	f := parseImpactFlags(args)
-	files, defs, uses, err := facts.CollectWithRefs(f.root)
+	// Policy-aware, like reachability: an unfiltered walk makes every
+	// checkout under .data/ look like a second definition of the symbol, and
+	// the blast radius then names files the gate never reads.
+	cfg, err := loadPolicyFor(f.config, f.root)
+	if err != nil {
+		fail(err)
+	}
+	files, defs, uses, err := facts.CollectSelectedWithRefs(f.root, cfg)
 	if err != nil {
 		fail(err)
 	}

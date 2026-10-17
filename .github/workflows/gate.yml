@@ -10,61 +10,34 @@
 # with the target branch, and metricgate refuses to guess: it names the ref it
 # could not resolve rather than reporting a clean tree.
 #
-# paths: keep in sync with internal/parser/parser.go LanguageForFile. Only
-# listed paths trigger the gate; .metricgate.yaml changes re-gate everything.
+# WHY THE TRIGGER IS push AND NOT pull_request
+#   GitHub will not start a workflow for a pull_request event that its own
+#   GITHUB_TOKEN created: the run lands in `action_required` and waits for a
+#   human to press "Approve workflows to run". autopr.yml opens the PR with
+#   that token, so a pull_request-triggered gate would sit unapproved on every
+#   PR this repository opens for itself, and the check would never report.
+#   Verified 2026-10-17: the run had zero jobs and the commit had no `gate`
+#   check at all (only autopr's own `open`).
+#
+#   A push carries the actor who pushed, so a run started by `git push` is not
+#   bot-created and needs no approval. Checks are attached to the commit, not
+#   to the PR, so gating the push puts the verdict on the PR's head SHA anyway.
+#   The second push in that verification — same commit, actor OliverYang — ran
+#   the gate to `success` with no approval step.
+#
+# WHY NO paths FILTER
+#   A required check that never runs is not "skipped", it stays pending, and
+#   whatever waits on it waits forever. The diff-scoped gate costs ~2s on this
+#   tree, so it runs on every push and reports "no new violations" when the
+#   diff touches no source file. The filter this replaces had a second failure
+#   mode: it matched 21 suffixes by hand, so a language added to
+#   internal/parser/parser.go silently gated nothing until someone remembered
+#   to extend the list.
 name: gate
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '**.go'
-      - '**.java'
-      - '**.ts'
-      - '**.mts'
-      - '**.cts'
-      - '**.js'
-      - '**.mjs'
-      - '**.cjs'
-      - '**.jsx'
-      - '**.py'
-      - '**.c'
-      - '**.h'
-      - '**.cpp'
-      - '**.cc'
-      - '**.cxx'
-      - '**.hpp'
-      - '**.hh'
-      - '**.hxx'
-      - '**.cs'
-      - '**.rs'
-      - '.metricgate.yaml'
-      - '.github/workflows/gate.yml'
   push:
-    branches: [main]
-    paths:
-      - '**.go'
-      - '**.java'
-      - '**.ts'
-      - '**.mts'
-      - '**.cts'
-      - '**.js'
-      - '**.mjs'
-      - '**.cjs'
-      - '**.jsx'
-      - '**.py'
-      - '**.c'
-      - '**.h'
-      - '**.cpp'
-      - '**.cc'
-      - '**.cxx'
-      - '**.hpp'
-      - '**.hh'
-      - '**.hxx'
-      - '**.cs'
-      - '**.rs'
-      - '.metricgate.yaml'
-      - '.github/workflows/gate.yml'
+    branches: ['**']
 
 permissions:
   # Check-run annotations (line-level findings on the PR diff).
@@ -92,13 +65,12 @@ jobs:
         id: base
         run: |
           set -eu
-          # A pull_request knows its target branch; a push to main knows the
-          # commit it replaced. Both are resolved to something metricgate can
-          # merge-base against, because a gate that cannot name its base is a
-          # gate that reports a clean tree for the wrong reason.
-          if [ -n "${{ github.base_ref }}" ]; then
-            base="origin/${{ github.base_ref }}"
-          else
+          # A push to main knows the commit it replaced; a push to any other
+          # branch is measured against main, which is where it intends to land.
+          # Both are resolved to something metricgate can merge-base against,
+          # because a gate that cannot name its base is a gate that reports a
+          # clean tree for the wrong reason.
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             base="${{ github.event.before }}"
             # A brand-new branch reports 40 zeros; there is no "before" to
             # diff against, so the first push gates its own commit only.
@@ -106,6 +78,8 @@ jobs:
               *[!0]*) ;;
               *) base="HEAD~1" ;;
             esac
+          else
+            base="origin/main"
           fi
           echo "base=$base" >> "$GITHUB_OUTPUT"
           echo "gating against $base"
@@ -155,20 +129,48 @@ jobs:
           open(body_path, "w").write("\n".join(lines) + "\n")
           PY
 
-      - name: Comment on the PR
+      - name: Find the pull request for this branch
+        id: pr
         # A push to main has no PR to comment on; the verdict lives in the log.
-        if: always() && github.event_name == 'pull_request'
+        if: github.ref != 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const branch = context.ref.replace('refs/heads/', '');
+            const find = async () => {
+              const { data: prs } = await github.rest.pulls.list({
+                owner, repo, head: `${owner}:${branch}`, state: 'open',
+              });
+              return prs[0];
+            };
+            // The gate finishes in seconds; autopr.yml needs longer to open the
+            // PR. Without this wait the first push of a branch reports no PR
+            // and the comment only appears on the *second* push, which reads as
+            // a gate that silently ignored the change.
+            let pr = await find();
+            for (let i = 0; i < 12 && !pr; i++) {
+              await new Promise((r) => setTimeout(r, 5000));
+              pr = await find();
+            }
+            const n = pr ? String(pr.number) : '';
+            core.info(n ? `commenting on PR #${n}` : 'no open PR for this branch after 60s; the check-run still carries the verdict');
+            core.setOutput('number', n);
+
+      - name: Comment on the PR
+        if: always() && steps.pr.outputs.number != ''
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('findings-summary.md', 'utf8');
             const marker = '<!-- metricgate-gate-report -->';
+            const issue_number = Number('${{ steps.pr.outputs.number }}');
             // Replace our previous comment instead of stacking one per run.
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
+              issue_number,
             });
             const existing = comments.find(c => c.body.includes(marker));
             if (existing) {
@@ -182,7 +184,7 @@ jobs:
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
+                issue_number,
                 body: marker + '\n' + body,
               });
             }
