@@ -80,6 +80,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [evaluation-commit-replay-results.md](evaluations/evaluation-commit-replay-results.md) | **提交级研判执行报告（实测，dev-cockpit 289 commits）**：0/289 零检出 commit；error 清零 5/5；一轮收敛 1/5 证伪（真实仓库比合成任务难）；副作用 2 warning/0 error；test-no-assert 215/289（按 commit 计数）。⚠️ 两处已就地修正：215 已于 iter-30 用当前判据重算（含义变了：全部来自 1 个函数），§2 的「规则族触发总量」18 行里 13 行**不可从归档复现** |
 | [evaluation-iter29-remediation.md](evaluations/evaluation-iter29-remediation.md) | **iter-29 五项整改实测**：TS 箭头函数从不可见到可量（同文件可维护性 19→51）、`test-no-assert` 误报 55→19（本仓 8→0）、规则中文目录到前端、运行历史记录触发命令（含脱敏）、harness 接线样例。本仓 422→431 warnings / 0 errors 不变 |
 | [evaluation-iter30-tna-recalibration.md](evaluations/evaluation-iter30-tna-recalibration.md) | **iter-30 重标定（实测，289 commit × 双判据重放）**：215/289 在新旧判据下都成立且可从归档复现，但按独立事件只有 1 个函数（anchors 31→2→1，findings 1,783→233→215）；`Benchmark*` 已从 `test-no-assert` 排除（语料 19→5，0 条真阳丢失）；另附跨语言函数单元普查与旧报告 13 行不可复现的逐条对照 |
+| [iter-30 迭代日志](iterations/iter-30-recalibration-and-benchmark-scope.md) | iter-30 全过程（重放口径的三个坑 / 215 的机制 / benchmark 摘出 / 普查的负面结论 / iter-31 排期与 `triaging` 的两条负结论） |
 | [ab-experiment.md](evaluations/ab-experiment.md) | LLM 约束效果 A/B 实验设计（下一步核心验证） |
 
 ## [research/](research/) — 调研笔记
@@ -92,7 +93,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [research-harness-and-constraints-2026.md](research/research-harness-and-constraints-2026.md) | 大模型产出约束工具 × harness 工程：业界全景（2026-Q3） |
 | [roadmap-research.md](research/roadmap-research.md) | 确定性约束能力补全调研与行动方案（2025-09） |
 | [digest-open-questions-research.md](research/digest-open-questions-research.md) | **digest 待解问题定向文献调研**：任务条件化注入先例（AutoGuide）+ 1.74× 成本归因实验设计（30× 方差警告 → k≥5 中位数 + 三桶模型）+ B 类惯用法提示文献支撑与空白 |
-| [product-evolution-directions-2026-10.md](research/product-evolution-directions-2026-10.md) | **产品演进方向调研（2026-10）**：短期收敛闸门可信度与交付质量（iter-19 ~ iter-20），中期扩展规则表达力（iter-21 ~ iter-23），v2 决策输入
+| [product-evolution-directions-2026-10.md](research/product-evolution-directions-2026-10.md) | **产品演进方向调研（2026-10）**：短期收敛闸门可信度与交付质量（iter-19 ~ iter-20），中期扩展规则表达力（iter-21 ~ iter-23），v2 决策输入。§7 排期表已按「已完成轮次 / 下一轮」重写两次，最新排期见 [iter-31 建议](research/product-evolution-directions-2026-10.md) §7.3 |
 
 ## [design/](design/) — 设计契约与方案
 

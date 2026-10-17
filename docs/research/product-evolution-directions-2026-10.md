@@ -438,7 +438,28 @@ Lost-in-the-Middle）。真正的问题是：**默认预算选错会让 required
 | iter-22 顺带 | 子目录 root 跑 `-diff` 时 value-delta 静默全保留 | ✅ 已定口径并实现（`iter-24` §2.1 选 C、§4 断言结清）。~~验收判据「`unchanged` 不再一个为 0」~~ 这说的是**修复前**的病灶形状，不是还欠的债 |
 | iter-23+ | D3 blast-radius 进闸门 / D5 bundle 降级 / ~~D6 strategy 重写~~ | ⚠️ D6 已提交；D3/D5 未开始 |
 
-### 7.2 本轮（iter-29）实际做完的五项
+### 7.2 已完成的轮次（iter-29、iter-30）
+
+**iter-29 五项**（不依赖 CI 的待办，详见 [evaluation-iter29-remediation.md](../evaluations/evaluation-iter29-remediation.md)）：
+
+| 项 | commit | 类型 |
+|---|---|---|
+| TS/JS 模块级箭头函数算函数单元 | `760f498` | 度量正确性（同文件可维护性 19→51） |
+| `test-no-assert` 认「拿到 `*testing.T` 的 helper」 | `ecd57b5` | 规则正确性（语料误报 55→19，本仓 8→0） |
+| `.claude/settings.json.example` 发货 | `ec1455c` | 文档承诺兑现 |
+| 规则目录中文到前端 | `f0b0a6e` | 可解释性（61 行全覆盖，7 个 id） |
+| 运行历史记录触发命令 + 路径 | `c386b4a` | 可追溯性（含脱敏） |
+
+**iter-30 三项**（把 iter-29 §7 的债还完，详见 [iter-30 迭代日志](../iterations/iter-30-recalibration-and-benchmark-scope.md) + [evaluation-iter30-tna-recalibration.md](../evaluations/evaluation-iter30-tna-recalibration.md)）：
+
+| 项 | commit | 收口观测 |
+|---|---|---|
+| 289 commit × 双判据重放，重标定 `test-no-assert` | `739aa11` | 215/289 **在新旧判据下都成立且可复现**，但含义被读错：全部来自 1 个函数，anchors 31→1；`claims.md` #19 该项证据**不再上调** |
+| `Benchmark*` 从 `test-no-assert` 排除 | `d2bcf9b` | 语料 19→5、仓库 233→215，**0 条真阳丢失**；Go 夹具搬进 `go_test_no_assert_test.go`（`rules_test.go` 413→216 行） |
+| 跨语言函数单元普查 | `ed58746` | JS 的洞**不共享**于其他语言（那些 `name = <closure>` 就是闭包，全站规则是折叠）；真缺口换成另一类：C# accessor / Java static-init / C# top-level statements 的分支**不在任何单元里**，零单元还会压掉 maintainability 快照。已钉成测试，未修（需先定命名） |
+
+> iter-30 的两个负面结论比两个正结论更有价值：（1）**per-commit 计数不是 per-event 计数**，215 个命中是同一个函数在 215 个 commit 里各算一次；（2）旧报告 §2「规则族触发总量」18 行里 **13 行无法从归档 JSON 复现**（口径不可考），已就地标注而非改写。
+
 
 不依赖 CI 的待办已全部清掉，详见 [evaluation-iter29-remediation.md](../evaluations/evaluation-iter29-remediation.md)：
 
@@ -450,21 +471,26 @@ Lost-in-the-Middle）。真正的问题是：**默认预算选错会让 required
 | 规则目录中文到前端 | `f0b0a6e` | 可解释性（61 行全覆盖，7 个 id） |
 | 运行历史记录触发命令 + 路径 | `c386b4a` | 可追溯性（含脱敏） |
 
-### 7.3 iter-30 建议（下一轮）
+### 7.3 iter-31 建议（下一轮）
+
+按「不做会让下一个数字错」排序。CI 仍是 7 个 workflow 全 `disabled_manually`，凡依赖 CI 的项标了前置。
 
 | 优先级 | 内容 | 依赖 CI？ | 收口观测 |
 |---|---|---|---|
-| **P0** | **重跑 commit replay 标定 `test-no-assert`** —— 本轮改了判据，`evaluation-commit-replay-results.md` 的 215/289 与 `claims.md` #19 都成了旧判据数字 | 否 | 215 换成新判据数，或明标「旧判据上界」（已在两处就地标注） |
-| **P0** | **C/C++/C# 等价失明排查** —— R1 修的是 JS 系，同类「kind-set 漏掉某种声明形态」在别的适配器里大概率还有 | 否 | 每语言一个「全 lambda / 全属性 / 全表达式体」fixture，FUNCS > 0 |
-| P1 | `Benchmark*` 是否单开一档（R2 剩的 14/19 条都是 benchmark） | 否 | 定口径后本仓 + 语料各跑一次，写进 `docs/metrics.md` |
-| P1 | 别名追踪（`tt := t`）—— R2 的已知精度下界 | 否 | 要么做，要么在规则文档明写不追 |
-| P1 | D1 标识符规则族（原 iter-21，最大的一块未动） | 否 | `metricgate constraints rule` 6/6 PASS |
-| P1 | `languageGroups` 有数据无消费者（R4 记下的观察） | 否 | 前端按语言分组，或删字段 |
-| P2 | pre-commit scoped 根（原 iter-19 唯一遗留） | 否 | 同一脏树前后耗时中位数 |
-| **等 CI** | P2 triage push 触发、P4 分支保护、T4.5 L8 | **是** | CI 停着时加的是不会执行的代码 |
+| **P0** | **把被 claim 引用的原始数据落进仓库** —— `.data/` 不被 git 跟踪，iter-30 能重算纯粹因为这台机器还在 | 否 | `docs/evaluations/` 或等价位置有仓内可寻址的 per-rule 摘要 JSON + commit 清单 + policy 版本/sha；`claims.md` #19 指向它 |
+| **P0** | **旧评估数字逐个标判据版本** —— R1/R2 之后 `evaluation-*.md` 里的函数级/测试级数字跨了判据 | 否 | 每篇加「本报告数字来自 <commit> 的判据」；不确定的标不可比，**不换算** |
+| P1 | C# accessor / Java static-init 的单元缺口（iter-30 已钉住，未修） | 否 | 先出命名方案（`P.get` / `get@line`）走策略评审；**不要先动 kindset**，否则 `MI=90.2` 这种假快照会流进历史库 |
+| P1 | **新规则：benchmark 其实没测东西** —— iter-30 摘掉了噪音，真缺陷现在无人回答 | 否 | 一条规则 + 一个 fixture，提示必须可执行（如 setup 返回值未被引用） |
+| P1 | D1 标识符规则族（原 iter-21，最大的一块未动；6 条 NAMING 条款共享同一个机制缺口） | 否 | `metricgate constraints rule` 6/6 PASS，每条 ≥1 bad + ≥1 good |
+| P1 | 别名追踪（`tt := t`）与「靠超时失败」的取舍 —— iter-30 残留命中的两个来源 | 否 | 要么实现，要么在规则文档（而非测试注释）明写不追 |
+| P1 | `languageGroups` 有数据无消费者 | 否 | 前端按语言分组，或删字段。**不要留着** |
+| P2 | pre-commit scoped 根（原 iter-19 唯一遗留，实测省 1.65–2.05 秒） | 否 | 同一脏树前后耗时中位数 |
+| **等 CI** | P2 triage push 触发、P4 分支保护、T4.5 L8 | **是** | CI 停着时加的是不会执行的代码；恢复前按 iter-27 §7 顺序重跑三段证明 |
 
 > 排期逻辑改一句话：**先保证度量量到的东西是真的（P0 两项），再让闸门表达更多团队规范（D1）**。
-> 原表那句「先快又一致」仍然对，但本轮发现了一个更前面的坑：**快而一致地量错，比慢更糟**。
+> 原表那句「先快又一致」仍然对，但 iter-29 发现了一个更前面的坑：**快而一致地量错，比慢更糟**。iter-30 又往前推了一层：
+> **量对了也不代表你说的那个数字是对的**——215 个命中没错，错的是把它念成「215 个事件」。下一轮把「让数字可复核」排在
+> 「让闸门更强壮」前面，就是这个道理。
 
 
 ---
