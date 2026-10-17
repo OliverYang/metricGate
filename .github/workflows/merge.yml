@@ -32,6 +32,15 @@
 #   `workflow_run` runs with a write token even when the triggering workflow
 #   ran on a fork's commit. Merging is a write, so the run refuses anything
 #   whose head repository is not this one.
+#
+# WHY IT DISPATCHES seal.yml INSTEAD OF LETTING push FIRE
+#   GitHub does not create workflow runs for events triggered by GITHUB_TOKEN
+#   (recursion prevention); `workflow_dispatch` and `repository_dispatch` are
+#   the only two exceptions. This job merges with GITHUB_TOKEN, so its push to
+#   main produces no `push` event and `seal.yml` -- `on: push: branches: [main]`
+#   -- never starts. The result is silent: merged, all green, never released.
+#   So the merge dispatches seal.yml itself, which is a dispatch precisely
+#   because there is no push to hook.
 name: merge
 
 on:
@@ -43,6 +52,10 @@ permissions:
   contents: write
   pull-requests: write
   checks: read
+  # Needed to dispatch seal.yml after merging. A GITHUB_TOKEN merge fires no
+  # push event, so the release workflow has to be started by hand -- and this
+  # is the hand.
+  actions: write
 
 concurrency:
   # One decision per head commit; a burst of completions coalesces.
@@ -162,6 +175,45 @@ jobs:
                 sha: pr.head.sha,
               });
               core.info(`merged PR #${pr.number} (${merged.sha}); seal.yml takes it from here.`);
+
+              // ...except that it does not, and this is the one place where
+              // being wrong is silent.
+              //
+              // The merge above is performed with GITHUB_TOKEN, and GitHub does
+              // not create workflow runs for events triggered by GITHUB_TOKEN
+              // (recursion prevention). `workflow_dispatch` and
+              // `repository_dispatch` are the only exceptions. So the push this
+              // merge makes to main fires no `push` event, and seal.yml -- which
+              // is `on: push: branches: [main]` -- never starts.
+              //
+              // The failure mode is the bad one: the PR is merged, every check
+              // on it is green, the run is green, and the release simply never
+              // happens. Nothing turns red, so nothing asks for attention. Seen
+              // on f38a2599: `total runs on that sha: 0`.
+              //
+              // (PR #1 did get sealed, which is what made this look fine: that
+              // merge was made with a PAT, so the push was a real user event.)
+              //
+              // Dispatch it explicitly. repository_dispatch and
+              // workflow_dispatch are the two events GITHUB_TOKEN is allowed to
+              // trigger, which is exactly why the fix is a dispatch and not an
+              // "also run on push" -- there is no push to run on.
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner, repo,
+                  workflow_id: 'seal.yml',
+                  ref: 'main',
+                });
+                core.info('dispatched seal.yml for main; the push that triggered nothing now triggers it.');
+              } catch (err) {
+                // A merge that landed is not undone by a failed dispatch, and
+                // failing here would report the merge as broken. Warn loudly and
+                // name the manual recovery instead.
+                core.warning(
+                  `merged PR #${pr.number} but could not dispatch seal.yml: ${err.status || '?'} ${err.message}. ` +
+                    'Run it by hand: gh workflow run seal.yml --repo ' + `${owner}/${repo}`,
+                );
+              }
             } catch (err) {
               // 405 = not mergeable (conflict, or a push landed between the
               // check read and the merge). 409 = head moved. Both are states a
