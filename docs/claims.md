@@ -155,7 +155,7 @@ LLM 侧 `codex review --commit <sha>`。
 | `metricgate calls` 汇总入口 | `cmd/metricgate/calls_cmd.go` | 把日志压成一张表；`-since` / `-format json` |
 | 埋点不可绕过 | `cmd/metricgate-mcp/tools.go` 的 `addTool` | 新加工具若不经过它，端到端测试会红（`e2e_test.go`） |
 | pre-commit hook（已验证三种情形） | `hooks/pre-commit` | "这次提交新增的行"是否越界 |
-| CI workflow | `.github/workflows/metricgate.yml` | 同上，在 PR 上（**尚未在 GitHub 真跑过**） |
+| CI workflow | `.github/workflows/gate.yml` | 同上，在 PR 与 push to main 上（**判据已在本机验证；GitHub Actions 的运行环境尚未真跑过**） |
 | agent 指令模板 | `workflow.md` §2 | 何时调什么、完成判据是什么 |
 
 同时修掉两个**被这次接线暴露出来的真实缺陷**：

@@ -18,7 +18,17 @@ gate:
 # script). It is not a package: the .mjs file there made the arch extractor
 # treat the directory as one, which the architecture snapshot then reported as
 # drift.
-exclude: [".git", "vendor", "node_modules", "testdata", ".data", "third_party", "shots-iter2"]
+# Path segments to skip entirely. Matching is by SEGMENT NAME, not by prefix:
+# "docs/a/b" matches nothing, "b" matches any directory called b at any depth.
+#   third_party   — vendored upstream grammar (go.mod `replace`); its generated
+#                   parser.c is 298k lines and cannot be fixed here.
+#   shots-iter2   — archived UI evidence (PNGs plus a CDP script), not a package.
+#   .trellis/.pi/.agents/.claude — agent-harness state and skills. They are tool
+#                   directories that happen to contain Python and TypeScript, so
+#                   scanning them reports 105 errors about code this repository
+#                   does not own and cannot fix. Excluding them keeps the
+#                   whole-tree verdict about our code.
+exclude: [".git", "vendor", "node_modules", "testdata", ".data", "third_party", "shots-iter2", ".trellis", ".pi", ".agents", ".claude"]
 
 languages:
   go:

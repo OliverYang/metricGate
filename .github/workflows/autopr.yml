@@ -1,0 +1,117 @@
+# Open a pull request for every pushed branch, using the workflow's own token.
+#
+# WHY THIS EXISTS
+#   The author pushes over SSH. SSH moves refs; it cannot call the GitHub API,
+#   so `git push` alone leaves a branch with no pull request and no gate — the
+#   work sits invisible until someone opens the web UI. This workflow closes
+#   that gap with the one credential every run already has: GITHUB_TOKEN.
+#
+# WHAT IT DOES NOT DO
+#   It does not merge, label, or review. It opens (or updates) the PR and lets
+#   gate.yml do the judging. A PR opened here is identical to one opened by
+#   hand, except that its author is the bot.
+#
+# IDEMPOTENCE
+#   Pushing twice to the same branch must not create two PRs. The lookup runs
+#   before the create, and the create is skipped when an open PR already
+#   exists for that head branch.
+name: autopr
+
+on:
+  push:
+    # Only the working branches. main is gated by gate.yml and sealed by
+    # seal.yml; a PR from main to main is not a thing.
+    branches-ignore:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # One PR per branch, so a burst of pushes coalesces instead of racing.
+  group: autopr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Open or update the pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const base = 'main';
+
+            // A branch that differs from base by nothing has no PR to open.
+            const { data: cmp } = await github.rest.repos.compareCommitsWithBasehead({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              basehead: `${base}...${branch}`,
+            });
+            if (cmp.ahead_by === 0) {
+              core.info(`${branch} has no commits ahead of ${base}; nothing to open.`);
+              return;
+            }
+
+            const { data: existing } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              state: 'open',
+            });
+            if (existing.length > 0) {
+              core.info(`PR #${existing[0].number} already tracks ${branch}; leaving it alone.`);
+              return;
+            }
+
+            // Link the issue when the branch is named fix/issue-12-… or
+            // feat/issue-12-…, which is what scripts/agent-work.sh creates.
+            const issueMatch = branch.match(/^(?:fix|feat)\/issue-(\d+)-/);
+            const issueLine = issueMatch
+              ? `Closes #${issueMatch[1]}\n\n`
+              : '';
+
+            // The newest commit subject is the best available title: it is
+            // written by whoever did the work, not inferred from the diff.
+            const title = cmp.commits.length > 0
+              ? cmp.commits[cmp.commits.length - 1].commit.message.split('\n')[0]
+              : `Changes on ${branch}`;
+
+            const body = [
+              issueLine + `Opened automatically for branch \`${branch}\`.`,
+              '',
+              '### What the gate will check',
+              '',
+              `\`metricgate check . -diff -base origin/${base}\` — the lines this`,
+              'branch adds, judged against the thresholds in `.metricgate.yaml`.',
+              'The verdict appears as the `gate` check on this PR and as a',
+              'comment below.',
+              '',
+              '### How to take it from here',
+              '',
+              '```sh',
+              'git fetch origin',
+              `git switch ${branch}`,
+              '```',
+              '',
+              '<sub>Opened by `.github/workflows/autopr.yml`. The branch author',
+              'pushed over SSH; this workflow is what turns a pushed ref into a',
+              'reviewable PR without a personal access token.</sub>',
+            ].join('\n');
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: branch,
+              base,
+              title,
+              body,
+            });
+            core.info(`Opened PR #${pr.number} for ${branch}.`);

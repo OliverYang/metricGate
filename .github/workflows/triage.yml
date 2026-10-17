@@ -1,0 +1,173 @@
+# Turn findings into issues, so the work has somewhere to live.
+#
+# WHY THIS EXISTS
+#   The gate answers "is this change clean?". It does not answer "what is still
+#   dirty?". A whole-tree scan is report-only by design (schedule.yml), which
+#   means its findings are read once and forgotten. This workflow gives them a
+#   durable home: one issue per distinct finding, labelled so a local agent can
+#   claim it.
+#
+# WHY ONLY ERRORS
+#   The tree currently carries ~400 warnings. Filing those would bury the
+#   errors and train everyone to ignore the label. Errors are the set the gate
+#   would fail on, so they are the set worth a work item.
+#
+# DEDUPLICATION
+#   The finding JSON has no fingerprint field, and the message embeds the
+#   threshold ("is 23 (threshold warning 15)") — so hashing the message would
+#   file a new issue every time a threshold moves. The key is
+#   `ruleId|file|startLine`, which changes only when the violation moves.
+#   It is embedded as an HTML comment in the issue body and searched for on
+#   every run: an issue that is still open gets a comment, not a twin.
+name: triage
+
+on:
+  schedule:
+    # Daily at 03:00 UTC, an hour after the weekly trend scan, so the two
+    # never contend for the same runner minute.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  file:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the gate
+        run: go build -o metricgate ./cmd/metricgate
+
+      - name: Scan the whole tree
+        # Report-only: the tree carries accepted legacy debt, and this job's
+        # product is an issue list, not an exit code. `|| true` keeps a red
+        # scan from skipping the filing step below.
+        run: ./metricgate check . -format json > findings.json || true
+
+      - name: File one issue per distinct error
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync('findings.json', 'utf8'));
+            } catch (err) {
+              core.setFailed(`findings.json is not readable: ${err.message}`);
+              return;
+            }
+
+            const errors = (report.findings || []).filter(f => f.severity === 'error');
+            core.info(`scan produced ${errors.length} error-severity finding(s)`);
+
+            // Stable across threshold edits and across runs of the same code.
+            const fingerprint = (f) =>
+              crypto.createHash('sha1')
+                .update([f.ruleId, f.file, f.startLine].join('|'))
+                .digest('hex')
+                .slice(0, 12);
+
+            // Everything already filed, so the per-finding lookup is a map hit
+            // rather than an API call per finding.
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'metricgate',
+              per_page: 100,
+            });
+            const byFingerprint = new Map();
+            for (const issue of open) {
+              const m = (issue.body || '').match(/metricgate-fp: ([0-9a-f]{12})/);
+              if (m) byFingerprint.set(m[1], issue);
+            }
+            core.info(`${byFingerprint.size} open metricgate issue(s) already carry a fingerprint`);
+
+            let created = 0;
+            let seen = 0;
+
+            for (const f of errors) {
+              const fp = fingerprint(f);
+              const existing = byFingerprint.get(fp);
+              const where = `${f.file}:${f.startLine}`;
+              if (existing) {
+                // Still there. A comment keeps the history of "it persisted"
+                // without opening a second issue for the same line.
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  body: `Still present as of ${new Date().toISOString().slice(0, 10)} (run ${context.runId}).`,
+                });
+                seen++;
+                continue;
+              }
+
+              const body = [
+                '<!-- metricgate-fp: ' + fp + ' -->',
+                '`metricgate check .` reports this on the whole tree:',
+                '',
+                '```',
+                `${where}: [error] ${f.ruleId} (${f.message})`,
+                '```',
+                '',
+                '| field | value |',
+                '| --- | --- |',
+                `| rule | \`${f.ruleId}\` |`,
+                `| file | \`${f.file}\` |`,
+                `| line | ${f.startLine} |`,
+                `| severity | error |`,
+                '',
+                '### How this issue was filed',
+                '',
+                '`.github/workflows/triage.yml` scans the whole tree and files one',
+                'issue per distinct `ruleId|file|startLine`. Re-running the scan',
+                'comments on this issue instead of opening a twin, so the',
+                'fingerprint above is the identity of the problem, not of the run.',
+                '',
+                '### Picking it up',
+                '',
+                '```sh',
+                `./scripts/agent-claim.sh            # lists what is claimable`,
+                `./scripts/agent-work.sh ${'<issue-number>'} <short-slug>`,
+                '```',
+                '',
+                'The fix is done when `metricgate check . -diff -base origin/main` is',
+                'clean on the branch, which is exactly what the `gate` check runs.',
+                '',
+                '<sub>Filed by triage. Thresholds come from `.metricgate.yaml`; a',
+                'finding that is intentional belongs in the accept ledger',
+                '(`metricgate accept add`), not in a suppressed issue.</sub>',
+              ].join('\n');
+
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[metricgate] ${f.ruleId} at ${where}`,
+                body,
+                labels: ['metricgate', 'agent'],
+              });
+              core.info(`filed #${issue.number} for ${where} (${fp})`);
+              created++;
+            }
+
+            core.summary
+              .addHeading('metricgate triage')
+              .addTable([
+                [{ data: 'metric', header: true }, { data: 'value', header: true }],
+                ['errors scanned', String(errors.length)],
+                ['issues created', String(created)],
+                ['already open (commented)', String(seen)],
+              ])
+              .write();

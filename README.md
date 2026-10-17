@@ -66,7 +66,7 @@ lives in **[docs/capabilities.md](docs/capabilities.md)**. The highlights:
   saves edits back atomically.
 - **Outputs**: text, JSON, SARIF 2.1.0 (GitHub code scanning), local SQLite
   trend store.
-- **Integration**: 28 CLI subcommands and an MCP stdio server exposing 12 tools
+- **Integration**: 29 CLI subcommands and an MCP stdio server exposing 12 tools
   ([details](#mcp-server-call-it-from-your-coding-agent)).
 - **CI gate**: exit 1 on violations.
 
@@ -131,7 +131,17 @@ What you get:
 
 The full-featured version this repo runs on itself — check-run annotations,
 a self-updating PR comment, artifact upload, and a weekly whole-tree scan —
-lives in [`.github/workflows/`](.github/workflows/metricgate-pr.yml).
+lives in [`.github/workflows/`](.github/workflows/). This repository also runs a
+closed agent loop on top of it: triage files findings as issues, a local agent
+claims one, and the pushed branch opens its own PR. See
+**[docs/github-setup.md](docs/github-setup.md)** for the topology, the one-time
+SSH setup, and the daily loop:
+
+```sh
+./scripts/agent-claim.sh                    # what is claimable
+./scripts/agent-work.sh 42 short-slug       # branch + brief
+./scripts/agent-pr.sh   42 "fix: ..."       # gate, commit, push -> CI opens the PR
+```
 
 ## MCP server (call it from your coding agent)
 
@@ -157,8 +167,9 @@ metricgate calls          # call counts by phase, intercept rate, converge rate
 ```
 
 Wiring instructions — a paste-ready agent-instruction template, a pre-commit
-hook, a CI job, and what the instrumentation can and cannot tell you — are in
-**[docs/workflow.md](docs/workflow.md)**.
+hook, a **post-edit hook that puts the verdict in front of the model after every
+edit** (`hooks/post-edit.sh`), a CI job, and what the instrumentation can and
+cannot tell you — are in **[docs/workflow.md](docs/workflow.md)**.
 
 Tools exposed:
 
@@ -378,6 +389,17 @@ for an unchanged value, so "0 new findings" is a claim you can audit. Add
 (`errors`, `warnings`, `verdict.accepted`, `verdict.suppressed`) — the gate
 line and the JSON come from one function and cannot disagree. Metric
 snapshots stored for trends are always the full measurements.
+
+The trend store is bounded only if you say so. `store.retain: {runs: N, days: D}`
+(both default 0 = unlimited, so nothing is ever removed) plus `prune_on_write: false`
+by default means the history you have today is the history you keep. When you do set a
+bound, `metricgate store prune [-dry-run]` retires runs with their findings and metric
+snapshots in one transaction — archived runs are never touched and the newest live run
+of each `project_root` always survives, so a project card cannot go empty. The CLI
+prints the removed row counts and what remains; the cockpit overview shows the bound,
+`kept` versus `total`, and the last trim. DELETE frees pages without shortening the
+file; VACUUM is a separate deliberate step, never automatic — see
+[docs/iterations/iter-25-store-retention.md](docs/iterations/iter-25-store-retention.md) §9.
 
 When the gate fails, the output lists every sanctioned path out — fix,
 suppress with a `metricgate: ignore` directive, concede with

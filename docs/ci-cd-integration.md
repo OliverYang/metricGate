@@ -38,10 +38,10 @@ metricGate integrates into CI/CD pipelines at multiple stages:
 
 ### PR Gate Workflow
 
-See: `.github/workflows/metricgate-pr.yml`
+See: `.github/workflows/gate.yml`
 
 ```yaml
-name: metricGate PR Gate
+name: gate
 
 on:
   pull_request:
@@ -82,9 +82,10 @@ jobs:
 
 ### Scheduled Full Scan
 
-See: `.github/workflows/metricgate-schedule.yml`
+See: `.github/workflows/schedule.yml`
 
-Runs daily at 2 AM UTC to track technical debt trends.
+Runs weekly (Monday 02:00 UTC) as a report-only trend scan. Filing findings as
+issues is a separate daily job: `.github/workflows/triage.yml`.
 
 ## GitLab CI Integration
 
@@ -238,7 +239,8 @@ rules:
 
 ## Resources
 
-- GitHub Actions workflow: `.github/workflows/metricgate-pr.yml`
+- GitHub Actions workflows: `.github/workflows/{gate,autopr,triage,seal,schedule}.yml`
+  (topology and the daily agent loop: `docs/github-setup.md`)
 - GitLab CI pipeline: `.gitlab-ci.yml`
 - CI helper script: `scripts/ci-helper.sh`
 - Design doc: `docs/design/ci-cd-integration-design.md` (TBD)

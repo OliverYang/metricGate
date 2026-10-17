@@ -1,0 +1,167 @@
+# Seal a release when main goes green.
+#
+# WHY THIS EXISTS
+#   "Merged" and "shipped" were the same event, so there was never a moment
+#   where a known-good tree was named. This workflow creates that moment: main
+#   passes the whole-tree gate, and the commit that passed is tagged and
+#   published with the evidence attached.
+#
+# WHY THE VERSION COMES FROM SOURCE
+#   `cmd/metricgate/main.go` declares `var toolVersion`, deliberately a var so
+#   `-ldflags -X main.toolVersion=` can override it at build time. That
+#   declaration is the only place in the repository that states a version, so
+#   the tag is derived from it rather than from `git describe` (there are no
+#   tags to describe from) or from a hand-maintained list.
+#
+# WHY IT FAILS LOUDLY ON AN EXISTING TAG
+#   Two commits cannot be v0.1.0. If the tag is taken, the release was already
+#   sealed for different code and the honest answer is "bump toolVersion", not
+#   "move the tag".
+name: seal
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Sealing is a whole-repo act; two of them must not interleave.
+  group: seal
+  cancel-in-progress: false
+
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the gate
+        run: go build -o metricgate ./cmd/metricgate
+
+      - name: Read the declared version
+        id: version
+        run: |
+          set -eu
+          # The declaration is `var toolVersion = "0.1.0"` — a var, not a
+          # const, so -ldflags can override it (see the comment above it).
+          version=$(grep -oE '^var toolVersion = "[^"]+"' cmd/metricgate/main.go \
+            | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$version" ]; then
+            echo "could not read toolVersion from cmd/metricgate/main.go" >&2
+            exit 1
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "declared version: $version"
+
+      - name: Refuse to move an existing tag
+        run: |
+          set -eu
+          tag="${{ steps.version.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "tag $tag already exists; bump toolVersion instead of moving it" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
+            echo "tag $tag already exists on the remote; bump toolVersion" >&2
+            exit 1
+          fi
+          echo "tag $tag is free"
+
+      - name: Gate the whole tree
+        # Whole tree, not the diff: a seal certifies the tree as it stands, and
+        # legacy debt that the diff-scoped gate is designed to ignore would
+        # otherwise be certified as clean.
+        run: |
+          set -o pipefail
+          ./metricgate check . -arch-base arch.json -format json > seal-findings.json
+
+      - name: Summarize
+        id: summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          try:
+              data = json.load(open("seal-findings.json"))
+          except (OSError, ValueError):
+              data = {}
+          errors = data.get("errors", 0)
+          warnings = data.get("warnings", 0)
+          metrics = len(data.get("metrics") or [])
+          verdict = (data.get("verdict") or {}).get("passed")
+          lines = [
+              f"- errors: **{errors}**",
+              f"- warnings: {warnings}",
+              f"- metric snapshots: {metrics}",
+              f"- verdict: {'PASSED' if verdict else 'not passed'}",
+              f"- commit: `{os.environ.get('GITHUB_SHA', '?')}`",
+          ]
+          open("seal-summary.md", "w").write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+
+      - name: Build the release binary
+        run: |
+          set -eu
+          version="${{ steps.version.outputs.tag }}"
+          # Stamp the version the same way a release build would, so the
+          # published binary and the published tag cannot disagree.
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-X main.toolVersion=${version#v}" \
+            -o metricgate-release ./cmd/metricgate
+          shasum -a 256 metricgate-release | tee metricgate-release.sha256
+
+      - name: Tag and publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = '${{ steps.version.outputs.tag }}';
+            const summary = fs.readFileSync('seal-summary.md', 'utf8');
+            const sha = fs.readFileSync('metricgate-release.sha256', 'utf8').trim();
+
+            const body = [
+              '## Evidence',
+              '',
+              summary,
+              '',
+              '## Artifact',
+              '',
+              '```',
+              sha,
+              '```',
+              '',
+              '## What "sealed" means here',
+              '',
+              'This commit passed the whole-tree gate',
+              '(`metricgate check . -arch-base arch.json`, `fail_on=error`).',
+              'That is a stronger claim than the per-PR gate makes: the PR gate',
+              'judges only the lines a change adds, so it stays green on a',
+              'repository that carries legacy debt. A seal certifies the tree.',
+              '',
+              '<sub>Created by `.github/workflows/seal.yml`. The version is read',
+              'from `var toolVersion` in `cmd/metricgate/main.go`; to seal a new',
+              'release, bump that value and merge.</sub>',
+            ].join('\n');
+
+            const { data: release } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name: tag,
+              body,
+              draft: false,
+              prerelease: false,
+            });
+            core.info(`published ${release.html_url}`);

@@ -1,0 +1,67 @@
+#!/bin/sh
+# pre-push — the gate that runs when you actually send code somewhere.
+#
+# WHY A THIRD HOOK
+#   pre-commit already gates a commit, so what does this add? A commit is
+#   local and cheap to rewrite; a push is where code leaves the machine and
+#   becomes someone else's problem. Between the two, a developer can commit
+#   with --no-verify, rebase, or simply never run the gate again. The push is
+#   the last moment a verdict is still cheap.
+#
+#   It is also the hook that makes scripts/agent-pr.sh honest: without it, the
+#   agent script's own gate call is a convention, and a human pushing the same
+#   branch by hand would skip it entirely.
+#
+# WHAT IT CHECKS
+#   The lines this push adds, against origin/main — the same command
+#   .github/workflows/gate.yml runs, so a local pass predicts a green PR check.
+#
+# WHAT IT DOES NOT CHECK
+#   The whole tree. Legacy debt that the diff-scoped gate is designed to ignore
+#   would turn every push red for reasons the pusher did not cause, and a hook
+#   that is always red is a hook everyone bypasses. The whole-tree verdict
+#   belongs to .github/workflows/seal.yml, which certifies main after merge.
+#
+# BYPASS
+#   `git push --no-verify` — deliberately available. This hook is a fast
+#   feedback loop, not an authority; the PR gate is the authority, and it
+#   cannot be bypassed by the pusher.
+#
+# ENVIRONMENT
+#   METRICGATE            binary to use (default: metricgate, falling back to
+#                         ./metricgate at the repo root)
+#   METRICGATE_PUSH_BASE  ref to diff against (default: origin/main)
+set -u
+
+bin=${METRICGATE:-metricgate}
+if ! command -v "$bin" >/dev/null 2>&1; then
+    # Same fall-forward chain as hooks/pre-commit: a fresh clone with the
+    # dogfooded binary at the repo root works with no PATH setup, while an
+    # explicitly named binary that is missing stays an error.
+    if [ -x "$PWD/metricgate" ]; then
+        bin=$PWD/metricgate
+    else
+        echo "pre-push: $bin not found; skipping the gate" >&2
+        echo "pre-push: build one with 'go build -o metricgate ./cmd/metricgate'" >&2
+        exit 0
+    fi
+fi
+
+base=${METRICGATE_PUSH_BASE:-origin/main}
+
+# A base we cannot resolve is not a clean tree: metricgate refuses to guess and
+# names the ref it could not find, which is the behaviour we want to surface
+# rather than paper over.
+if ! git rev-parse -q --verify "$base" >/dev/null 2>&1; then
+    echo "pre-push: $base is not a known ref (fetch first: git fetch origin)" >&2
+    exit 0
+fi
+
+archflags=""
+if [ -f "$PWD/arch.json" ]; then
+    archflags="-arch-base $PWD/arch.json"
+fi
+
+echo "pre-push: gating the diff against $base" >&2
+# shellcheck disable=SC2086 # archflags is a deliberate word-split pair
+exec "$bin" check . -diff -base "$base" $archflags

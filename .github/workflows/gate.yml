@@ -1,7 +1,10 @@
-# Gate the lines a pull request adds, and surface the verdict where the
-# author looks: required check (blocking) + check-run annotations + one PR
-# comment. Zero credentials: metricGate is pure local static analysis and
-# calls nothing over the network.
+# The gate. One workflow for every change that reaches main:
+#   pull_request -> gate the lines the PR adds, post the verdict as a check-run
+#                   plus one sticky PR comment (this is the required check)
+#   push to main -> gate the same lines on the way in, so a merge commit that
+#                   bypassed review still gets a verdict in the Actions log
+# Zero credentials: metricGate is pure local static analysis and calls nothing
+# over the network.
 #
 # fetch-depth: 0 is required. The default shallow checkout has no merge-base
 # with the target branch, and metricgate refuses to guess: it names the ref it
@@ -9,11 +12,11 @@
 #
 # paths: keep in sync with internal/parser/parser.go LanguageForFile. Only
 # listed paths trigger the gate; .metricgate.yaml changes re-gate everything.
-name: metricGate PR Gate
+name: gate
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [main]
     paths:
       - '**.go'
       - '**.java'
@@ -36,7 +39,32 @@ on:
       - '**.cs'
       - '**.rs'
       - '.metricgate.yaml'
-      - '.github/workflows/metricgate-pr.yml'
+      - '.github/workflows/gate.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**.go'
+      - '**.java'
+      - '**.ts'
+      - '**.mts'
+      - '**.cts'
+      - '**.js'
+      - '**.mjs'
+      - '**.cjs'
+      - '**.jsx'
+      - '**.py'
+      - '**.c'
+      - '**.h'
+      - '**.cpp'
+      - '**.cc'
+      - '**.cxx'
+      - '**.hpp'
+      - '**.hh'
+      - '**.hxx'
+      - '**.cs'
+      - '**.rs'
+      - '.metricgate.yaml'
+      - '.github/workflows/gate.yml'
 
 permissions:
   # Check-run annotations (line-level findings on the PR diff).
@@ -60,12 +88,33 @@ jobs:
       - name: Build the gate
         run: go build -o metricgate ./cmd/metricgate
 
+      - name: Resolve the base ref
+        id: base
+        run: |
+          set -eu
+          # A pull_request knows its target branch; a push to main knows the
+          # commit it replaced. Both are resolved to something metricgate can
+          # merge-base against, because a gate that cannot name its base is a
+          # gate that reports a clean tree for the wrong reason.
+          if [ -n "${{ github.base_ref }}" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            base="${{ github.event.before }}"
+            # A brand-new branch reports 40 zeros; there is no "before" to
+            # diff against, so the first push gates its own commit only.
+            case "$base" in
+              *[!0]*) ;;
+              *) base="HEAD~1" ;;
+            esac
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "gating against $base"
+
       - name: Check the changed lines
         id: check
         run: |
           set -o pipefail
-          base="origin/${{ github.base_ref }}"
-          echo "gating against $base"
+          base="${{ steps.base.outputs.base }}"
           # SARIF is written via -sarif; JSON goes to stdout, human output to
           # stderr. Exit code drives the required check: 0 pass, 1 violations.
           ./metricgate check . -diff -base "$base" \
@@ -107,7 +156,8 @@ jobs:
           PY
 
       - name: Comment on the PR
-        if: always()
+        # A push to main has no PR to comment on; the verdict lives in the log.
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |

@@ -105,19 +105,38 @@ git config core.hooksPath hooks
 
 ### 3.2 agent harness 的 post-edit hook
 
-给 hook 一个**纯 shell** 的入口，剩下的交给 harness：
+**已发货**：`hooks/post-edit.sh`（纯 shell 入口，不绑定任何 harness）+ 一个不启用的
+示例 `.claude/settings.json.example`。验证脚本 `hooks/post-edit_test.sh` 钉住下面 §8 的五条判据。
 
-```sh
-#!/bin/sh
-# hooks/post-edit.sh — 把闸门的输出送回模型眼前
-out=$(metricgate check . -diff 2>&1) || {
-    printf '%s\n' "$out" >&2
-    exit 2
-}
-exit 0
+它做三件事：
+
+1. **解析被改的文件**：harness 通过 stdin 传工具调用 JSON（`{"tool_input":{"file_path":"…"}}`），
+   脚本用 `sed` 取出 `file_path`（不依赖 python/jq 存在）。
+2. **只查那个文件**：`metricgate check <file>`。实测 **1.3 s / 10 snapshots**；
+   作为对照，全树 `check . -diff` 是 **4.4–4.9 s / ~24k snapshots**。
+3. **取不到路径时回落全树**：`check . -diff`。宁可慢也不静默跳过。
+
+为什么默认窄口径（这是本轮唯一的决策点，见 [iter-26 §4](iterations/iter-26-post-edit-hook.md)）：
+post-edit 的全部价值是**快速反馈循环**，每次编辑多等几秒就是模型开始绕开它的原因；
+而 pre-commit 已经在做全树收口。代价要说清：
+
+> **窄口径不覆盖跨文件规则** —— 层违规、fan-out、clone 检测需要全树视野，
+> 它们由 `pre-commit` 的 `check . -diff` 兜底。
+
+所以脚本在**每次**裁决（通过也一样）的 stderr 首行打印 scope，避免一个文件的
+`PASSED` 被读成「整个仓库干净」：
+
+```
+post-edit: checked internal/cockpit/errors.go only (cross-file rules: layering, fan-out, clones run at pre-commit)
+post-edit: checked whole tree with -diff
 ```
 
-以 Claude Code 为例（`settings.json`，格式取自其 hooks 文档）：
+harness 接线（Claude Code 为例）：复制示例并替换绝对路径——
+
+```bash
+cp .claude/settings.json.example .claude/settings.json
+sed -i '' "s|<ABS_PATH>|$PWD|" .claude/settings.json   # macOS；GNU sed 去掉 ''
+```
 
 ```json
 {
@@ -134,14 +153,35 @@ exit 0
 
 语义要对齐：`PostToolUse` **不能**阻止已经执行的编辑，`exit 2` 的作用是把 stderr
 展示给模型。这正是我们要的 —— 编辑已经发生，我们要的是模型**看到裁决并去修**。
+**不要把它宣传成「拦截」**，那是它做不到的事。
+
+三条降级路径都是**响亮**的（打印一行到 stderr 并 `exit 0`），不是沉默：找不到
+`metricgate`（回落链同 `hooks/pre-commit`：`$METRICGATE` → `command -v` → `$PWD/metricgate`）、
+被改的文件已不存在（改名/删除，查它只会得到 stat 错误，看起来像违规）、
+以及**闸门无法给出裁决**时（例如库被并发写者锁住 `SQLITE_BUSY`，或不在 git 工作树里）——
+最后这条特别重要：基础设施故障不能被报告成「发现违规」，否则模型会去追一个不存在的缺陷。
+判据是**裁决文本**（`gate: FAILED`）而不是退出码，因为 `check` 对「无法裁决」
+也返回 2（`cmd/metricgate/main.go:137 fail()` → `os.Exit(2)`），两者会撞车。
+
+其它 harness（Cursor / Codex / …）的 hook 格式各不相同，本轮只发纯 shell 入口，
+由使用者自己接。**post-edit 不是 git hook**，不要装进 `.git/hooks/`。
 
 ### 3.3 CI
 
-仓库里已放好 `.github/workflows/metricgate.yml`，核心就一行：
+仓库里有四个 workflow，分工见 **[github-setup.md](github-setup.md)**（含日常循环与故障排查）。
+闸门本身的核心仍然只有一行：
 
 ```sh
 ./metricgate check . -diff -base "origin/${{ github.base_ref }}"
 ```
+
+| 文件 | 何时 | 范围 |
+| --- | --- | --- |
+| `gate.yml` | PR / push to main | diff（required check + PR 注释 + SARIF） |
+| `autopr.yml` | push 到非 main 分支 | 用 `GITHUB_TOKEN` 开 PR（本地只需 SSH） |
+| `triage.yml` | 每日 | 全树 → 把 error findings 提成 issue（指纹去重） |
+| `seal.yml` | push to main | 全树 → 绿则 tag + Release（封板） |
+| `schedule.yml` | 每周 | 全树 report-only，出趋势 artifact |
 
 两个必须注意的点，都是本机实测出来的：
 
@@ -153,13 +193,15 @@ exit 0
   ```
   这条消息本身就是本轮修的：之前它会说 "requires a git repository"，把读的人
   引去找一个本来就装着的 git。
-- **CI 跑的是 diff，不是全树**。本仓库全树检查带 1 个已接受的 error（见 `claims.md`），
+- **CI 跑的是 diff，不是全树**。本仓库全树检查带已接受的债务（见 `claims.md`），
   全树闸门会永远红在一个贡献者无从下手的地方。diff 闸门第一天就绿，之后只加严。
+  封板（`seal.yml`）才是全树，因为它认证的是"这棵树干净"。
 
-> 状态诚实说明：这个 workflow 文件**尚未在 GitHub 上真实运行过**（本机没有远程）。
-> 其中 `-base` 的行为、退出码、失败消息都在本机用真实仓库验证过；
-> 未验证的部分只有 GitHub Actions 自身的环境（setup-go、cgo 构建 tree-sitter）。
-> 首次跑之前请按此判断，别把它当"已验证"。
+> 状态诚实说明：四个 workflow 的**判据都在本机用真实仓库验证过**（`-base` 行为、
+> 退出码、失败消息、triage 的指纹去重、seal 的版本读取），`scripts/*.sh` 与
+> `hooks/pre-push` 也都实跑过。**尚未验证的只有 GitHub Actions 自身的运行环境**
+> （setup-go、cgo 构建 tree-sitter、`GITHUB_TOKEN` 的权限边界）——那部分要等首次
+> 真实推送后看 Actions 日志。首次跑之前请按此判断，别把它当"已验证"。
 
 ## 4. 本地埋点：怎么知道它真的被调用了
 
