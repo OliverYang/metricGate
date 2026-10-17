@@ -4,6 +4,33 @@
 
 仓库：<https://github.com/OliverYang/metricGate>（默认分支 `main`）
 
+> ## ⏸ 当前状态：CI 全部停用（2026-10-17 起）
+>
+> 七个 workflow 全部 `disabled_manually`，**推代码到 GitHub 不会触发任何 run**。
+> 现在的工作方式是：本地 `main` 直接开发，每天推一次当备份。
+>
+> | | |
+> |---|---|
+> | 停用时间 | 2026-10-17 |
+> | 停用方式 | `gh workflow disable <name>.yml`（服务端状态，不靠改文件） |
+> | 停用范围 | autopr / gate / merge / review / schedule / seal / triage —— 全部 |
+> | 本地替代 | `/tmp/mg-check check . -arch-base arch.json`，与 `gate.yml` 同一份判据 |
+>
+> **为什么不用删文件 / 加 `[skip ci]`**：删文件是改代码，会进历史，将来恢复要 revert；
+> `[skip ci]` 是每次都要记得写、忘了就跑了，而 `merge` / `seal` 一旦跑起来是会**写**的
+> （合并 PR、打 tag、发 release）。`gh workflow disable` 是服务端开关，改一行代码
+> 都不可能绕过它，而且 `gh workflow list --all` 一眼能看见状态。
+>
+> **恢复**：
+> ```sh
+> gh workflow list --repo OliverYang/metricGate --all   # 先确认当前是 disabled
+> for wf in autopr gate merge review schedule seal triage; do
+>   gh workflow enable "$wf.yml" --repo OliverYang/metricGate
+> done
+> ```
+> 恢复后注意 §7.6 的三件仍开着的事（分支保护未配、triage 只跑 cron、test-no-assert 误报），
+> 以及 `merge.yml` 的 dispatch 修复只在 main 上才生效。
+
 ---
 
 ## 0. 一句话拓扑
