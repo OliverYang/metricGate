@@ -6,6 +6,9 @@ evidence anchors）的落地与**可证伪验收**，对应设计文档
 [docs/metricgate-ux-bundle-design.md §5](../design/metricgate-ux-bundle-design.md#5-阶段实施与验收计划本轮仅设计)
 的 E 阶段。数值全部本机实测；不能测的命题直接标“未验证”，不写结论。
 
+> **判据版本（iter-31 补标）**：采集于 `7686857`（D4 anchor 落地处）。anchorStatus 语义此后未改，
+> 这部分仍可比；涉及仓库自身 findings 计数的句子按当时树读（索引见 [criterion-version-index.md](criterion-version-index.md)）。
+
 ## 1. 落地清单
 
 | 阶段 | 提交 | 能力 | 关键验收 |

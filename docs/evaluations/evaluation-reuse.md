@@ -16,6 +16,8 @@
 > 加一句复用提示把 Arm A 的重造从 **100% 压到 20%**，但剩下的 20% **不是不听话**，
 > 是 **API 不可复用**（`clones.fingerprint` 未导出、`arch.Check` 形态不匹配）；
 > 且**复用本身触发了一条 `sdp-violation`** —— 提示与架构策略冲突，只有图分析看得见。
+>
+> **判据版本（iter-31 补标）**：本报告的数字采集于判据变更之前，不可按当前工具复现；具体哪把尺子见 [criterion-version-index.md](criterion-version-index.md)。
 
 ## 0. 一句话结论
 

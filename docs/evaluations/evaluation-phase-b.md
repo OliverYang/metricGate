@@ -3,6 +3,10 @@
 日期：本次自主实现周期。测量环境：macOS arm64，Go 1.26.2；同一工作区、同一 Go toolchain corpus。
 方法按 [phase-b-design.md §7](../design/phase-b-design.md#7-量化评估协议) 预注册；数值不够支持结论时直接标为不可比。
 
+> **判据版本（iter-31 补标）**：采集于 `7ada898`（Phase B-4 落地处）。「0 errors / 46 warnings /
+> 2,606 snapshots」是当时那棵树的值，判据此后改过 4 次（见 [criterion-version-index.md](criterion-version-index.md) §1）；
+> near-clone 的 fixture 级结论仍有效，因为它有 fixture，不依赖仓库自身计数。
+
 ## 1. Phase B 落地清单
 
 | 子阶段 | 提交 | 新能力 | 验证 |

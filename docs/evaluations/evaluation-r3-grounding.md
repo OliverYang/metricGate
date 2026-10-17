@@ -6,6 +6,8 @@
 > 实验设计在动手前预注册于 [`../design/digest-engineering-checklist.md`](../design/digest-engineering-checklist.md)（含可推翻假设）。
 >
 > 数据采集：2026-09-29，单机，22 任务全量。注入物：`constraints digest` 命令（本轮实现，5 节结构，确定性生成，均价 441 token/任务）。
+>
+> **判据版本（iter-31 补标）**：本报告的数字采集于判据变更之前，不可按当前工具复现；具体哪把尺子见 [criterion-version-index.md](criterion-version-index.md)。
 
 ## 0. 一句话结论
 

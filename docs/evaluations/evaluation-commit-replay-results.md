@@ -3,6 +3,17 @@
 日期：2026-10-09/10　状态：**已执行（dev-cockpit Go 全量；ace-ts TS 待前置）**
 协议：[evaluation-commit-replay-protocol.md](evaluation-commit-replay-protocol.md)（预注册 2026-10-09）
 
+> **判据版本（iter-31 补标）**：本报告的度量来自 `c701576`–`d5cb01c` 之间的工具链 + 157 行 `policy.yaml`，
+> 时代最接近的复现组合是 `/tmp/mg-era-bin`（`d5cb01c` 构建）+ `git show d5cb01c:policy.yaml`——该组合在
+> `396cd3cd8f` 上逐条复现归档值（2174 findings / 555 files / 222 errors）。**判据不可归因到确切 commit**，
+> 所以凡引用本报告数字，同时引用 [data/commit-replay/summary.json](data/commit-replay/summary.json) 的
+> `criterion_versions`。§2 那张「规则族触发总量」表有 **13/18 行无法从归档 JSON 复现**（口径不可考，已就地标注）；
+> 「215/289 commit 触发 `test-no-assert`」可复现但含义被读错（= 1 个函数逐 commit 重复计数，见
+> [evaluation-iter30-tna-recalibration.md](evaluation-iter30-tna-recalibration.md) §3）。
+> 原始数据摘要已入库（`data/commit-replay/`）：此前 1.3 GB 归档 JSON 只在 `.data/` 下、从未被 git 跟踪。
+>
+> 全仓判据版本索引：[criterion-version-index.md](criterion-version-index.md)（每篇报告的采集日期 → 当时 main → 之后变过的判据）。
+
 ## 0. 一句话结论
 
 对真实 LLM 生成仓库（marein/dev-cockpit，289 commits，README 自证 100% vibe coded）：**门禁在全部 289 个 commit 都有检出（0 个零检出 commit）；error 级 findings 经 findings-JSON 反馈修复 5/5 清零；副作用率 2 条 warning / 0 error；一轮收敛 1/5，远低于 R2 合成任务的 6/7——真实仓库比合成任务难修**。

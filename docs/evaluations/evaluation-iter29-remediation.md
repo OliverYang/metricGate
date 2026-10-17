@@ -3,6 +3,16 @@
 日期：2026-10-18　状态：**已执行**
 上游：[iter-29 中期清点](../iterations/iter-29-midterm-backlog-audit.md)（排期来源）　[iter-28](../iterations/iter-28-cockpit-dark-and-store-retention.md)　[iter-27](../iterations/iter-27-manual-handoff-blockers.md)
 
+> **判据版本（iter-31 补标）**：本文每个数字都自带它的判据边界，因为本轮**同时改了两处判据**：
+> 「before」列 = `275ee38` 的工具链，「after」列 = `c386b4a` 的工具链（`260f498`/`ecd57b5` 区间的判据）。
+> 引用本报告的 before/after 差值时必须连同这个 commit 对一起引，否则差值会被读成「同一把尺子量出的变化」。
+> 其中 §6.1 有意做了「同一棵树、两把尺子」的隔离测量（before/after 判据对比，零代码改动），
+> 那是本报告唯一不含代码变化的对比口径。`test-no-assert` 判据此后又改过一次（`d2bcf9b` 排除 benchmark），
+> 所以本文的 19 条与 8→0 读作「helper 能力判据下」的数，最终口径是 5 条（见
+> [evaluation-iter30-tna-recalibration.md](evaluation-iter30-tna-recalibration.md) §4）。
+>
+> 全仓判据版本索引：[criterion-version-index.md](criterion-version-index.md)（每篇报告的采集日期 → 当时 main → 之后变过的判据）。
+
 ## 0. 一句话结论
 
 五项全部合入 main（`275ee38..c386b4a`，31 文件 +2686 −211）。**两条是度量正确性**：TS/JS 模块级箭头函数从「整文件不可见」变成可量（同一段代码可维护性指数 19 → 51），`test-no-assert` 在 110 个真实 `_test.go` 上误报 55 → 19（本仓 8 → 0）。**三条是可达性**：规则目录中文到前端、运行历史记录触发命令、harness 接线样例落地。**本仓 gate 从 422 warnings 到 431（+9），0 errors 不变，PASSED 不变**——+16 来自新暴露的 TS 函数，−8 来自误报清零，净增 9 条里有 1 条是本轮新写的代码自己越线（已重构消化，见 §4.3）。

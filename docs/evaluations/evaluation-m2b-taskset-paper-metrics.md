@@ -10,6 +10,13 @@
 日期：2026-10-08。前置：M2-B 协议（预注册判断线 H1/H2/H3 不变）；R1 沙箱协议
 （[`evaluation-base-rate.md`](evaluation-base-rate.md) §1–2）。
 
+> **判据版本（iter-31 补标）**：§3 各任务的「坏形状已 fire」验证发生在 `8f78d0c`–`1140909` 时代。
+> 其中 N07（`test-no-assert`）的夹具在 iter-31 用当前判据（`d2bcf9b` 之后）**复跑仍 fire**（表驱动 + `t.Log`
+> 无断言，1 条命中）；其余触发属阈值类（npath/fan-out/boolean-params/function-length），阈值此后未改，仍有效。
+> 「benchmark 不断言」这类形状**已不是** `test-no-assert` 的目标（`d2bcf9b` 起不算），别用它造任务。
+>
+> 全仓判据版本索引：[criterion-version-index.md](criterion-version-index.md)（每篇报告的采集日期 → 当时 main → 之后变过的判据）。
+
 ## 0. 一句话
 
 10 个任务（7 新写 + 3 个 U04 变体），每个触发任务带一个已验证的坏形状参考；

@@ -3,6 +3,14 @@
 日期：2026-10-09　状态：**预注册，未执行**
 前置证据：R1（31.8% 首过违规）、R2（7/7 修复收敛，6/7 一轮）、M2-B（boolean-params 90× LLM 特异）、M2 主协议（B 类 3/3 防住）。本实验把同样的门禁放到**真实存在的公开 LLM 生成仓库**上，做 commit 级检出 + 挑拣级纠正重放。
 
+> **判据版本（iter-31 补标）**：执行见 [evaluation-commit-replay-results.md](evaluation-commit-replay-results.md)（2026-10-09/10），
+> 判据介于 `c701576`–`d5cb01c`，policy 为 157 行 `policy.yaml`。此后 `test-no-assert` 判据改过两次
+> （`ecd57b5` / `d2bcf9b`）、TS/JS 函数单元判据改过一次（`760f498`）——若重跑，**先固定判据版本再比数字**，
+> 协议 §6「工具与策略必须同版本」这条前置是 iter-30 用一次错误结论换来的（只回退二进制、policy 用了晚 5 天的
+> 186 行版本，一度把可信归档标成「不可复现」）。
+>
+> 全仓判据版本索引：[criterion-version-index.md](criterion-version-index.md)（每篇报告的采集日期 → 当时 main → 之后变过的判据）。
+
 ## 0. 一句话结论（预填）
 
 （执行后回填）对真实 LLM 写的开源仓库，metricGate 能否检出质量问题、纠正重放能否量化改善、以及工具会不会误伤干净的 LLM 代码。

@@ -7,6 +7,8 @@
 > ③ `sdp-violation` 与"复用"指令的冲突，该怎么在策略里调和？
 >
 > 采集：2026-09-28。协议与原始数据可复现，见 §5。
+>
+> **判据版本（iter-31 补标）**：本报告的数字采集于判据变更之前，不可按当前工具复现；具体哪把尺子见 [criterion-version-index.md](criterion-version-index.md)。
 
 ## 0. 一句话结论
 

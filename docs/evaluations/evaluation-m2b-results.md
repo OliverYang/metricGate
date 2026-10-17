@@ -4,6 +4,13 @@
 协议：[`evaluation-m2b-paper-metrics-protocol.md`](evaluation-m2b-paper-metrics-protocol.md)（预注册判断线 H1/H2/H3）；
 任务集：[`evaluation-m2b-taskset-paper-metrics.md`](evaluation-m2b-taskset-paper-metrics.md)（预注册附件）。
 
+> **判据版本（iter-31 补标）**：本报告的度量由 `8f78d0c`–`429e7a8` 之间的工具链产生（跑批 2026-10-09，
+>
+> 全仓判据版本索引：[criterion-version-index.md](criterion-version-index.md)（每篇报告的采集日期 → 当时 main → 之后变过的判据）。
+提交日 `429e7a8`），早于 `test-no-assert` 与函数单元判据的全部后续改动（`ecd57b5` helper 能力、`d2bcf9b`
+排除 `Benchmark*`、`760f498` TS 箭头函数成单元）。**凡引用本报告的规则命中数，读作「判据 X 之前」**：
+> 具体到 `test-no-assert`——本报告 N07 那行「三臂均 0」与 iter-30 重标定不矛盾（见 §4.3 的 iter-31 注）。
+
 ## 0. 一句话
 
 30 run 跑批完成：**H1 证伪**（digest 注入的新指标阈值行在 10 任务上净效应为 0——既没预防也没恶化）、
@@ -97,6 +104,13 @@ V3 L2 agent 显然消化了 digest（产物 248 行、26 轮），防住了 laye
 在本任务集上未被触发**——该规则的价值主张（抓 LLM 伪绿测试）仍然只有机制论证，
 没有实测支持；要触发它可能需要更隐蔽的任务设计（如"写 benchmark"）或更弱的模型。
 
+> **iter-31 注（判据版本）**：本节的「01：三臂均 0」用**旧判据**（`8f78d0c` 时代，只看 t.Error/t.Fatal/
+> assert/require/must 前缀）量得，且任务措辞是「调用与输出」。iter-30 已用 289 个真实 commit 证明 LLM
+> 伪绿测试在真实仓库里**存在**（`internal/assistant/memory_test.go` 一个文件 1,207 条，21 个函数各调一次不认识的
+> helper），只是**不是 215 个独立事件**（见 [evaluation-iter30-tna-recalibration.md](evaluation-iter30-tna-recalibration.md) §3）。
+> 所以本节结论**范围要收窄**：它证否的是「任务措辞诱导能压过模型的写断言训练先验」，**不是**「LLM 不写伪绿测试」。
+> 两件事同时为真：模型在被要求写测试时会自发断言，以及模型在真实仓库里会留下不断言的测试。
+
 ### 4.4 N05：boolean-params 是"模型照抄任务形状"的实锤
 
 三臂产物签名逐字相同：`CompareRuns(baseline, current RunResult, verbose, includeInfo,
@@ -162,5 +176,8 @@ L2 与 L1 相当（三行阈值行未放大成本）。产物行数无系统性�
   （30 run 全量留存，会话 jsonl 含逐轮 usage）。
 - 统一重测脚本内嵌于本文档写作过程（干净沙箱副本 + 逐产物放置 + `check . -format json`）；
   重测结果与跑批时度量一致（§2 表）。
+- **判据可寻址性（iter-31 补）**：30 份产物在 `/tmp/m2b_runs/out/`（`/tmp`，**不在仓库内**，已随机器重启
+  丢失）。判据版本见文档头；N07 的「坏形状」夹具已在 iter-31 用当前判据复现仍 fire（表驱动 + t.Log 无断言，
+  单条命中，benchmark 已经不报）。
 - 判定计算：LLM 超阈率按函数口径从 `metrics` 数组提取（`scope` 非空为函数级），
   人类基线引自协议 §1（metric_snapshots 34173/12400/12400 条）。

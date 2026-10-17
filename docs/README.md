@@ -59,6 +59,10 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 
 ## [evaluations/](evaluations/) — 实验与评估
 
+> **引用任何一条数字前先看** [evaluations/criterion-version-index.md](evaluations/criterion-version-index.md)：判据改过 7 次，
+> 老报告的数字全部不可按当前工具复现。索引给出每篇报告的采集日期、当时的 main commit、之后变过哪些判据，
+> 以及 ❌/⚠️/✅ 三档读法——没有一篇被推翻，被改的是引用它们的方式。
+
 | 文档 | 说明 |
 |---|---|
 | [evaluation.md](evaluations/evaluation.md) | 确定性约束能力总评估（2025-09 基线） |
@@ -82,6 +86,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [evaluation-iter30-tna-recalibration.md](evaluations/evaluation-iter30-tna-recalibration.md) | **iter-30 重标定（实测，289 commit × 双判据重放）**：215/289 在新旧判据下都成立且可从归档复现，但按独立事件只有 1 个函数（anchors 31→2→1，findings 1,783→233→215）；`Benchmark*` 已从 `test-no-assert` 排除（语料 19→5，0 条真阳丢失）；另附跨语言函数单元普查与旧报告 13 行不可复现的逐条对照 |
 | [iter-30 迭代日志](iterations/iter-30-recalibration-and-benchmark-scope.md) | iter-30 全过程（重放口径的三个坑 / 215 的机制 / benchmark 摘出 / 普查的负面结论 / iter-31 排期与 `triaging` 的两条负结论） |
 | [ab-experiment.md](evaluations/ab-experiment.md) | LLM 约束效果 A/B 实验设计（下一步核心验证） |
+| [criterion-version-index.md](evaluations/criterion-version-index.md) | **判据版本索引（iter-31）**：每篇评估报告的数字来自哪把尺子——采集日期→当时 main→之后变过的 7 项判据，逐篇标 ❌ 不可复现 / ⚠️ 连判据版本一起引 / ✅ 当前判据；含「policy 与二进制必须同版本」这条用错误结论换来的前置 |
 
 ## [research/](research/) — 调研笔记
 

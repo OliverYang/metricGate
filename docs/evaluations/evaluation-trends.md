@@ -6,6 +6,10 @@
 与 `metricgate trends` 在仓库自身上做受控实验，把数字写到评估里。
 
 > **注**：所有数字在仓库当前 commit 顶上自洽跑出（`/tmp/mg` = 当前 build）。
+>
+> **判据版本（iter-31 补标）**：本报告的价值恰在「同一棵树重复跑一致」——那证明的是
+> run-to-run 稳定性，**不证明判据未变**。「69 warnings / 3,595 snapshots」不可按当前工具复现，
+> 别拿本表当「现在也是 69」的证据（当时哪棵树见 [criterion-version-index.md](criterion-version-index.md)）。
 > 命令可一键复现：见文末"复现命令"。
 
 ## 1. run-to-run 稳定性
