@@ -147,7 +147,11 @@ jobs:
               ].join('\n');
 
               await core.summary.addRaw(how).write();
-              core.error(how);
+              // setFailed, not error: a job that reports success while no PR
+              // exists is worse than a red one. The first draft logged
+              // core.error and returned, and the run concluded "success" —
+              // the exact silent failure this block exists to end.
+              core.setFailed(how);
               return;
             }
             core.info(`Opened PR #${pr.number} for ${branch}.`);
