@@ -124,6 +124,35 @@ jobs:
               // the fix is a checkbox in Settings, so the fix is spelled out
               // here and written to the job summary where it is actually seen.
               const msg = String(err.message || '');
+
+              // A racing creator -- a human clicking "Compare & pull request",
+              // another autopr run for the same branch, or an agent calling the
+              // API -- makes `pulls.create` return 422 "A pull request already
+              // exists". That is not a failure: the thing this workflow wanted
+              // (an open PR for the branch) is exactly what now exists.
+              //
+              // Treating it as one is worse than cosmetic here. This job produces
+              // a check named `open`, and merge.yml is fail-closed -- a red `open`
+              // blocks the very PR that just got created, so the chain deadlocks
+              // on its own race. Observed: PR #3 was created by an API call in the
+              // same second this job ran, and merge.yml then refused to merge it
+              // with "other checks are red: open=failure".
+              if (err.status === 422 && /already exists/i.test(msg)) {
+                const { data: now } = await github.rest.pulls.list({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  head: `${context.repo.owner}:${branch}`,
+                  state: 'open',
+                });
+                const n = now[0]?.number;
+                core.info(
+                  n
+                    ? `PR #${n} already tracks ${branch} (created concurrently); nothing to open.`
+                    : `${branch} raced another creator but no open PR is visible yet; re-run to pick it up.`,
+                );
+                return;
+              }
+
               const forbidden = err.status === 403 || /not permitted to create or approve/i.test(msg);
               if (!forbidden) throw err;
 
