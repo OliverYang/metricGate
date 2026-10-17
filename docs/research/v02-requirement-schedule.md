@@ -83,7 +83,7 @@
 规模：~200 行。
 
 > **状态：✅ 已完成**（2026-10-14）。交付与五性核对见
-> [docs/iterations/iter-18-trace-attrs-and-report.md](../../iterations/iter-18-trace-attrs-and-report.md)。
+> [docs/iterations/iter-18-trace-attrs-and-report.md](../iterations/iter-18-trace-attrs-and-report.md)。
 > 亮点：X2 白名单丢弃有计数、X3 四入口同源（CLI `trace` / MCP `get_trace` /
 > `trends -trace|-model|-prompt-digest` / Cockpit 下拉）；`Window.TraceIDs` 用
 > nil-vs-空 区分"全部 trace"与"无匹配"，`trends -model nope` 明确回答 0 runs。

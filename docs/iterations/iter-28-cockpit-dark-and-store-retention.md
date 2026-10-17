@@ -155,10 +155,9 @@ warning 从 415 升到 422 是新代码带来的（`retain.go` / `store_cmd.go` 
 1. **`internal/cockpit/rules_zh.go` 还在分支上**（59 行 + 覆盖率测试）。它给规则提供
    中文名与说明，是 `T4.3`「度量实验结论摘要」的前置。取它需要同时确认
    `rules_catalogue_test.go` 的断言，本轮没做。
-2. **`iter-26-post-edit-hook.md` 还在分支上**，而 `hooks/post-edit.sh` 与
-   `hooks/post-edit_test.sh` 已经在 `main` 上（12 passed）。所以文档与代码又一次
-   分离——`docs/workflow.md:108` 声称「已发货」的 `.claude/settings.json.example`
-   **两个地方都不存在**。这是 `S2` 的真缺口，见 `iter-29` §2。
+2. ~~**`iter-26-post-edit-hook.md` 还在分支上**~~ → **已解**（`iter-29` §6）：
+   `iter-26-post-edit-hook.md` 与 `docs/workflow.md:108` 承诺的
+   `.claude/settings.json.example` 都已进 `main`。文档与代码重新同树。
 3. **分支 `feat/issue-1-ci-smoke-test` 仍保留**（`79497d1`），兜底 tag
    `wip/snapshot-2026-10-17` → `e1e1042`。本轮只捞了 store 一族，`web/` 与
    `.agents/` 不动。

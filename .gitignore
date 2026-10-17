@@ -9,3 +9,11 @@
 
 # cmuxterm tool state, created by the terminal multiplexer in the repo root
 ~/
+# A developer-global ignore may carry a bare `.claude`, which prunes the whole
+# directory before any negation below it is read. Un-ignore the directory first,
+# then ignore its contents: settings.json carries this machine's absolute path
+# and stays local, while settings.json.example is what docs/workflow.md tells
+# people to copy, so it must be tracked.
+!/.claude/
+/.claude/*
+!/.claude/settings.json.example

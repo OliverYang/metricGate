@@ -1,0 +1,16 @@
+{
+  "//": "Sample wiring, NOT enabled by itself. Nothing reads this file: it is inert until you copy it to .claude/settings.json and replace <ABS_PATH> with your repo root. See docs/workflow.md §3.2. PostToolUse cannot undo an edit — exit 2 only shows stderr to the model, which is the point.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<ABS_PATH>/hooks/post-edit.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

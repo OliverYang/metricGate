@@ -95,12 +95,12 @@ warning 列表失去可信度**——既然有 8 条是错的，第 9 条凭什�
 这一节把三份文档的每一条都跑了一遍。分四类：**写着已发货但其实没有**、
 **写着待做也确实没做**、**写着待做但其实已经做了**、**描述本身有误**。
 
-### §2.1 写着「已发货」，实际不存在
+### §2.1 写着「已发货」，实际不存在 —— ✅ 已补齐（见 §6）
 
 | 声称 | 实测 | 判定 |
 |---|---|---|
 | `docs/workflow.md:108`「**已发货**：`hooks/post-edit.sh` + 一个不启用的示例 `.claude/settings.json.example`」 | `hooks/post-edit.sh`（4.5K）与 `hooks/post-edit_test.sh`（5.0K）**在** main 上，`bash hooks/post-edit_test.sh` → **12 passed**。但 `ls .claude` → **目录不存在**；`git ls-tree -r feat/issue-1-ci-smoke-test` 也没有 | 缺的只是 **harness 接线样例**。hook 本身是好的 |
-| `docs/iterations/iter-26-post-edit-hook.md` | 只在分支上，main 没有 | 代码与日志分离（`iter-28` §6 已记） |
+| `docs/iterations/iter-26-post-edit-hook.md` | 只在分支上，main 没有 → **已取回 main** | 代码与文档重新同树（`iter-28` §6 已记） |
 
 **这条的意义**：`hooks/post-edit.sh` 是「纯 shell 入口，不绑定任何 harness」，
 这个设计是对的——它不需要 `.claude/` 就能用。但**文档承诺了一个接线样例**，
@@ -274,3 +274,41 @@ Node 的代码几乎全部用这种写法，所以**这个适配器对现代 TS 
 并据此在 `docs/claims.md` #19 上调了证据。**那个数字现在偏高且无法在本机重算**
 （语料仓库不在本地）。新判据会滤掉其中"传 `*testing.T` 给 helper"的部分。
 `claims.md` #19 的该项证据需要重新标定 —— 已记入 `iter-29` 之后的待办。
+
+---
+
+## §6 R3 的实际修法（`.claude/settings.json.example`）
+
+`.claude` 被**两层**忽略：仓库 `.gitignore` 从没写过它，但开发者的全局
+`core.excludesFile`（本机是 `/Users/mac/.gitignore:9`）有一条裸 `.claude`。
+Git 对一个被忽略的**目录**直接剪枝，位于其下的取反规则永远不会被读到 —— 所以
+只写 `!/.claude/settings.json.example` 时 `git add` 依然报 "paths are ignored"。
+
+仓库 `.gitignore` 因此是三行，顺序即语义：
+
+```
+!/.claude/                        # 先把目录本身放回来
+/.claude/*                        # 忽略内容：settings.json 带本机绝对路径
+!/.claude/settings.json.example   # 唯独样例进 git
+```
+
+判据不是「`git check-ignore` 返回什么」这种容易读反的东西，而是**走完文档里的
+接线流程再看 hook 是否真的跑**：`cp example → settings.json` → 替换 `<ABS_PATH>`
+→ 喂一条 `{"tool_input":{"file_path":"internal/rules/go_test_no_assert.go"}}` 的
+payload 给 `hooks/post-edit.sh` → 输出 scope 行 + `exit 0`。这条链路跑通才叫
+「样例可用」。
+
+顺带修好一个断链：`docs/research/v02-requirement-schedule.md:86` 写的是
+`../../iterations/iter-18-…`（多爬一级）。`docs/` 全量扫描后断链数为 0。
+
+**样例保持"不启用"的两处设计**：文件里 `"//"` 键存说明（这样它仍是合法 JSON，
+不需要 `jsonc` 解析器）；`iter-26` §T26.3 的原话是「本仓 clone 后不应自动生效」，
+所以只有 `settings.json`（真跑的那份）刻意留在忽略区。
+
+**验证**：`bash hooks/post-edit_test.sh` → 12 passed / 0 failed（脚本未改，
+证明新增样例没影响入口）；`git ls-files .claude/` → 只有 `settings.json.example`。
+
+**新增 TODO（本轮发现，未做）**：docs/ 内部相对链接目前没有守卫。这轮的断链是
+人肉发现的。加一个 `scripts/docs-links.sh`（遍历 `docs/**/*.md`，解析
+`]` 后的相对路径，`os.path.exists` 判据，非零退出）成本很低，应挂在 pre-commit
+而不是 CI（CI 现在是停的）。已记入排期文档。

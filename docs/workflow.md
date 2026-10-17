@@ -138,6 +138,14 @@ cp .claude/settings.json.example .claude/settings.json
 sed -i '' "s|<ABS_PATH>|$PWD|" .claude/settings.json   # macOS；GNU sed 去掉 ''
 ```
 
+> **为什么示例进得了 git 而 `settings.json` 进不去，以及一个坑**：`.gitignore`
+> 里写的是 `!/.claude/` + `/.claude/*` + `!/.claude/settings.json.example` 三行。
+> 只写 `!/.claude/settings.json.example` 是不够的 —— 开发者全局 gitignore
+> （`core.excludesFile`）里有一条裸 `.claude`，Git 会先把整个目录**剪掉**，
+> 位于其下的取反规则根本轮不到执行。必须先 `!/.claude/` 把目录本身放回来，
+> 再忽略内容、再取反示例文件。这三行的顺序就是这三件事，少一行 `git add` 会
+> 静默失败在目录级剪枝上。
+
 ```json
 {
   "hooks": {
