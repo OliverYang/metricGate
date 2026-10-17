@@ -82,10 +82,6 @@ CREATE TABLE IF NOT EXISTS issue_states (
 	updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_issue_states_status ON issue_states(status);
-CREATE TABLE IF NOT EXISTS store_meta (
-	key TEXT PRIMARY KEY,
-	value TEXT NOT NULL
-);
 `
 
 // Open creates the database file (and parent directory) and applies the
@@ -104,84 +100,37 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := migrate(db); err != nil {
+	if err := migrateRunsProjectRoot(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	if err := migrateRunsArchived(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	if err := migrateRunsPolicyDigest(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	if err := migrateRunsTraceID(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	// Both finding columns are migrated here, and snippet_hash must come
+	// first: migrateFindingsFingerprint backfills each row by re-reading it
+	// (findingForBackfill selects snippet_hash), so a legacy database that
+	// lacks snippet_hash fails inside the fingerprint migration itself. The
+	// issue list has the same dependency — it groups by fingerprint and
+	// selects MAX(snippet_hash) — which is why the column cannot be optional.
+	if err := migrateFindingsSnippetHash(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate store: %w", err)
+	}
+	if err := migrateFindingsFingerprint(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate store: %w", err)
 	}
 	return &Store{db: db}, nil
-}
-
-// migrate brings a database written by an earlier version up to the current
-// schema. Every step is additive and idempotent, so opening an already-current
-// store is a no-op rather than a rewrite.
-//
-// It is separate from Open because Open's job is opening, and because these
-// steps have an order that is not obvious from the call sites: the columns are
-// added before anything indexes or backfills them, and among the two findings
-// columns snippet_hash must come first. The comment on that pair is the reason
-// the order is load-bearing, not stylistic.
-func migrate(db *sql.DB) error {
-	steps := []func(*sql.DB) error{
-		migrateRunsProjectRoot,
-		migrateRunsArchived,
-		migrateRunsPolicyDigest,
-		migrateRunsTraceID,
-		// snippet_hash must be migrated before fingerprint:
-		// migrateFindingsFingerprint backfills each row by re-reading it
-		// (findingForBackfill selects snippet_hash), so a legacy database that
-		// lacks snippet_hash fails inside the fingerprint migration itself. The
-		// issue list has the same dependency — it groups by fingerprint and
-		// selects MAX(snippet_hash) — which is why the column cannot be optional.
-		migrateFindingsSnippetHash,
-		migrateFindingsFingerprint,
-		// The covering index is created after the columns it names exist, rather
-		// than in the schema literal: creating it with the base schema fails on a
-		// store written before fingerprint existed ("no such column: fingerprint").
-		createFindingsGroupIndex,
-		// store_meta carries rows about the database rather than about a run, so
-		// it has no migration of its own to run before it.
-		migrateStoreMeta,
-	}
-	for _, step := range steps {
-		if err := step(db); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// createFindingsGroupIndex declares the covering index the issues query walks to
-// produce de-duplicated groups in fingerprint order.
-//
-// It is load-bearing rather than an optimisation: without it the planner walks
-// idx_findings_run and materialises every group before the outer LIMIT can stop
-// it. Measured on the real 2.4GB database, unassigned 60-run window: 0.38s with
-// this index, 10.75s without it. It existed in hand-built databases but was
-// never declared here, so a fresh clone planned the slow way; declaring it is
-// what makes the fast plan reproducible rather than accidental.
-//
-// CREATE INDEX on a 1.2M-row table takes about 20s the first time and is a
-// no-op afterwards, so it is paid once per database rather than per run.
-func createFindingsGroupIndex(db *sql.DB) error {
-	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_findings_group ON findings(
-		fingerprint, rule_id, severity, source, file, start_line, start_column,
-		end_line, end_column, message, run_id, snippet_hash)`)
-	return err
-}
-
-// migrateStoreMeta adds the key/value table that carries facts about the
-// database itself, starting with the last retention pass (meta.go). It exists
-// for databases written before this table was in the schema literal: a legacy
-// store has every other table and no place to put the record.
-func migrateStoreMeta(db *sql.DB) error {
-	if hasTable(db, "store_meta") {
-		return nil
-	}
-	_, err := db.Exec(`CREATE TABLE store_meta (
-		key TEXT PRIMARY KEY,
-		value TEXT NOT NULL
-	)`)
-	return err
 }
 
 // migrateRunsPolicyDigest adds the nullable policy fingerprint column. Older
