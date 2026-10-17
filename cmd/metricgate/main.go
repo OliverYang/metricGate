@@ -33,7 +33,13 @@ import (
 // source; a local build keeps the fallback below. `metricgate version` prints
 // this alongside buildStamp(), which reports the VCS revision actually linked
 // in — the constant alone could not distinguish two builds of the same version.
-var toolVersion = "0.1.0"
+//
+// Bumping this is what seals a release: seal.yml reads it on every push to
+// main, and a value whose tag already exists means the tree ships unsealed
+// (see the workflow's header). This tree carries the merged cockpit work, the
+// language parity pass, the review/merge CI chain and the issues query
+// rewrite, none of which v0.1.0 contains.
+var toolVersion = "0.2.0"
 
 // commands maps each subcommand to its entry point. A table keeps main a
 // three-branch dispatcher no matter how many subcommands accumulate, instead
@@ -66,6 +72,7 @@ var commands = map[string]func([]string){
 	"accept":       cmdAccept,
 	"suppressions": cmdSuppressions,
 	"cockpit":      cmdCockpit,
+	"store":        cmdStore,
 	"init":         cmdInit,
 	"version":      cmdVersion,
 }

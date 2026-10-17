@@ -17,6 +17,21 @@
 #   Two commits cannot be v0.1.0. If the tag is taken, the release was already
 #   sealed for different code and the honest answer is "bump toolVersion", not
 #   "move the tag".
+#
+# WHY "ALREADY SEALED" IS A SKIP AND NOT A FAILURE
+#   This job runs on every push to main, and main moves for reasons that are
+#   not releases: a docs fix, a CI tweak, a merge of work that does not bump
+#   the version. If an existing tag failed the job, every such merge would turn
+#   main red until someone invented a version number — which is how a check
+#   that is right in principle gets ignored in practice. So the tag guard
+#   distinguishes three states and only the third is red:
+#
+#     tag absent                 -> seal it
+#     tag points at this commit  -> already sealed; nothing to do
+#     tag points at other code   -> this tree is NOT sealed; skip and say so
+#
+#   The third case is still visible: the run prints the notice and the job
+#   summary states that the tree went out unsealed and what to do about it.
 name: seal
 
 on:
@@ -63,20 +78,35 @@ jobs:
           echo "declared version: $version"
 
       - name: Refuse to move an existing tag
+        id: guard
         run: |
           set -eu
           tag="${{ steps.version.outputs.tag }}"
+          skip=0
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "tag $tag already exists; bump toolVersion instead of moving it" >&2
-            exit 1
+            existing=$(git rev-parse "$tag^{commit}")
+            head=$(git rev-parse HEAD)
+            if [ "$existing" = "$head" ]; then
+              echo "$tag already seals this commit; nothing to do"
+            else
+              echo "$tag already seals ${existing:0:12}; this tree (${head:0:12}) is NOT sealed"
+              echo "bump toolVersion in cmd/metricgate/main.go and merge to seal it"
+            fi
+            skip=1
+          elif git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
+            # The tag exists on the remote but was never fetched. Same answer:
+            # the version is spent, and moving it would repoint a published
+            # release at different code.
+            echo "$tag already exists on the remote; this tree is NOT sealed"
+            echo "bump toolVersion in cmd/metricgate/main.go and merge to seal it"
+            skip=1
+          else
+            echo "$tag is free"
           fi
-          if git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
-            echo "tag $tag already exists on the remote; bump toolVersion" >&2
-            exit 1
-          fi
-          echo "tag $tag is free"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
 
       - name: Gate the whole tree
+        if: steps.guard.outputs.skip != '1'
         # Whole tree, not the diff: a seal certifies the tree as it stands, and
         # legacy debt that the diff-scoped gate is designed to ignore would
         # otherwise be certified as clean.
@@ -111,6 +141,7 @@ jobs:
           PY
 
       - name: Build the release binary
+        if: steps.guard.outputs.skip != '1'
         run: |
           set -eu
           version="${{ steps.version.outputs.tag }}"
@@ -128,6 +159,7 @@ jobs:
           sha256sum metricgate-release | tee metricgate-release.sha256
 
       - name: Tag and publish
+        if: steps.guard.outputs.skip != '1'
         uses: actions/github-script@v7
         with:
           script: |
@@ -171,3 +203,18 @@ jobs:
               prerelease: false,
             });
             core.info(`published ${release.html_url}`);
+
+      - name: Say why nothing was sealed
+        if: steps.guard.outputs.skip == '1'
+        run: |
+          set -eu
+          tag="${{ steps.version.outputs.tag }}"
+          {
+            echo "## Not sealed"
+            echo ""
+            echo "\`$tag\` is already taken, so this commit went to main without a release."
+            echo ""
+            echo "That is expected for merges that do not change the version. To seal"
+            echo "this tree, bump \`var toolVersion\` in \`cmd/metricgate/main.go\` and"
+            echo "merge again; tags are never moved."
+          } >> "$GITHUB_STEP_SUMMARY"
