@@ -630,7 +630,8 @@ total runs on that sha: 1
 ```
 
 `event=workflow_dispatch` 而不是 `push` —— 这正是修法在起作用的样子：没有 push 事件，
-是 `merge.yml` 自己把 `seal` 拉起来的。`seal` 跑完的判定是第三态（跳过而非失败）：
+是 `merge.yml` 自己把 `seal` 拉起来的。PR #7（`main` → `9bac60d0`）复现了同样结果，
+所以这不是一次偶然：`merge.yml` 自合并的每一次，`seal` 都会以 `workflow_dispatch` 被拉起。`seal` 跑完的判定是第三态（跳过而非失败）：
 
 ```
 v0.2.0 already seals f836511314ae; this tree (104a1100589b) is NOT sealed
