@@ -1063,9 +1063,14 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.project-stats { display: grid; text-align: right; }
+/* The stats column is two lines by design (the number, then what it counts),
+   so it is nowrap: wrapped, "次运行 · 41 个未处理问题" broke across three lines
+   and pushed the row's own height around, which made a list of eight projects
+   read as eight different heights. */
+.project-stats { display: grid; gap: 0.125rem; text-align: right; white-space: nowrap; }
 .project-stats b { color: var(--text-strong); font-size: var(--e-font-size-xl); }
 .project-stats small, .project-latest { color: var(--muted); font-size: var(--e-font-size-xs); }
+.project-latest { text-align: right; white-space: nowrap; }
 .project-arrow { color: var(--muted); }
 
 /* The two secondary doors on a card with no calls. They are buttons rather than

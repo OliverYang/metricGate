@@ -5,15 +5,17 @@
 
 | goal | 屏幕 | 主要文件区域（app.js 行号 / style.css 选择器） | 依赖 |
 |---|---|---|---|
-| CU-00 | Issues 列表 + 外壳遗留（**已收口 2026-10-15**） | `issueCard`(727) `fileGroup`(769) `facetPanel`(1723) `activityEvents`(1795) / `.file-group*` `.issue-card*` `.facet-*` | — |
-| CU-01 | Summary / 项目概览（**已收口 2026-10-15**） | `measureCard`(970) `acceptedEntry`(872) `scopeAggregate`(1021) `trendScope`(1490) `workspaceOverview`(1508) `metricTrendPanel`(1547) `VIEWS.overview`(1587) / `.layout-grid` 921 `.measures-grid` 1009 `.measure-*` 1010–1035 `.accepted-*` 1043–1055 | CU-00 L2；遗留 L8/L9（后端载荷） |
-| CU-02 | Issue 详情四 tab + 代码窗口（**已收口 2026-10-15**） | `issueDetail`(1119) `ISSUE_TABS`(1185) `issueTabBar`(1190) `issueWhere`(1202) `issueWhy`(1230) `issueActivity`(1251) `issueMore`(1265) `ensureSource`(551) / `.issues-layout.has-detail` 1097 `.issue-detail*` 1233 `.tab-bar` 1242 `.source-*` 1256 | CU-00 L1 |
-| CU-03 | 质量门禁页（**已收口 2026-10-15**） | `gateBanner`(898) `gateHeadroom`(924) `gateMeta`(952) `gateConditionRows`(1846) `VIEWS.gate`(1874) / `.headroom` 635 `.gate-lang` 655 `.panel-foot` 815 `.metric-convention` 822 `.gate-banner*` 971；后端 `internal/cockpit/gate_api.go` + `gate_api_test.go` | CU-01（评级块口径） |
-| CU-04 | Activity / Rules / Policy（**已收口 2026-10-16**） | `VIEWS.policy`(1604) `policyPane`(1618) `VIEWS.activity`(1756) `activityRow`(1820) `VIEWS.rules`(1908) `rulesOrder`(1958) `rulesHead`(1973) / `.th-sort` 593 `.trend-chart` 948 `.chart-caption` 966 `.timeline` 1283 `.policy-keys-panel` 1361 | CU-00 L3 |
+| CU-00 | Issues 列表 + 外壳遗留（**已收口 2026-10-15**） | `issueCard`(839) `fileGroup`(881) `facetPanel`(2344) `activityEvents`(2411) / `.file-group*` 1471 `.issue-card*` 504 `.facet-*` 1384 | — |
+| CU-01 | Summary / 项目概览（**已收口 2026-10-15**） | `measureCard`(1209) `acceptedEntry`(1075) `scopeAggregate`(1299) `trendScope`(2049) `workspaceOverview`(2067) `metricTrendPanel`(2107) `VIEWS.overview`(2147) / `.layout-grid` 1123 `.measures-grid` 1251 `.measure-*` 504 `.accepted-*` 505 | CU-00 L2；遗留 L8/L9（后端载荷） |
+| CU-02 | Issue 详情四 tab + 代码窗口（**已收口 2026-10-15**） | `issueDetail`(1505) `ISSUE_TABS`(1587) `issueTabBar`(1592) `issueWhere`(1604) `issueWhy`(1640) `issueActivity`(1661) `issueMore`(1675) `ensureSource`(653) / `.issues-layout` 1355 `.issue-detail*` 1371 `.tab-bar` 1558 `.source-*` 506 | CU-00 L1 |
+| CU-03 | 质量门禁页（**已收口 2026-10-15**） | `gateBanner`(1127) `gateHeadroom`(1163) `gateMeta`(1191) `gateConditionRows`(2470) `VIEWS.gate`(2498) / `.headroom` 781 `.gate-lang` 801 `.panel-foot` 986 `.metric-convention` 993 `.gate-banner*` 825；后端 `internal/cockpit/gate_api.go` + `gate_api_test.go` | CU-01（评级块口径） |
+| CU-04 | Activity / Rules / Policy（**已收口 2026-10-16**） | `VIEWS.policy`(2201) `policyPane`(2215) `VIEWS.activity`(2379) `activityRow`(2444) `VIEWS.rules`(2533) `rulesOrder`(2634) `rulesHead`(2698) / `.th-sort` 732 `.trend-chart` 1150 `.chart-caption` 1177 `.timeline` 1599 `.policy-keys-panel` 1677 | CU-00 L3 |
+| CU-05 | 表格化 + 右侧抽屉（**已收口 2026-10-17**） | `issueRow`(905) `issueTable`(926) `trendColumn`(969) `sameDaySeries`(991) `runRow`(1020) `runTable`(1040) `ratingCard`(1825) `VIEWS.issues`(1452) `VIEWS.runs`(2001) `workspaceOverview`(2067) `VIEWS.overview`(2147) / `.issues-layout` 1355 `.issues-table` 1448 `.runs-table` 1307 `.overview-head` 1238 `.rating-card` 1239 `.gate-banner` 825 | CU-00..CU-04 |
 
-**行号是移动靶**：上表为 2026-10-16 独立验证 goal（`mv9rvxfs-ws5fu1`）收口后的实测值，
-`app.js` 2559 行 / `style.css` 1411 行。上一版（CU-01 收口复核）记的是 2498 / 1389，
-CU-02..CU-04 的锚点本轮全部后移 7–16 行 —— **开工前重导一次，别照抄**：
+**行号是移动靶**：上表为 2026-10-17 CU-05 收口后的实测值，`app.js` 3456 行 / `style.css` 1744 行。
+上一版（2026-10-16 独立验证 goal）记的是 2559 / 1411 —— CU-05 把 issues 与 runs 从卡片流改成表格、
+新增 `ratingCard` 与 `sameDaySeries`，CU-00..CU-04 的锚点全部后移 150–900 行。
+**开工前重导一次，别照抄**：
 
 ```bash
 cd internal/cockpit/web && grep -n "export const measureCard\|const workspaceOverview\|VIEWS.activity = " app.js

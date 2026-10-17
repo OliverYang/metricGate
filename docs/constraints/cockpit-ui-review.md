@@ -21,13 +21,17 @@
 ```bash
 # 数某个 VIEWS 块（含其调用的行内类名）里出现的语义色类
 a=$(grep -n '^VIEWS\.policy = {' internal/cockpit/web/app.js | cut -d: -f1)
-n=$(awk -v s="$a" 'NR>s && /^VIEWS\.[a-z]* = \{/ {print NR; exit}' internal/cockpit/web/app.js)
+n=$(awk -v s="$a" 'NR>s && (/^VIEWS\.[a-z]* = \{/ || /^\/\/! S8/) {print NR; exit}' internal/cockpit/web/app.js)
 awk -v s="$a" -v e="$n" 'NR>=s && NR<=e' internal/cockpit/web/app.js \
   | grep -oE '(error|warning|info|success|grade-[A-E]|tone-[a-z]+)' | sort -u | wc -l   # 期望 ≤8
 ```
 
-实测（2026-10-16，`app.js` 2488 行）：projects 0 / issues 1 / calls 1 / runs 3 / overview 0 /
-policy 1 / activity 3 / gate 1 / rules 3。全部远低于上限——规则 1 是防回归的闸门，不是待修项。
+实测（2026-10-17，`app.js` 3456 行）：projects 0 / issues 1 / calls 1 / runs 3 / overview 0 /
+policy 1 / activity 3 / gate 2 / rules 1。全部远低于上限——规则 1 是防回归的闸门，不是待修项。
+（2026-10-16 的旧值是 gate 1 / rules 3。两个数都动了：gate 页因横幅与状态列多出一档；
+rules 页的旧值 3 是量测范围的偏差 —— 它是最后一个 `VIEWS`，上面的 `awk` 找不到下一个
+`VIEWS.X = {` 就把范围拉到文件末尾，扫进了 S8 的 `s.error` 分支。按上表命令量测时把终止条件
+加上 `|| /^\/\/! S8/`，rules 就是真实的 1。）
 
 ## 规则 2 · rail 是 9 个视图的唯一入口
 
@@ -91,8 +95,43 @@ grep -rn 'sonarqube-webapp\|@sonarsource' internal/cockpit/web/ | grep -v '^[^:]
 
 ---
 
-## 违规处置
+## 规则 7 · 详情面板不占列宽
 
-1–2 为硬规则，违反即回改；3–5 由 `bash scripts/cockpit-observe.sh quick` 与收尾
+表格页的详情（问题详情、后续任何同类面板）**不得作为 grid 的第三列**预留宽度。
+密集表格的每一列都需要最小可用宽度，而一个常驻的第三列会在窗口不够宽时先把「问题」这类
+自由文本列压成省略号——恰恰是操作者正在读那一行的时候，行的标题消失。
+
+详情要么浮在列表之上（`position: fixed`，只遮住右边缘，一键可关），要么在窄屏下沉为列表下方的块。
+
+```bash
+# 详情列不得出现在 grid 模板里。排除单列（那是窄屏下沉，不是第三列）。
+grep -nE '\.(issues|runs)-layout\.has-detail *\{[^}]*grid-template-columns' internal/cockpit/web/style.css \
+  | grep -v 'grid-template-columns: minmax(0, 1fr); }' \
+  && echo 'FAIL: 详情面板被排成了 grid 列'
+```
+
+反例（本仓真实踩过，2026-10-17）：`.issues-layout.has-detail { grid-template-columns: 13rem minmax(0, 1fr) 24rem }`
+在 1600px 窗口下把表格压到约 660px，7 列的「问题」列渲染成 `fan-out of ...`；
+补 `.issues-table { min-width: 46rem }` 只是把裁剪推给横向滚动，`引入`/`状态` 两列彻底看不见。
+最终改为抽屉浮层后两列同时可用。
+
+## 规则 8 · 坐标轴标签不得重复无信息
+
+趋势类图表的横轴标签，当全序列落在同一天时**必须换成时刻**，且点数多于空间时必须稀疏绘制。
+二十根柱全标 `10-17` 等于没有坐标轴，而唯一能说的信息（这一天里的什么时候）被省掉了。
+
+```bash
+# 稀疏绘制：标签默认隐藏，每 4 根 + 最后一根可见
+grep -n 'trend-column:nth-child(4n + 1) small' internal/cockpit/web/style.css \
+  || echo 'FAIL: 趋势轴标签未稀疏绘制'
+```
+
+反例：2026-10-17 截图 `p4-overview2.png` 的轴读作 `10-170-170-17`（二十个 `10-17` 互相重叠）。
+修法：`sameDaySeries(points)` 判定后把标签切成 `HH:MM`，并把 caption 里的「横轴是运行日期」
+同步换成「运行时刻」——只改图不改文案会留下一个说谎的说明。
+
+---
+
+1–2 为硬规则，违反即回改；3–5 与 7–8 由 `bash scripts/cockpit-observe.sh quick` 与收尾
 `fast` + `check_path('internal/cockpit/web', diff_only:true)` 一并兜住；6 靠清单自证。
 新增规则必须带**可执行判定命令**与一条已知违规的反例，否则不算规则。
