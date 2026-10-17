@@ -14,8 +14,18 @@ import (
 // code but verifies nothing, so a regression walks straight through it.
 // Detection is existence-based over the whole function subtree, so assertions
 // inside t.Run subtest closures count. panic() counts as a deliberate failure
-// assertion, and so does handing the test's *testing.T to a helper; go vet
-// enforces the Test*/Benchmark* signature.
+// assertion, and so does handing the test's *testing.T to a helper.
+//
+// Scope is Test* only. A Benchmark* cannot fail by design — it reports
+// ns/op and the toolchain treats a benchmark that never calls b.Error as
+// working. Iter-29's recalibration replayed 289 real commits and found that
+// including benchmarks produced 18 of the 233 surviving findings, each one
+// telling the author to add `t.Error` to a function whose parameter is `b`
+// (dev-cockpit's BenchmarkQuickOpenQuery, 18 commits in a row). A warning that
+// is unactionable on 100% of its occurrences is not a finding, and the corpus
+// suite showed the same shape: 14 of 19 survivors were benchmarks.
+// A benchmark that measures nothing is a real smell, but it is a different
+// one ("the setup never runs") and would need its own rule.
 func goTestNoAssert() *Rule {
 	return &Rule{
 		ID:              "test-no-assert",
@@ -31,13 +41,13 @@ func goTestNoAssert() *Rule {
 		AnchorCapture: "testfunc",
 		OnMatch: func(ctx *MatchCtx) *model.Finding {
 			name := ctx.Text(ctx.Captures["name"])
-			if !strings.HasPrefix(name, "Test") && !strings.HasPrefix(name, "Benchmark") {
+			if !strings.HasPrefix(name, "Test") {
 				return nil
 			}
 			// TestMain(m *testing.M) is a harness, not a test: require the
-			// testing.T/B parameter go vet mandates for the prefix.
+			// *testing.T parameter go vet mandates for the Test* prefix.
 			params := ctx.Text(ctx.Captures["params"])
-			if !strings.Contains(params, "*testing.T") && !strings.Contains(params, "*testing.B") {
+			if !strings.Contains(params, "*testing.T") {
 				return nil
 			}
 			blk := ctx.Captures["body"]
@@ -108,14 +118,15 @@ func passesValue(ctx *MatchCtx, args *sitter.Node, name string) bool {
 
 // testingTParam is the name a test function's *testing.T parameter goes by,
 // which is almost always t and sometimes tb or tx. Returning "" means the
-// signature has no such parameter, so no call can pass it.
+// signature has no such parameter, so no call can pass it. A *testing.B is not
+// looked for: benchmarks are out of scope (see goTestNoAssert).
 func testingTParam(params string) string {
 	for _, field := range strings.Split(strings.Trim(params, "()"), ",") {
 		field = strings.TrimSpace(field)
-		if !strings.HasSuffix(field, "*testing.T") && !strings.HasSuffix(field, "*testing.B") {
+		if !strings.HasSuffix(field, "*testing.T") {
 			continue
 		}
-		name := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(field, "*testing.T"), "*testing.B"))
+		name := strings.TrimSpace(strings.TrimSuffix(field, "*testing.T"))
 		// A variadic or unnamed parameter has no identifier to match against.
 		if name == "" || strings.HasPrefix(name, "...") {
 			return ""
