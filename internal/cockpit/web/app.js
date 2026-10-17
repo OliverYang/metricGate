@@ -887,6 +887,60 @@ export const fileGroup = (group) => html`
     ${list(group.issues, issueCard)}
   </section>`;
 
+/**
+ * issueRow is the Issues table's unit of work.
+ *
+ * It carries the same identity issueCard does — one row per finding, the row
+ * selects it, the checkbox bulk-selects it, the dropdown sets its verdict — but
+ * renders as a <tr> because the list is scanned by column. On a page with 421
+ * findings the question is almost always "which files have the worst of rule
+ * X", and that is a question about a column: a card puts the same seven facts
+ * in a different order on every row, which makes the column impossible to read.
+ *
+ * The message is the only cell allowed to grow; every other one is sized by the
+ * stylesheet so the columns line up down the page. The location keeps both
+ * halves of the L1 contract — the short name is what is visible, the absolute
+ * path stays in the title.
+ */
+export const issueRow = (issue) => html`
+  <tr class="issue-row${state.openFingerprint === issue.fingerprint ? " is-selected" : ""}"
+    data-action="issue.select" data-fingerprint=${issue.fingerprint}>
+    <td class="col-pick"><input type="checkbox" class="issue-pick" data-action="issue.toggle" data-fingerprint=${issue.fingerprint}
+      ${state.selected.has(issue.fingerprint) ? raw("checked") : ""} aria-label="选择此问题"></td>
+    <td class="col-sev">${severityBadge(issue.severity)}</td>
+    <td class="col-rule"><code class="issue-rule">${issue.ruleId}</code></td>
+    <td class="col-msg" title="${issue.message}">${issue.message}</td>
+    <td class="col-loc"><span class="issue-loc" title="${issue.file}:${issue.startLine}">${fileBase(issue.file)}:${issue.startLine}</span></td>
+    <td class="col-age"><span class="issue-meta">${relativeTime(issue.lastSeen)} · 见过 ${issue.occurrences} 次</span></td>
+    <td class="col-status">${statusSelect(issue)}</td>
+  </tr>`;
+
+/**
+ * issueTable is the list itself: a header that names the columns, then one row
+ * per finding.
+ *
+ * The header is drawn even when the list is empty, because the empty state is a
+ * <td> inside the table — a filter that matches nothing should leave the shape
+ * of the answer on screen, not replace it with a sentence.
+ */
+export const issueTable = (rows) => html`
+  <div class="table-wrap">
+    <table class="issues-table">
+      <thead>
+        <tr>
+          <th class="col-pick"></th>
+          <th class="col-sev">严重度</th>
+          <th class="col-rule">规则</th>
+          <th class="col-msg">问题</th>
+          <th class="col-loc">位置</th>
+          <th class="col-age">引入</th>
+          <th class="col-status">状态</th>
+        </tr>
+      </thead>
+      <tbody>${rows.length ? list(rows, issueRow) : html`<tr><td class="table-empty" colspan="7">没有匹配的问题</td></tr>`}</tbody>
+    </table>
+  </div>`;
+
 /** phaseBar is one step of the gate-loop flow, sized against the busiest step. */
 export const phaseBar = (key, counts) => {
   const phase = PHASES[key] || PHASES.other;
@@ -1390,8 +1444,7 @@ VIEWS.issues = {
           <div class="issue-list">
             ${s.error ? loadError(s)
             : s.loading && !s.issues.issues.length ? loadPending(s)
-            : s.issues.issues.length ? list(groupByFile(s.issues.issues), fileGroup)
-              : html`<p class="empty-state">没有匹配的问题</p>`}
+            : issueTable(s.issues.issues)}
           </div>
           ${pager(s)}
         </div>
@@ -1405,15 +1458,27 @@ VIEWS.issues = {
  * of one issue into where/why/activity/more is worth keeping because each tab
  * answers a different question, and shoving all four into one column makes the
  * operator read past the answer they wanted.
+ *
+ * It is a drawer, not a dialog: it stays in the page's own grid so the table it
+ * describes keeps scrolling beside it. The close control is the same
+ * `dialog.close` action the modal uses — the action clears openFingerprint, and
+ * the drawer is drawn from that state, so there is one way to un-select a row
+ * rather than two.
  */
 const issueDetail = (s) => {
   if (!s.openFingerprint) return "";
   const issue = s.issues.issues.find((row) => row.fingerprint === s.openFingerprint);
   if (!issue) {
-    return html`<section class="panel issue-detail"><p class="empty">该问题不在当前页；翻页或清除筛选后重试。</p></section>`;
+    return html`<aside class="panel issue-detail">
+      <header class="issue-detail-head">
+        <div class="issue-detail-title"><h2>该问题不在当前页</h2></div>
+        <div class="issue-detail-actions"><button class="icon-button" data-action="issue.close" aria-label="关闭详情">×</button></div>
+      </header>
+      <p class="empty">翻页或清除筛选后重试。</p>
+    </aside>`;
   }
   return html`
-    <section class="panel issue-detail">
+    <aside class="panel issue-detail">
       <header class="issue-detail-head">
         <div class="issue-detail-title">
           <p class="eyebrow">ISSUE ${issue.fingerprint}</p>
@@ -1421,14 +1486,15 @@ const issueDetail = (s) => {
           <p class="issue-detail-loc"><code title="${issue.file}">${fileBase(issue.file)}:${issue.startLine}</code>
             <span class="issue-rule">${issue.ruleId}</span></p>
         </div>
-        <div class="issue-detail-actions">${severityBadge(issue.severity)}${statusTag(issue.status)}${statusSelect(issue)}</div>
+        <div class="issue-detail-actions">${severityBadge(issue.severity)}${statusTag(issue.status)}
+          <button class="icon-button" data-action="issue.close" aria-label="关闭详情">×</button></div>
       </header>
       ${issueTabBar(issue, s.issueTab)}
       ${s.issueTab === "where" ? issueWhere(issue, s.source)
       : s.issueTab === "why" ? issueWhy(issue)
       : s.issueTab === "activity" ? issueActivity(issue)
       : issueMore(issue)}
-    </section>`;
+    </aside>`;
 };
 
 /**
@@ -2618,6 +2684,17 @@ ACTIONS["issue.select"] = (el) => {
   // is actually on screen. Switching to "where" fetches it then.
   ensureSource();
 };
+
+/**
+ * issue.close un-picks the row, which is what empties the drawer.
+ *
+ * It is a separate action from dialog.close even though both end up closing
+ * something: the dialog is a DOM element with its own open state, while the
+ * drawer is drawn from openFingerprint. Routing the drawer's × through the
+ * dialog's action would work only as long as closeDialog() happens to also
+ * clear the fingerprint — and it does not.
+ */
+ACTIONS["issue.close"] = () => set({ openFingerprint: null });
 
 /**
  * toast reports a write that has already happened, with its undo.

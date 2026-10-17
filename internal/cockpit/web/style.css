@@ -1288,25 +1288,41 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 
 /* ---------------------------------------------------- 5. VIEWS: issues triage */
 
-/* The SonarQube issues layout: a sticky facet rail on the left, the card list
-   in the middle, and the detail pane as a third column once a card is picked.
-   The detail is a sibling of the list rather than a block under it because the
-   code window is tall: stacked, reading it scrolls the cards you are comparing
-   out of view, which is the one thing the triage page is for. The detail gets
-   the flexible column and the list a fixed one, because the code window is the
-   thing that has to fit (sq-issues.png: rail | cards | detail). */
-.issues-layout { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1rem; align-items: start; }
-.issues-layout.has-detail { grid-template-columns: 14rem minmax(23rem, 1.15fr) minmax(21rem, 1fr); }
+/* The SonarQube issues layout: a sticky facet rail on the left and the table on
+   the right. The detail is a drawer that floats over the table's right edge, not
+   a third column — and that is a reversal of the first attempt, which reserved
+   a fixed third column. A third column at 1600px leaves the table ~660px, and
+   with seven columns that collapses the message to "fan-out of ...": the row's
+   headline disappears at the exact moment the operator is reading it. Reserving
+   space for the detail costs the list the space it needs to be a list.
+   Floating costs the table's rightmost columns instead, only while a row is
+   open, and the drawer is one click from being dismissed. */
+.issues-layout { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 1rem; align-items: start; }
 .issues-sidebar { display: grid; gap: 1rem; padding: 0.875rem 1rem; position: sticky; top: calc(var(--e-topbar-height) + 0.75rem); }
 .issues-main { display: grid; min-width: 0; gap: 0.75rem; }
-/* Sticky so the pane stays beside the card it belongs to while the list
-   scrolls, and capped so a long source window scrolls inside the pane instead
-   of stretching the page past the rail. */
+/*
+ * The drawer. Fixed rather than sticky because it is not part of the column
+ * flow: it hangs off the viewport's right edge, so a long source window scrolls
+ * inside it while the table behind keeps its own scroll position.
+ *
+ * It is inset from the topbar rather than flush to it. Flush, its top edge sat
+ * on the refresh button and swallowed the click — a panel that covers the
+ * control which re-reads the data it is describing is the wrong trade. Inset,
+ * it reads as a card floating under the header, which is what it is.
+ *
+ * Its width is clamped by vw so on a narrow window it takes most of the screen
+ * rather than pushing its own content out of view.
+ */
 .issues-layout > .issue-detail {
-  position: sticky;
+  position: fixed;
   top: calc(var(--e-topbar-height) + 0.75rem);
-  max-height: calc(100vh - var(--e-topbar-height) - 1.5rem);
-  margin-bottom: 0;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 20;
+  width: min(30rem, 46vw);
+  margin: 0;
+  border: var(--e-border-width) solid var(--line-strong);
+  box-shadow: var(--e-shadow-lg);
   overflow-y: auto;
 }
 
@@ -1367,8 +1383,36 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 
 .issue-list { display: grid; gap: 1rem; }
 
-/* SonarQube groups the list by file: the file is the unit an operator works on,
-   so it is a heading with its own rows rather than a column on every row. */
+/*
+ * The findings table. Column widths are declared once, on the header, and the
+ * body inherits them by position — a table is the one layout where the browser
+ * will size seven columns from seven independent hints and still line them up.
+ * Only the message column is allowed to grow, because it is the only one whose
+ * content has no fixed shape.
+ */
+.issues-table { table-layout: fixed; }
+.issues-table .col-pick { width: 2rem; padding-right: 0; }
+.issues-table .col-sev { width: 5.5rem; }
+.issues-table .col-rule { width: 10rem; }
+.issues-table .col-loc { width: 11rem; }
+.issues-table .col-age { width: 8rem; }
+.issues-table .col-status { width: 6.5rem; }
+.issues-table .col-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.issues-table td.col-rule, .issues-table td.col-loc, .issues-table td.col-age { overflow: hidden; }
+.issues-table .col-loc .issue-loc, .issues-table .col-age .issue-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The selected row is marked with an inset edge, not a border: a border-left
+   on one row would shift every column in that row by 2px, which reads as the
+   table twitching when a row is picked. */
+.issues-table tbody tr { cursor: pointer; }
+.issues-table tbody tr.is-selected { background: var(--e-color-accent-weak); box-shadow: inset 2px 0 0 var(--e-color-accent); }
+.issues-table tbody tr.is-selected .col-msg { color: var(--text-strong); }
+.issues-table .issue-status { padding: 0.125rem 0.25rem; font-size: var(--e-font-size-xs); }
+.issues-table .badge { padding: 0 0.375rem; font-size: var(--e-font-size-xs); }
+
+/* SonarQube groups the list by file: the file is the unit an operator works on.
+   The table keeps that group as a full-width row rather than a column, so two
+   findings in one file still sit together without repeating the path on every
+   row. fileGroup() is what draws these rows when a caller wants them. */
 .file-group { display: grid; gap: 0.5rem; }
 .file-group-head {
   display: flex;
@@ -1445,9 +1489,12 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
 .pager { display: flex; align-items: center; justify-content: center; gap: 0.875rem; margin-top: 0.75rem; }
 
 .issue-detail { min-height: 15rem; }
-.issue-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.625rem; }
-.issue-detail-title { min-width: 0; }
-.issue-detail-head h2 { margin: 0.375rem 0 0; color: var(--text-strong); font-size: var(--e-font-size-lg); line-height: 1.5; overflow-wrap: anywhere; }
+.issue-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.625rem; }
+/* min-width: 0 on the title column is what lets the long message actually wrap
+   inside a 26rem drawer: a flex child defaults to min-width: auto, which is the
+   content's intrinsic width, so overflow-wrap never gets a narrower box. */
+.issue-detail-title { min-width: 0; flex: 1 1 auto; }
+.issue-detail-head h2 { margin: 0.375rem 0 0; color: var(--text-strong); font-size: var(--e-font-size-md); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 .issue-detail-loc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.75rem; margin: 0.5rem 0 0; }
 .issue-detail-loc code { color: var(--muted); font-family: var(--mono); font-size: var(--e-font-size-xs); overflow-wrap: anywhere; }
 .issue-detail-actions { display: flex; flex: none; align-items: center; gap: 0.5rem; }
@@ -1583,9 +1630,19 @@ dialog::backdrop { background: var(--e-overlay-backdrop); }
   .layout-grid { grid-template-columns: minmax(0, 1fr); }
   .issues-layout, .issues-layout.has-detail { grid-template-columns: minmax(0, 1fr); }
   .issues-sidebar { position: static; }
-  /* Below the breakpoint there is no third column to be sticky in, and a
-     capped height would clip the pane instead of scrolling the page. */
-  .issues-layout > .issue-detail { position: static; max-height: none; overflow-y: visible; }
+  /* Below the breakpoint there is no column beside the list to float in, and a
+     fixed drawer on a 900px window would cover most of the table. It becomes a
+     block under the list instead — the same trade the three-column layout makes,
+     resolved the other way because there is no third column to put it in. */
+  .issues-layout > .issue-detail {
+    position: static;
+    width: auto;
+    border-radius: var(--e-radius-md);
+    border: var(--e-border-width) solid var(--line);
+    box-shadow: none;
+    max-height: none;
+    overflow-y: visible;
+  }
   .policy-layout { grid-template-columns: minmax(0, 1fr); }
 }
 
