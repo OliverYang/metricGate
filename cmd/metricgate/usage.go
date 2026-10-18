@@ -81,7 +81,10 @@ usage:
   metricgate cockpit update [flags]   check the release feed manually
   metricgate store prune [-dry-run]   apply store.retain to the history database:
                                       retire old runs with their findings and
-                                      metric snapshots (-runs/-days override)
+                                      metric snapshots (-runs/-days override;
+                                      DELETE frees pages without shrinking the
+                                      file, -vacuum returns them; see
+                                      docs/store-retention.md)
   metricgate version                  print the version
 `
 

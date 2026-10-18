@@ -232,6 +232,7 @@ Cockpit 的「扫描配置」视图把这条链变成可查可解析可改：候
 | | `layers` / `forbid` | 分层与禁止边 |
 | `clones` | `enabled` / `min_lines` / `min_tokens` | 重复检测开关与门槛（零值 = 关闭） |
 | `store` | `enabled` / `path` | 本地趋势库（SQLite） |
+| | `retain.runs` / `retain.days` / `prune_on_write` | 历史保留边界（零值 = 全部保留）与写库后自动 prune（默认关）；见 [store-retention.md](store-retention.md) |
 
 ### 预设（`preset:`）
 

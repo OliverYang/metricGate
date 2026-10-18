@@ -12,6 +12,7 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [claims.md](claims.md) | **价值主张台账**：每条对外 claim 的证据来源与验证方式，表述以本文件为单一事实源 |
 | [workflow.md](workflow.md) | **Agent 循环工作流**：把闸门接进 coding agent 循环的三个接口（pre-generation 约束 / post-edit 校验 / review bundle） |
 | [metrics.md](metrics.md) | **度量定义参考**：内置度量的口径、阈值与输出说明 |
+| [store-retention.md](store-retention.md) | **历史库的保留与清理**：`store prune` 的三种状态、`prune` 只删行 / `-vacuum` 才还字节、真实删除的护栏（必须是被 policy 文件命名的库）、`last_prune` 与 `last_prune_intent` 的区别，附真库副本实测数 |
 
 ## [pilot/](pilot/README.md) — 规范文档 → policy → 真实项目检查（MVP 试点）
 
