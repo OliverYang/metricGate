@@ -86,6 +86,8 @@ docs/ 按主题分 6 个目录，根目录只保留 4 份核心产品文档。�
 | [evaluation-iter29-remediation.md](evaluations/evaluation-iter29-remediation.md) | **iter-29 五项整改实测**：TS 箭头函数从不可见到可量（同文件可维护性 19→51）、`test-no-assert` 误报 55→19（本仓 8→0）、规则中文目录到前端、运行历史记录触发命令（含脱敏）、harness 接线样例。本仓 422→431 warnings / 0 errors 不变 |
 | [evaluation-iter30-tna-recalibration.md](evaluations/evaluation-iter30-tna-recalibration.md) | **iter-30 重标定（实测，289 commit × 双判据重放）**：215/289 在新旧判据下都成立且可从归档复现，但按独立事件只有 1 个函数（anchors 31→2→1，findings 1,783→233→215）；`Benchmark*` 已从 `test-no-assert` 排除（语料 19→5，0 条真阳丢失）；另附跨语言函数单元普查与旧报告 13 行不可复现的逐条对照 |
 | [iter-30 迭代日志](iterations/iter-30-recalibration-and-benchmark-scope.md) | iter-30 全过程（重放口径的三个坑 / 215 的机制 / benchmark 摘出 / 普查的负面结论 / iter-31 排期与 `triaging` 的两条负结论） |
+| [iter-32 迭代日志](iterations/iter-32-store-prune-guard.md) | **`store prune` 护栏与空库修复**：一次真实误删（仓库根目录跑 `-runs 20` 删了本仓 78 runs）换来的四步护栏（正向 `policy_file` 判据 / `-yes` 不是万能钥匙 / 被拒的运行连库文件都不创建 / declared vs removed 入账），新手的默认值为什么仍是无界，以及两个 agent 共享一个工作目录时 `git checkout` 会销毁对方未提交工作 |
+| [store-retention.md](store-retention.md) | **历史库的保留与清理（用户文档）**：iter-32 事故与护栏的产品面说明——三态读法、`prune` 只删行 / `-vacuum` 才还字节（附真库副本实测）、护栏四步、两个 `store_meta` key 的区别 |
 | [ab-experiment.md](evaluations/ab-experiment.md) | LLM 约束效果 A/B 实验设计（下一步核心验证） |
 | [criterion-version-index.md](evaluations/criterion-version-index.md) | **判据版本索引（iter-31）**：每篇评估报告的数字来自哪把尺子——采集日期→当时 main→之后变过的 7 项判据，逐篇标 ❌ 不可复现 / ⚠️ 连判据版本一起引 / ✅ 当前判据；含「policy 与二进制必须同版本」这条用错误结论换来的前置 |
 

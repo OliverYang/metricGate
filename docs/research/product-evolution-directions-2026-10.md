@@ -498,15 +498,22 @@ Lost-in-the-Middle）。真正的问题是：**默认预算选错会让 required
 > 所以顺序是「先方案、评审、再动 kindset」。（C/C++/Java/Python/Rust 的 file-scope 闭包绑定
 > 经普查**不是**缺口：折叠进外层是全站一致规则，`internal/metrics/func_unit_census_test.go` 钉住了这一点。）
 
-### 7.4 iter-32 建议（下一轮）
+### 7.4 iter-32 实际做的与遗留的
+
+> iter-32 被一个临时插入的任务吃掉了：`store prune` 捞回后发现默认无界，以及仓库根目录
+> 跑一句 `store prune -runs 20` 真删了本仓 78 runs。护栏优先于下表第一行，因为它护的是
+> **已经在丢的数据**，而 accessor 缺口丢的只是一个不存在的单元计数。
+> 全过程与验收现场见 [iter-32 迭代日志](../iterations/iter-32-store-prune-guard.md)。
 
 | 优先级 | 内容 | 前置 | 收口观测 |
 |---|---|---|---|
-| **P0** | C# accessor / Java static-init / C# top-level statements 的单元缺口：先 naming 方案（`P.get` / `get@line` / 不进单元另立门禁） | iter-30 普查结论；**必须先过策略评审再动 `kindset.go`** | 每条一个 fixture：命名可解释 + `MI>0` 快照含 `get`/`static_init` 字样；反向证据看 `func_unit_census_test.go` 那条「改了 MINUS 的失败输出」 |
-| P1 | benchmark 其实没测东西（新规则） | 无 | 一条规则 + fixture，零误报于现仓库 48 个包 |
+| **P0**（从 iter-32 推过来） | C# accessor / Java static-init / C# top-level statements 的单元缺口：先 naming 方案（`P.get` / `get@line` / 不进单元另立门禁） | iter-30 普查结论；**必须先过策略评审再动 `kindset.go`** | 每条一个 fixture：命名可解释 + `MI>0` 快照含 `get`/`static_init` 字样；反向证据看 `func_unit_census_test.go` 那条「改了 MINUS 的失败输出」 |
+| P0 | `store.retain` 的有界默认（需明确修订 D22-5） | iter-32 护栏已合入（`b2f9a81`）——**先有护栏再谈默认**，否则有界默认 + cwd 发现 = 自动删除每台机器上每个带 policy 的仓库；`prune_on_write` 的成本实测（裸两个 `COUNT(*)` 全扫 0.329s / 350 MiB 库）一并回答 | 改默认后 `internal/config/retain_test.go` 那三个钉住零值的测试必须**被改写而不是被删**，并在 commit message 里指名 D22-5 |
+| P1 | benchmark 其实没测东西（新规则） | 无 | 一条规则 + fixture，零误报于现仓库 48 个包；注意 iter-31 已把 `Benchmark*` 从 `test-no-assert` 摘出，这条新规则要接住那个缺口 |
 | P1 | D1 标识符规则族 | 无 | `metricgate constraints rule` 6/6 PASS |
 | P1 | 别名追踪 or 明写不追 | 无 | 规则文档里出现「不追别名」这句话，而不是只活在测试注释里 |
 | P1 | `languageGroups` 消费者 | 无 | 前端按语言分组，或删字段 |
+| P1 | 删除类动词的 spec 清单落地 | iter-32 已写 `.trellis/spec/backend/destructive-commands.md`（未跟踪，`.trellis/` 在 `.gitignore`） | `accept remove` / 抑制台账的写路径逐条过那份 checklist |
 
 
 ---
