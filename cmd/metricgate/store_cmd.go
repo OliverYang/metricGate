@@ -5,8 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
+	"time"
 
 	"metricgate/internal/config"
 	"metricgate/internal/store"
@@ -28,6 +27,9 @@ func cmdStore(args []string) {
 		fmt.Fprint(os.Stderr, pruneUsage(newPruneFlagSet()))
 		return
 	}
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, storeBareMessage(newPruneFlagSet()))
+	}
 	dispatch("store", storeSubcommandList, args, map[string]func([]string){
 		"prune": cmdStorePrune,
 	})
@@ -46,186 +48,30 @@ func isHelpToken(arg string) bool {
 
 const storeSubcommandList = "prune"
 
-// pruneFlags is what `store prune` accepts. The retention overrides are here
-// because the dry run is a question about a policy an operator is *considering*
-// setting: writing a candidate bound into .metricgate.yaml to see its effect
-// would edit the policy file every other command and every other session in
-// this repository reads.
-type pruneFlags struct {
-	configPath string
-	dryRun     bool
-	runs       int
-	days       int
-	format     string
-	vacuum     bool
-}
-
-// unsetBound is the sentinel "this flag was not given", so 0 keeps its meaning
-// from the policy file: store.retain.runs: 0 is unlimited, and -runs 0 must not
-// mean something else than the key it overrides.
-const unsetBound = -1
-
-// newPruneFlagSet builds the flag set for `store prune`. It is a function
-// returning the set rather than a flag.ExitOnError set because the -h body and
-// the tests need the same object the parser uses: a help text written out by
-// hand is how a `-port` that never existed ended up in docs/capabilities.md.
-func newPruneFlagSet() *flag.FlagSet {
-	set := flag.NewFlagSet("store prune", flag.ContinueOnError)
-	set.Usage = func() { fmt.Fprint(os.Stderr, pruneUsage(set)) }
-	set.String("config", "", "policy file (used to locate store.path and store.retain)")
-	set.Bool("dry-run", false, "report what would be removed and change nothing")
-	set.Int("runs", unsetBound, "override store.retain.runs for this invocation (-1 = use the policy, 0 = unlimited)")
-	set.Int("days", unsetBound, "override store.retain.days for this invocation (-1 = use the policy, 0 = unlimited)")
-	set.String("format", "text", "text or json")
-	set.Bool("vacuum", false, "after a real prune, VACUUM the file to return the freed pages (needs free disk equal to the database)")
-	return set
-}
-
-// parsePruneFlags returns an error rather than exiting so the validation of a
-// destructive flag set is something a test can reach.
+// storeBareMessage is what `metricgate store` prints when someone types the
+// destructive verb and nothing after it. dispatch still refuses with exit 2 — a
+// bare `store` must not look like it did something — but the refusal alone
+// teaches nothing about the safe order of operations, so the usage block and the
+// preview command come first.
 //
-// The parse error is fatal, not swallowed: this is the one verb that deletes
-// history, and a mistyped -dry-run that the parser quietly ignored would run
-// the real prune while the operator believes they only asked for a preview.
-func parsePruneFlags(args []string) (pruneFlags, error) {
-	set := newPruneFlagSet()
-	flags, rest := splitFlags(set, args)
-	if err := set.Parse(append(flags, rest...)); err != nil {
-		return pruneFlags{}, err
-	}
-	f := pruneFlags{
-		configPath: flagText(set, "config"),
-		dryRun:     flagText(set, "dry-run") == "true",
-		format:     flagText(set, "format"),
-		vacuum:     flagText(set, "vacuum") == "true",
-	}
-	// -dry-run means "change nothing", and a VACUUM rewrites the file. Refusing
-	// the pair is the same discipline as parsing the destructive flag set
-	// strictly: the operator asked for a preview, and a preview must not touch
-	// the bytes it is previewing.
-	if f.vacuum && f.dryRun {
-		return pruneFlags{}, errors.New("-vacuum and -dry-run contradict: a dry run changes nothing, a vacuum rewrites the file")
-	}
-	for _, name := range []string{"runs", "days"} {
-		n, err := boundFlag(set, name)
-		if err != nil {
-			return pruneFlags{}, err
-		}
-		switch name {
-		case "runs":
-			f.runs = n
-		case "days":
-			f.days = n
-		}
-	}
-	if f.format != "text" && f.format != "json" {
-		return pruneFlags{}, fmt.Errorf("-format must be text or json, got %q", f.format)
-	}
-	return f, nil
-}
-
-// override reports whether the operator gave this bound on the command line.
-func override(v int) bool { return v != unsetBound }
-
-// flagText reads one flag's value as text. Going through the parsed set rather
-// than a parallel struct keeps `-h` and the parser on one source of truth.
-func flagText(set *flag.FlagSet, name string) string { return set.Lookup(name).Value.String() }
-
-// boundFlag validates a retention override. The message spells out all three
-// meanings because -1, 0 and N are three different intents and the flag that
-// takes them belongs to the one verb that deletes history.
-func boundFlag(set *flag.FlagSet, name string) (int, error) {
-	n, err := strconv.Atoi(flagText(set, name))
-	if err != nil {
-		return 0, fmt.Errorf("-%s: %w", name, err)
-	}
-	if n < unsetBound {
-		return 0, fmt.Errorf("-%s: %d is not a bound; -1 uses the policy value, 0 means unlimited, anything else is the number of runs or days to keep", name, n)
-	}
-	return n, nil
-}
-
-// prunePlan is the policy the command will act on plus where it came from. The
-// source is printed because "keep the newest 200 runs (from store.retain)" and
-// "keep the newest 200 runs (from -runs)" are different statements about the
-// repository's configuration, and an operator comparing a dry run to the real
-// thing must be able to see which one they tested.
-type prunePlan struct {
-	policy store.RetainPolicy
-	source string
-}
-
-// storeRetentionPolicy reads the retention bounds off the policy. Both the
-// `store prune` verb and the write path use it, so "what does this repo keep"
-// has one answer: the only way they could drift is if one of them read the
-// config keys a second time.
-func storeRetentionPolicy(cfg *config.Config) store.RetainPolicy {
-	return store.RetainPolicy{Runs: cfg.Store.Retain.Runs, Days: cfg.Store.Retain.Days}
-}
-
-func resolvePrunePlan(cfg *config.Config, f pruneFlags) prunePlan {
-	p := storeRetentionPolicy(cfg)
-	source := "store.retain"
-	if override(f.runs) {
-		p.Runs = f.runs
-		source = "-runs/-days"
-	}
-	if override(f.days) {
-		p.Days = f.days
-		source = "-runs/-days"
-	}
-	return prunePlan{policy: p, source: source}
-}
-
-func (p prunePlan) describe() string {
-	bounds := []string{}
-	if p.policy.Runs > 0 {
-		bounds = append(bounds, fmt.Sprintf("newest %d runs", p.policy.Runs))
-	}
-	if p.policy.Days > 0 {
-		bounds = append(bounds, fmt.Sprintf("runs started in the last %d days", p.policy.Days))
-	}
-	if len(bounds) == 0 {
-		return "unlimited (no bound set): nothing is ever removed"
-	}
-	return "keep " + strings.Join(bounds, " or ") + " [" + p.source + "]"
-}
-
-// cmdStorePrune retires the runs the retention policy excludes, together with
-// their findings and metric snapshots.
-//
-// -dry-run and the real prune share everything up to the delete: same policy
-// resolution, same store.PruneCounts selection, same output shape. A dry run
-// that computed its own estimate would be a second number to disbelieve, which
-// is what this iteration is meant to end.
-func cmdStorePrune(args []string) {
-	f, err := parsePruneFlags(args)
-	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			// set.Usage already printed the flags; -h is a successful answer, not
-			// an error. `check -h` and `cockpit serve -h` exit 0 the same way.
-			os.Exit(0)
-		}
-		fail(err)
-	}
-	cfg, err := loadPolicyFor(f.configPath, ".")
-	if err != nil {
-		fail(err)
-	}
-	out, err := runPrune(cfg, f)
-	if err != nil {
-		fail(err)
-	}
-	if f.format == "json" {
-		printPruneJSON(os.Stdout, out)
-		return
-	}
-	printPruneText(os.Stdout, out)
+// It renders from the same *flag.FlagSet that parses the real flags, for the same
+// reason store -h does: a usage block missing a flag that exists (or carrying one
+// that does not) is how docs/capabilities.md acquired a `-port` nobody could pass.
+func storeBareMessage(set *flag.FlagSet) string {
+	return pruneUsage(set) + "\n" +
+		"to see what a prune would do before it does it:\n" +
+		"  metricgate store prune -dry-run\n"
 }
 
 // runPrune is the whole operation minus flag parsing and policy discovery, so a
 // test can point it at a temporary database and read back the exact numbers the
 // operator would see. It performs no printing.
+//
+// It is a sequence of named steps rather than one body, because the steps have
+// different reasons to fail and the reason matters on this path: an error raised
+// after declarePrune returns means a human has already been asked, and an error
+// after executePrune means rows are already gone. Inlined, those three states
+// share one `if err != nil` and the function reads as though they were one.
 func runPrune(cfg *config.Config, f pruneFlags) (pruneOutput, error) {
 	plan := resolvePrunePlan(cfg, f)
 	st, err := openStoreForPrune(cfg)
@@ -238,17 +84,11 @@ func runPrune(cfg *config.Config, f pruneFlags) (pruneOutput, error) {
 	if err != nil {
 		return pruneOutput{}, err
 	}
-	var report store.PruneReport
-	switch {
-	case plan.policy.Unlimited():
-		// No bound: nothing is retired and no write transaction is spent on an
-		// empty set. Reported as a refusal, not as a clean run.
-		report = store.PruneReport{Kept: before.RunCount}
-	case f.dryRun:
-		report, err = st.PruneCounts(plan.policy)
-	default:
-		report, err = st.Prune(plan.policy)
+	guard, declared, err := declarePrune(cfg, st, plan, f)
+	if err != nil {
+		return pruneOutput{}, err
 	}
+	report, err := executePrune(st, plan, f, before)
 	if err != nil {
 		return pruneOutput{}, err
 	}
@@ -256,20 +96,111 @@ func runPrune(cfg *config.Config, f pruneFlags) (pruneOutput, error) {
 	if err != nil {
 		return pruneOutput{}, err
 	}
-	out := pruneOutput{plan: plan, dryRun: f.dryRun, report: report, before: before, after: after, path: cfg.Store.Path}
-	// The vacuum runs after `after` is read, so the reported free pages are the
-	// ones the prune actually produced. It only ever runs on a real prune that
-	// removed something: rewriting a 500 MB file to reclaim zero pages is pure
-	// cost, and -dry-run is refused with -vacuum at parse time.
-	if f.vacuum && report.Runs > 0 {
-		if err := st.Vacuum(); err != nil {
-			return pruneOutput{}, fmt.Errorf("vacuum: %w", err)
-		}
-		out.vacuumed = true
-		if out.after, err = st.Stats(); err != nil {
-			return pruneOutput{}, err
-		}
+	out := pruneOutput{
+		plan:     plan,
+		dryRun:   f.dryRun,
+		report:   report,
+		declared: declared,
+		before:   before,
+		after:    after,
+		path:     cfg.Store.Path,
+		guard:    guard,
 	}
+	if err := recordPruneOutcome(cfg, st, out); err != nil {
+		return pruneOutput{}, err
+	}
+	return applyVacuum(st, f, out)
+}
+
+// declarePrune counts what a real prune is about to remove and asks whether it
+// may, returning the guard's own account of that decision for the report.
+//
+// A dry run declares nothing separately: the report it prints *is* the
+// declaration, and counting it twice would be two numbers to disbelieve.
+func declarePrune(cfg *config.Config, st *store.Store, plan prunePlan, f pruneFlags) (pruneGuard, store.PruneReport, error) {
+	guard := pruneGuard{
+		Required: guardRequired(plan, f),
+		// Source is the origin of the policy that located the store, not the
+		// origin of the bound: the guard cares about whether a file named these
+		// bytes, and retention.source already answers the other question.
+		Source:   cfg.SourceKind,
+		Explicit: f.configPath != "",
+	}
+	if f.dryRun {
+		return guard, store.PruneReport{}, nil
+	}
+	// The real prune counts the same selection before it deletes anything, so what
+	// the operator approved can be compared to what the delete reported. It is the
+	// query the dry run already runs; paying it again on the real path (~0.33s on
+	// this repository's store) buys the only replayable evidence of what was
+	// claimed.
+	declared, err := st.PruneCounts(plan.policy)
+	if err != nil {
+		return pruneGuard{}, store.PruneReport{}, err
+	}
+	if err := authorizePrune(cfg, plan, declared, f, prunePromptFromSeams()); err != nil {
+		return pruneGuard{}, store.PruneReport{}, err
+	}
+	// An authorization that was never required is not a confirmation worth
+	// reporting; and if it was required, reaching here means the guard did not
+	// refuse, which is the whole content of the claim.
+	guard.Confirmed = guard.Required
+	return guard, declared, nil
+}
+
+// executePrune picks the one outcome the policy and the flags select. They are
+// mutually exclusive by construction: an unlimited policy spends no write
+// transaction at all, a dry run only counts, and everything else is the delete.
+func executePrune(st *store.Store, plan prunePlan, f pruneFlags, before store.Stats) (store.PruneReport, error) {
+	switch {
+	case plan.policy.Unlimited():
+		// No bound: nothing is retired and no write transaction is spent on an
+		// empty set. Reported as a refusal, not as a clean run.
+		return store.PruneReport{Kept: before.RunCount}, nil
+	case f.dryRun:
+		return st.PruneCounts(plan.policy)
+	default:
+		return st.Prune(plan.policy)
+	}
+}
+
+// recordPruneOutcome writes the declared/removed pair after a real prune, so the
+// approval and the deletion can be compared by whichever process reads the store
+// next. A dry run records nothing, and an unlimited policy records nothing:
+// neither removed anything, and an intent for a pass that could not delete would
+// bury the passes that did.
+func recordPruneOutcome(cfg *config.Config, st *store.Store, out pruneOutput) error {
+	if out.dryRun || out.plan.policy.Unlimited() {
+		return nil
+	}
+	return st.RecordPruneIntent(store.PruneIntent{
+		At:        time.Now().UTC(),
+		Source:    cfg.SourceKind,
+		Declared:  store.ReportJSONOf(out.declared),
+		Removed:   store.ReportJSONOf(out.report),
+		StorePath: out.path,
+	})
+}
+
+// applyVacuum rewrites the file when the operator asked for it and the prune
+// actually freed pages.
+//
+// It runs after the stats are read, so the reported free pages are the ones the
+// prune produced. Rewriting a 500 MB file to reclaim zero pages is pure cost, and
+// -dry-run is refused with -vacuum at parse time.
+func applyVacuum(st *store.Store, f pruneFlags, out pruneOutput) (pruneOutput, error) {
+	if !f.vacuum || out.report.Runs == 0 {
+		return out, nil
+	}
+	if err := st.Vacuum(); err != nil {
+		return out, fmt.Errorf("vacuum: %w", err)
+	}
+	out.vacuumed = true
+	after, err := st.Stats()
+	if err != nil {
+		return out, err
+	}
+	out.after = after
 	return out, nil
 }
 

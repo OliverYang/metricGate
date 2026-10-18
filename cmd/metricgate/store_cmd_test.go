@@ -1,21 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"io"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
-	"time"
-
-	"metricgate/internal/config"
-	"metricgate/internal/model"
-	"metricgate/internal/store"
 )
 
 // These tests cover the two things `store prune` can get wrong that a unit test
@@ -80,6 +75,62 @@ func TestPruneHelpExitsCleanly(t *testing.T) {
 			t.Errorf("store %s printed the subcommand error instead of help", token)
 		}
 	}
+}
+
+// TestStoreWithoutSubcommandPointsAtDryRun covers the moment the destructive verb
+// is most likely to be mistyped: an operator who types `metricgate store` and
+// nothing else. They must come away knowing a preview exists.
+//
+// Asserted against storeBareMessage rather than cmdStore because cmdStore's
+// refusal path ends in fail(), which calls os.Exit(2) and would take the test
+// binary with it — the exit code is pinned by the subprocess check below, and the
+// text is what a pure function can carry.
+func TestStoreWithoutSubcommandPointsAtDryRun(t *testing.T) {
+	got := storeBareMessage(newPruneFlagSet())
+	for _, want := range []string{
+		"usage: metricgate store prune",
+		"metricgate store prune -dry-run",
+		"-dry-run",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("bare `store` message omits %q:\n%s", want, firstLine(got))
+		}
+	}
+	// The message must carry the flags as the parser knows them, including -yes:
+	// a bare `store` is where an operator learns the safe order of operations, and
+	// a usage block missing a real flag is how docs/capabilities.md acquired a
+	// `-port` that never existed.
+	if !strings.Contains(got, "-yes") {
+		t.Errorf("bare `store` message omits -yes:\n%s", got)
+	}
+}
+
+// TestStoreBareSubcommandStillFails is the exit-code half: the usage block is an
+// addition to the refusal, not a replacement for it. Run in a subprocess because
+// the refusal exits the process, and the claim ("a bare `store` still fails")
+// cannot be observed any other way.
+func TestStoreBareSubcommandStillFails(t *testing.T) {
+	t.Setenv("CGO_ENABLED", "0")
+	if os.Getenv("TESTSTORESUBCOMMAND") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=TestStoreBareSubcommandStillFails")
+		cmd.Env = append(os.Environ(), "TESTSTORESUBCOMMAND=1")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("`store` with no subcommand exited 0, want 2:\n%s", out)
+		}
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 2 {
+			t.Errorf("exit code = %v, want 2:\n%s", err, out)
+		}
+		for _, want := range []string{"needs a subcommand", "metricgate store prune -dry-run"} {
+			if !strings.Contains(string(out), want) {
+				t.Errorf("output omits %q:\n%s", want, out)
+			}
+		}
+		return
+	}
+	cmdStore(nil)
+	t.Fatal("cmdStore did not exit")
 }
 
 // documentedFlags pulls the flag names out of a usage block, i.e. out of the
@@ -317,128 +368,6 @@ func rejectedParse(t *testing.T, args []string) error {
 	var err error
 	captureStderr(t, func() { _, err = parsePruneFlags(args) })
 	return err
-}
-
-// newPruneTestStore points a policy at a temporary database, so the command runs
-// end to end against a store this test owns.
-func newPruneTestStore(t *testing.T, runs int) (*config.Config, *store.Store) {
-	t.Helper()
-	path := t.TempDir() + "/history.db"
-	cfg := defaultPolicyForPruneTest(t)
-	cfg.Store.Enabled = true
-	cfg.Store.Path = path
-	cfg.Store.Retain.Runs = runs
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	return cfg, st
-}
-
-// seedRuns writes N real runs through SaveRunFull. It goes through the write path
-// rather than raw INSERTs because the counts asserted below are the ones `check`
-// produces, and a hand-made row can differ in exactly the columns that matter
-// (project_root nullability, the archived default, the finding columns).
-func seedRuns(t *testing.T, st *store.Store, n int) {
-	t.Helper()
-	for i := range n {
-		summary := &model.RunSummary{
-			Files: 1,
-			Findings: []model.Finding{{
-				RuleID: "sample", Severity: model.SevWarning, Source: model.SrcRule,
-				File: "a.go", StartLine: i + 1, StartCol: 1, EndLine: i + 1, EndCol: 1,
-				Message: "seeded",
-			}},
-			Metrics: []model.MetricResult{{
-				Metric: "file-length", File: "a.go", Value: 10, Warn: 400, Err: 800,
-			}},
-		}
-		if _, err := st.SaveRunFull(summary, "test", "abc", "/repo/prune", store.RunMeta{}); err != nil {
-			t.Fatal(err)
-		}
-		// Space the runs out so "newest N" is unambiguous: SaveRunFull stamps the
-		// wall clock, and two runs in the same second fall back to id order.
-		time.Sleep(2 * time.Millisecond)
-	}
-}
-
-// defaultPolicyForPruneTest is the shipped built-in policy, the one an operator
-// gets with no .metricgate.yaml — which is the case D22-5 is about, so the test
-// starts from it and only changes the store coordinates.
-func defaultPolicyForPruneTest(t *testing.T) *config.Config {
-	t.Helper()
-	cfg, err := config.Default()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
-}
-
-// mustPrune and mustStats fold the error checks into the call. Without them,
-// every assertion in these tests carries its own `if err != nil { t.Fatal }`,
-// and a row of those is exactly what pushes a test's npath past the threshold
-// the tool applies to it — the test then reads as a complexity problem when the
-// only intent was to fail loudly.
-func mustPrune(t *testing.T, cfg *config.Config, f pruneFlags) pruneOutput {
-	t.Helper()
-	out, err := runPrune(cfg, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func mustStats(t *testing.T, st *store.Store) store.Stats {
-	t.Helper()
-	stats, err := st.Stats()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return stats
-}
-
-// captureStdout and captureStderr redirect the process-level writers for one
-// call. They are here because cmdStore and the printers write to os.Stdout: the
-// claim under test is what the operator sees, and an out parameter returning a
-// string would test something other than what runs.
-// The redirect rebinds the package variable itself (hence **os.File): the code
-// under test and the flag package both read os.Stdout / os.Stderr at call time,
-// so copying the pointer would leave the writers untouched and the capture would
-// silently return an empty string — a test that passes by reading nothing.
-func captureStdout(t *testing.T, fn func()) string { return captureTo(t, &os.Stdout, fn) }
-
-func captureStderr(t *testing.T, fn func()) string { return captureTo(t, &os.Stderr, fn) }
-
-func captureTo(t *testing.T, dest **os.File, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := *dest
-	var buf bytes.Buffer
-	readDone := make(chan string, 1)
-	*dest = w
-	go func() {
-		_, _ = io.Copy(&buf, r)
-		readDone <- buf.String()
-	}()
-	defer func() {
-		*dest = old
-		_ = r.Close()
-	}()
-	fn()
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case out := <-readDone:
-		return out
-	case <-time.After(5 * time.Second):
-		t.Fatal("capture reader never finished")
-		return ""
-	}
 }
 
 func firstLine(s string) string {

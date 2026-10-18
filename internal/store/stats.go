@@ -41,6 +41,14 @@ func (st Stats) FreeBytes() int64 { return st.FreePages * st.PageSize }
 // statsQuery reads the whole snapshot in one round trip. pragma_* used as table
 // valued functions are what keep this atomic: they see the same database state
 // as the COUNT(*) beside them.
+//
+// The last two columns are wrapped in COALESCE because MIN/MAX over an empty
+// runs table is NULL, while FirstRunAt/LastRunAt are plain strings. The NULL
+// reached Scan as "converting NULL to string is unsupported", so an empty
+// store — a fresh `.metricgate/` directory, or a store whose every run has been
+// archived away — failed the command before it could report it. `store prune`
+// calls Stats unconditionally, which is how `metricgate store prune -dry-run`
+// in an empty directory came to exit 2 instead of describing the empty store.
 const statsQuery = `
 SELECT
   (SELECT page_count FROM pragma_page_count()),
@@ -51,8 +59,8 @@ SELECT
   (SELECT COUNT(*) FROM findings),
   (SELECT COUNT(*) FROM metric_snapshots),
   (SELECT COUNT(DISTINCT COALESCE(NULLIF(project_root, ''), '')) FROM runs WHERE archived = 0),
-  (SELECT MIN(started_at) FROM runs),
-  (SELECT MAX(started_at) FROM runs)`
+  (SELECT COALESCE(MIN(started_at), '') FROM runs),
+  (SELECT COALESCE(MAX(started_at), '') FROM runs)`
 
 // Stats reads the snapshot. It writes nothing.
 func (s *Store) Stats() (Stats, error) {

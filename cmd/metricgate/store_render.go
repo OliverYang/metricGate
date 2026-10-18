@@ -18,14 +18,28 @@ import (
 // different questions — "what did the operator ask for" and "what they read back"
 // — and a test of the second one should not have to wade through the first.
 
+// pruneGuard is the guard's own report: what it required, what it got, and which
+// policy origin the deletion was aimed at. It exists because "the prune removed
+// 78 runs" is a different statement when the bound came from a file the operator
+// named than when it came from defaults nobody read, and a JSON consumer
+// comparing two prunes has to be able to tell them apart without the prose.
+type pruneGuard struct {
+	Required  bool   `json:"required"`
+	Confirmed bool   `json:"confirmed"`
+	Source    string `json:"source"`
+	Explicit  bool   `json:"explicit"`
+}
+
 type pruneOutput struct {
 	plan     prunePlan
 	dryRun   bool
 	report   store.PruneReport
+	declared store.PruneReport
 	before   store.Stats
 	after    store.Stats
 	path     string
 	vacuumed bool
+	guard    pruneGuard
 }
 
 // freedBytes estimates what the retired runs occupy, charged at this database's
@@ -66,6 +80,21 @@ func printPruneText(w io.Writer, o pruneOutput) {
 		return
 	}
 	fmt.Fprintf(w, "kept: %s\n", countUnit(o.report.Kept, "run", "runs"))
+	printPruneDisposition(w, o)
+}
+
+// printPruneDisposition prints what happened after the decision to retire rows:
+// whether the counts the operator approved are the counts that were removed, and
+// what the file did.
+//
+// It carries the dry run's proof and the real run's file accounting in one place
+// because the two are the same question asked of two different states — "did the
+// bytes move, and should they have".
+//
+// "kept:" is printed by printPruneText, before this is called, and not here: the
+// count of survivors belongs to every branch above it, including the two that
+// return early, so owning it here meant printing it twice on the real path.
+func printPruneDisposition(w io.Writer, o pruneOutput) {
 	if o.dryRun {
 		// The unchanged-page_count line is the dry run's proof of D22-1, so it is
 		// printed even though nothing was expected to move.
@@ -73,6 +102,7 @@ func printPruneText(w io.Writer, o pruneOutput) {
 			o.before.PageCount, o.after.PageCount, o.before.RunCount, o.after.RunCount)
 		return
 	}
+	printPruneReconciliation(w, o)
 	// Saying the file did not shrink in the same breath as the delete is the
 	// honest version: the pages are free, the bytes are not back.
 	if o.vacuumed {
@@ -82,6 +112,23 @@ func printPruneText(w io.Writer, o pruneOutput) {
 	}
 	fmt.Fprintf(w, "file: %s -> %s; %s is now free pages. Re-run with -vacuum to return them (not run automatically).\n",
 		humanBytes(o.before.Bytes()), humanBytes(o.after.Bytes()), humanBytes(o.after.FreeBytes()))
+}
+
+// printPruneReconciliation prints the declared/removed disagreement, and nothing
+// when the two agree.
+//
+// A real prune states what it counted before deleting and what the delete
+// reports after; when those differ a concurrent `check` inserted or retired rows
+// mid-pass, which is a fact about the store rather than a failure of the prune.
+// The line is printed for a real prune only, and only on a difference: a warning
+// that fires on every run teaches an operator to skim past it, and a dry run has
+// no second number to compare against.
+func printPruneReconciliation(w io.Writer, o pruneOutput) {
+	if o.dryRun || o.declared.Runs == o.report.Runs {
+		return
+	}
+	fmt.Fprintf(w, "warning: declared %s but removed %s — a run was added or removed while the prune ran\n",
+		pruneDeletionLine(o.declared), pruneDeletionLine(o.report))
 }
 
 // pruneJSON is the machine-readable view of one prune. It carries the page
@@ -94,15 +141,22 @@ type pruneJSON struct {
 		Days   int    `json:"days"`
 		Source string `json:"source"`
 	} `json:"retention"`
-	DryRun          bool   `json:"dry_run"`
-	Vacuumed        bool   `json:"vacuumed"`
-	RunsRemoved     int    `json:"runs_removed"`
-	FindingsRemoved int    `json:"findings_removed"`
-	Snapshots       int    `json:"snapshots_removed"`
-	Kept            int    `json:"kept"`
-	EstimatedFree   int64  `json:"estimated_free_bytes"`
-	Path            string `json:"store_path"`
-	Before          struct {
+	DryRun          bool       `json:"dry_run"`
+	Vacuumed        bool       `json:"vacuumed"`
+	RunsRemoved     int        `json:"runs_removed"`
+	FindingsRemoved int        `json:"findings_removed"`
+	Snapshots       int        `json:"snapshots_removed"`
+	Kept            int        `json:"kept"`
+	Guard           pruneGuard `json:"guard"`
+	Declared        struct {
+		Runs      int `json:"runs"`
+		Findings  int `json:"findings"`
+		Snapshots int `json:"snapshots"`
+		Kept      int `json:"kept"`
+	} `json:"declared"`
+	EstimatedFree int64  `json:"estimated_free_bytes"`
+	Path          string `json:"store_path"`
+	Before        struct {
 		Runs      int   `json:"runs"`
 		Findings  int   `json:"findings"`
 		Snapshots int   `json:"snapshots"`
@@ -120,6 +174,7 @@ type pruneJSON struct {
 
 func printPruneJSON(w io.Writer, o pruneOutput) {
 	var j pruneJSON
+	j.Guard = o.guard
 	j.Path = o.path
 	j.Retention.Runs = o.plan.policy.Runs
 	j.Retention.Days = o.plan.policy.Days
@@ -130,6 +185,13 @@ func printPruneJSON(w io.Writer, o pruneOutput) {
 	j.FindingsRemoved = o.report.Findings
 	j.Snapshots = o.report.Snapshots
 	j.Kept = o.report.Kept
+	// declared mirrors what a replay of the same command line is expected to
+	// count, so `-format json` consumers can compare it to runs_removed without
+	// parsing prose. A dry run declares nothing and leaves it zero.
+	j.Declared.Runs = o.declared.Runs
+	j.Declared.Findings = o.declared.Findings
+	j.Declared.Snapshots = o.declared.Snapshots
+	j.Declared.Kept = o.declared.Kept
 	j.EstimatedFree = o.freedBytes()
 	j.Before.Runs = o.before.RunCount
 	j.Before.Findings = o.before.Findings
